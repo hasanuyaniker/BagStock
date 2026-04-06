@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Çanta Stok - Panel</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-logo" id="topbarLogo">ÇS</div>
+        <span class="topbar-title">Çanta Stok Yönetimi</span>
+      </div>
+      <div class="topbar-right">
+        <div class="user-chip">
+          <div class="user-avatar" id="userAvatar"></div>
+          <div class="user-info">
+            <span class="user-name" id="userName"></span>
+            <span class="role-badge" id="userRole"></span>
+          </div>
+          <button class="logout-btn" onclick="logout()">Çıkış</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ALERT BAR -->
+    <div class="alert-bar" id="alertBar"></div>
+
+    <div class="main-area">
+      <!-- SIDEBAR -->
+      <div class="sidebar" id="sidebar">
+        <div class="sidebar-item active" data-section="dashboard" onclick="switchSection('dashboard')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>Ana Ekran</span>
+        </div>
+        <div class="sidebar-item" data-section="inventory" onclick="switchSection('inventory')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+          <span>Envanter</span>
+        </div>
+        <div class="sidebar-item" data-section="sales" onclick="switchSection('sales')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+          <span>Günlük Satış</span>
+        </div>
+        <div class="sidebar-item" data-section="stockcount" id="stockcountNav" style="display:none;" onclick="switchSection('stockcount')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+          <span>Stok Sayım</span>
+        </div>
+        <div class="sidebar-item" data-section="reports" onclick="switchSection('reports')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Raporlar</span>
+        </div>
+        <div class="sidebar-item" data-section="settings" onclick="switchSection('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span>Ayarlar</span>
+        </div>
+      </div>
+
+      <!-- CONTENT -->
+      <div class="content">
+        <!-- DASHBOARD -->
+        <div class="section active" id="section-dashboard">
+          <div class="kpi-grid">
+            <div class="kpi-card green">
+              <div class="kpi-label">Toplam Stok Değeri</div>
+              <div class="kpi-value green" id="kpiTotalValue">₺0</div>
+            </div>
+            <div class="kpi-card blue">
+              <div class="kpi-label">Toplam SKU</div>
+              <div class="kpi-value" id="kpiTotalSku">0</div>
+            </div>
+            <div class="kpi-card red">
+              <div class="kpi-label">Tükenen Ürün</div>
+              <div class="kpi-value red" id="kpiOutOfStock">0</div>
+            </div>
+            <div class="kpi-card orange">
+              <div class="kpi-label">Kritik Stok</div>
+              <div class="kpi-value orange" id="kpiCritical">0</div>
+            </div>
+          </div>
+          <div class="charts-row">
+            <div class="chart-card">
+              <h3>Ürün Stok Miktarları</h3>
+              <canvas id="chartStock" height="300"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Ürün Tipi Dağılımı</h3>
+              <div style="position:relative;">
+                <canvas id="chartType" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- INVENTORY -->
+        <div class="section" id="section-inventory">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <input type="text" class="search-input" id="inventorySearch" placeholder="Ürün adı, barkod veya tip ara..." oninput="filterInventory()">
+            </div>
+            <div class="toolbar-right" style="position:relative;">
+              <button class="btn btn-secondary" onclick="toggleColumnPanel()">Sütunlar</button>
+              <div class="column-panel" id="columnPanel"></div>
+              <button class="btn btn-success" onclick="exportExcel('products')">Excel İndir</button>
+              <button class="btn btn-primary" onclick="openProductModal()">+ Ürün Ekle</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table id="inventoryTable">
+              <thead id="inventoryThead"></thead>
+              <tbody id="inventoryTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SALES -->
+        <div class="section" id="section-sales">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <label style="font-size:13px;font-weight:600;">Tarih:</label>
+              <input type="date" id="salesDate" onchange="loadSalesView()">
+              <input type="text" class="search-input" id="salesSearch" placeholder="Ürün ara..." oninput="filterSalesProducts()" style="width:200px;">
+            </div>
+          </div>
+          <div id="salesProductList"></div>
+          <div id="salesHistory" style="margin-top:24px;">
+            <h3 style="font-size:15px;color:var(--navy-700);margin-bottom:12px;">Günün Kayıtları</h3>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ürün</th>
+                    <th>Tip</th>
+                    <th>Miktar</th>
+                    <th>Not</th>
+                    <th>Kullanıcı</th>
+                  </tr>
+                </thead>
+                <tbody id="salesHistoryBody"></tbody>
+              </table>
+            </div>
+            <div class="sales-summary" id="salesSummary"></div>
+          </div>
+        </div>
+
+        <!-- STOCK COUNT -->
+        <div class="section" id="section-stockcount">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div class="toggle-group">
+              <button class="toggle-btn active" onclick="switchCountView('new')" id="countToggleNew">Yeni Sayım</button>
+              <button class="toggle-btn" onclick="switchCountView('history')" id="countToggleHistory">Geçmiş Sayımlar</button>
+            </div>
+            <span class="admin-badge">Sadece Admin</span>
+          </div>
+          <div id="countNewView"></div>
+          <div id="countHistoryView" style="display:none;"></div>
+        </div>
+
+        <!-- REPORTS -->
+        <div class="section" id="section-reports">
+          <div class="report-form">
+            <h3 style="font-size:16px;color:var(--navy-700);margin-bottom:16px;">Rapor İndir</h3>
+            <div class="form-group">
+              <label>Rapor Türü</label>
+              <select id="reportType" onchange="onReportTypeChange()">
+                <option value="products">Tüm Envanter</option>
+                <option value="critical-stock">Kritik ve Tükenen Stoklar</option>
+                <option value="sales-daily">Günlük Satış Detayı</option>
+                <option value="sales-range">Tarih Aralığı Satış Özeti</option>
+                <option value="stock-value">Ürün Bazında Stok Değeri</option>
+                <option value="stock-count">Stok Sayım Raporu</option>
+              </select>
+            </div>
+            <div id="reportDateFields" style="display:none;">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Başlangıç</label>
+                  <input type="date" id="reportFrom">
+                </div>
+                <div class="form-group">
+                  <label>Bitiş</label>
+                  <input type="date" id="reportTo">
+                </div>
+              </div>
+            </div>
+            <div id="reportSessionField" style="display:none;">
+              <div class="form-group">
+                <label>Sayım Oturumu</label>
+                <select id="reportSessionId"></select>
+              </div>
+            </div>
+            <button class="btn btn-success" onclick="downloadReport()" style="width:100%;justify-content:center;">Excel Olarak İndir</button>
+          </div>
+        </div>
+
+        <!-- SETTINGS -->
+        <div class="section" id="section-settings">
+          <div class="settings-tabs" id="settingsTabs">
+            <div class="settings-tab active" data-tab="users" onclick="switchSettingsTab('users')" id="settingsTabUsers">Kullanıcılar</div>
+            <div class="settings-tab" data-tab="types" onclick="switchSettingsTab('types')">Ürün Tipleri</div>
+            <div class="settings-tab" data-tab="media" onclick="switchSettingsTab('media')">Logo ve Görseller</div>
+            <div class="settings-tab" data-tab="password" onclick="switchSettingsTab('password')">Şifre Değiştir</div>
+            <div class="settings-tab" data-tab="backup" onclick="switchSettingsTab('backup')">Yedekleme</div>
+          </div>
+
+          <!-- Users Panel -->
+          <div class="settings-panel active" id="panel-users">
+            <div class="settings-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="font-size:15px;">Kullanıcılar</h3>
+                <button class="btn btn-primary btn-sm" onclick="openUserModal()" id="addUserBtn">+ Yeni Kullanıcı</button>
+              </div>
+              <div id="usersList"></div>
+            </div>
+          </div>
+
+          <!-- Types Panel -->
+          <div class="settings-panel" id="panel-types">
+            <div class="settings-card">
+              <h3 style="font-size:15px;margin-bottom:16px;">Ürün Tipleri</h3>
+              <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <input type="text" id="newTypeName" placeholder="Yeni tip adı..." style="flex:1;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;">
+                <button class="btn btn-primary btn-sm" onclick="addProductType()">Ekle</button>
+              </div>
+              <div id="typesList"></div>
+            </div>
+          </div>
+
+          <!-- Media Panel -->
+          <div class="settings-panel" id="panel-media">
+            <div class="settings-card">
+              <h3 style="font-size:15px;margin-bottom:16px;">Logo</h3>
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;">
+                <div id="logoPreview" style="width:80px;height:80px;background:#f0f4ff;border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                  <span style="color:var(--navy-400);font-size:24px;">ÇS</span>
+                </div>
+                <div>
+                  <input type="file" id="logoInput" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="uploadLogo()">
+                  <button class="btn btn-secondary" onclick="document.getElementById('logoInput').click()">Logo Değiştir</button>
+                </div>
+              </div>
+              <h3 style="font-size:15px;margin-bottom:16px;">Ürün Görselleri</h3>
+              <div id="mediaProductList"></div>
+            </div>
+          </div>
+
+          <!-- Password Panel -->
+          <div class="settings-panel" id="panel-password">
+            <div class="settings-card" style="max-width:400px;">
+              <h3 style="font-size:15px;margin-bottom:16px;">Şifre Değiştir</h3>
+              <div class="form-group">
+                <label>Mevcut PIN</label>
+                <input type="password" id="currentPin" maxlength="4" inputmode="numeric" placeholder="****">
+              </div>
+              <div class="form-group">
+                <label>Yeni PIN</label>
+                <input type="password" id="newPin" maxlength="4" inputmode="numeric" placeholder="****">
+              </div>
+              <div class="form-group">
+                <label>Yeni PIN (Tekrar)</label>
+                <input type="password" id="newPinConfirm" maxlength="4" inputmode="numeric" placeholder="****">
+              </div>
+              <button class="btn btn-primary" onclick="changePassword()">Kaydet</button>
+            </div>
+          </div>
+
+          <!-- Backup Panel -->
+          <div class="settings-panel" id="panel-backup">
+            <div class="settings-card" style="max-width:400px;">
+              <h3 style="font-size:15px;margin-bottom:12px;">Yedekleme</h3>
+              <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">
+                Tüm ürün, satış, ürün tipleri ve stok sayım verilerini JSON formatında indirin.
+              </p>
+              <button class="btn btn-success" onclick="downloadBackup()">JSON Yedek İndir</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product Modal -->
+  <div class="modal-overlay" id="productModal">
+    <div class="modal">
+      <h2 id="productModalTitle">Yeni Ürün Ekle</h2>
+      <input type="hidden" id="productEditId">
+      <div class="form-row">
+        <div class="form-group full">
+          <label>Ürün Adı *</label>
+          <input type="text" id="pName">
+        </div>
+        <div class="form-group">
+          <label>Barkod *</label>
+          <input type="text" id="pBarcode">
+        </div>
+        <div class="form-group">
+          <label>Ürün Tipi</label>
+          <select id="pType"><option value="">Seçiniz</option></select>
+        </div>
+        <div class="form-group">
+          <label>Tedarikçi</label>
+          <input type="text" id="pSupplier">
+        </div>
+        <div class="form-group">
+          <label>Stok Adedi</label>
+          <input type="number" id="pStock" value="0" min="0">
+        </div>
+        <div class="form-group">
+          <label>Alış Maliyeti (₺)</label>
+          <input type="number" id="pCost" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label>Kritik Stok</label>
+          <input type="number" id="pCritical" value="5" min="0">
+        </div>
+        <div class="form-group">
+          <label>Trendyol Fiyatı (₺)</label>
+          <input type="number" id="pTYPrice" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label>Trendyol Komisyonu (%)</label>
+          <input type="number" id="pTYComm" step="0.01" min="0" max="100">
+        </div>
+        <div class="form-group">
+          <label>Hepsiburada Fiyatı (₺)</label>
+          <input type="number" id="pHBPrice" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label>Hepsiburada Komisyonu (%)</label>
+          <input type="number" id="pHBComm" step="0.01" min="0" max="100">
+        </div>
+        <div class="form-group full">
+          <label>Ürün Görseli</label>
+          <div class="image-upload-area" id="productImageDrop" onclick="document.getElementById('productImageInput').click()">
+            <input type="file" id="productImageInput" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="previewProductImage(this)">
+            <p style="font-size:13px;color:#6b7280;">Görsel sürükleyin veya tıklayın</p>
+            <img id="productImagePreview" class="image-preview" style="display:none;">
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeProductModal()">İptal</button>
+        <button class="btn btn-primary" onclick="saveProduct()">Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Modal -->
+  <div class="modal-overlay" id="userModal">
+    <div class="modal" style="width:380px;">
+      <h2 id="userModalTitle">Yeni Kullanıcı</h2>
+      <input type="hidden" id="userEditId">
+      <div class="form-group">
+        <label>Kullanıcı Adı</label>
+        <input type="text" id="uName">
+      </div>
+      <div class="form-group">
+        <label>PIN (4 haneli)</label>
+        <input type="password" id="uPin" maxlength="4" inputmode="numeric" placeholder="****">
+      </div>
+      <div class="form-group">
+        <label>PIN (Tekrar)</label>
+        <input type="password" id="uPinConfirm" maxlength="4" inputmode="numeric" placeholder="****">
+      </div>
+      <div class="form-group">
+        <label>Rol</label>
+        <select id="uRole">
+          <option value="standard">Standart</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeUserModal()">İptal</button>
+        <button class="btn btn-primary" onclick="saveUser()">Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm Dialog -->
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-dialog">
+      <h3 id="confirmTitle">Emin misiniz?</h3>
+      <p id="confirmMessage"></p>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" onclick="closeConfirm()">İptal</button>
+        <button class="btn btn-danger" id="confirmAction">Sil</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stock Count Apply Modal -->
+  <div class="modal-overlay" id="applyCountModal">
+    <div class="modal" style="width:440px;">
+      <h2 style="color:var(--red);">Stok Sayımını Onayla</h2>
+      <p style="font-size:14px;color:#6b7280;margin-bottom:16px;">
+        <strong style="color:var(--red);">Dikkat:</strong> Stoklar üzerine yazılacak, bu işlem geri alınamaz!
+      </p>
+      <div id="applyCountSummary" style="margin-bottom:20px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeApplyModal()">İptal</button>
+        <button class="btn btn-danger" onclick="applyStockCount()">Evet, Stokları Güncelle</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

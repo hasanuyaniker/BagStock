@@ -1,0 +1,1358 @@
+// ==================== GLOBAL STATE ====================
+let currentUser = null;
+let products = [];
+let productTypes = [];
+let allSales = [];
+let columnSettings = [];
+let stockChart = null;
+let typeChart = null;
+let currentCountSession = null;
+
+const DEFAULT_COLUMNS = [
+  { key: 'image', label: 'Görsel', visible: true, width: 60 },
+  { key: 'name', label: 'Ürün Adı', visible: true, width: 180 },
+  { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 100 },
+  { key: 'barcode', label: 'Barkod', visible: true, width: 120 },
+  { key: 'supplier_name', label: 'Tedarikçi', visible: true, width: 120 },
+  { key: 'stock_quantity', label: 'Stok', visible: true, width: 70 },
+  { key: 'cost_price', label: 'Alış (₺)', visible: true, width: 90 },
+  { key: 'critical_stock', label: 'Krit.', visible: true, width: 60 },
+  { key: 'trendyol_price', label: 'TY Fiyat', visible: true, width: 90 },
+  { key: 'trendyol_commission', label: 'TY Kom.', visible: true, width: 80 },
+  { key: 'hepsiburada_price', label: 'HB Fiyat', visible: true, width: 90 },
+  { key: 'hepsiburada_commission', label: 'HB Kom.', visible: true, width: 80 },
+  { key: 'status', label: 'Durum', visible: true, width: 80 },
+  { key: 'actions', label: 'İşlem', visible: true, width: 100 }
+];
+
+let inventorySort = { key: null, dir: 'asc' };
+
+// ==================== AUTH ====================
+const token = localStorage.getItem('token');
+if (!token) { window.location.href = '/index.html'; }
+
+function getHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+}
+
+async function apiFetch(url, options = {}) {
+  if (!options.headers) options.headers = {};
+  options.headers['Authorization'] = 'Bearer ' + token;
+  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(options.body);
+  }
+  const res = await fetch(url, options);
+  if (res.status === 401) { logout(); return null; }
+  return res;
+}
+
+function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  window.location.href = '/index.html';
+}
+
+// ==================== INIT ====================
+(async function init() {
+  try {
+    const res = await apiFetch('/api/auth/me');
+    if (!res) return;
+    currentUser = await res.json();
+
+    // UI user info
+    document.getElementById('userAvatar').textContent = currentUser.username.charAt(0).toUpperCase();
+    document.getElementById('userName').textContent = currentUser.username;
+    const roleBadge = document.getElementById('userRole');
+    roleBadge.textContent = currentUser.role === 'admin' ? 'Admin' : 'Standart';
+    roleBadge.className = 'role-badge ' + currentUser.role;
+
+    // Show admin-only features
+    if (currentUser.role === 'admin') {
+      document.getElementById('stockcountNav').style.display = '';
+    } else {
+      document.getElementById('settingsTabUsers').style.display = 'none';
+      document.getElementById('addUserBtn') && (document.getElementById('addUserBtn').style.display = 'none');
+    }
+
+    // Load saved section
+    const saved = localStorage.getItem('activeSection');
+    if (saved && saved !== 'stockcount') switchSection(saved);
+    else if (saved === 'stockcount' && currentUser.role === 'admin') switchSection(saved);
+
+    await Promise.all([loadProductTypes(), loadProducts(), loadStats()]);
+
+    // Set today on sales date
+    document.getElementById('salesDate').value = new Date().toISOString().split('T')[0];
+
+  } catch (err) {
+    console.error('Init error:', err);
+  }
+})();
+
+// ==================== NAVIGATION ====================
+function switchSection(name) {
+  // Access control
+  if (name === 'stockcount' && currentUser?.role !== 'admin') {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    const sec = document.getElementById('section-stockcount');
+    sec.classList.add('active');
+    sec.innerHTML = '<div class="access-denied"><h2>Erişim Engellendi</h2><p>Bu sayfaya erişim yetkiniz yok.</p></div>';
+    return;
+  }
+
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+
+  document.getElementById('section-' + name)?.classList.add('active');
+  document.querySelector(`.sidebar-item[data-section="${name}"]`)?.classList.add('active');
+  localStorage.setItem('activeSection', name);
+
+  // Load section data
+  if (name === 'dashboard') loadStats();
+  if (name === 'inventory') { loadProducts(); loadColumnSettings(); }
+  if (name === 'sales') loadSalesView();
+  if (name === 'stockcount') loadStockCount();
+  if (name === 'settings') loadSettings();
+  if (name === 'reports') loadReportOptions();
+}
+
+// ==================== TOAST ====================
+function showToast(msg, type = 'success') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => { toast.remove(); }, 3000);
+}
+
+// ==================== CONFIRM DIALOG ====================
+let confirmCallback = null;
+function showConfirm(title, message, btnText, callback) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMessage').textContent = message;
+  const btn = document.getElementById('confirmAction');
+  btn.textContent = btnText;
+  confirmCallback = callback;
+  btn.onclick = () => { closeConfirm(); callback(); };
+  document.getElementById('confirmOverlay').classList.add('active');
+}
+function closeConfirm() { document.getElementById('confirmOverlay').classList.remove('active'); }
+
+// ==================== CURRENCY FORMAT ====================
+function formatCurrency(val) {
+  if (val == null || val === '') return '-';
+  return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(val);
+}
+
+function formatNumber(val) {
+  if (val == null) return '-';
+  return new Intl.NumberFormat('tr-TR').format(val);
+}
+
+// ==================== PRODUCT TYPES ====================
+async function loadProductTypes() {
+  const res = await apiFetch('/api/product-types');
+  if (!res) return;
+  productTypes = await res.json();
+}
+
+// ==================== STATS / DASHBOARD ====================
+async function loadStats() {
+  try {
+    const res = await apiFetch('/api/products/stats');
+    if (!res) return;
+    const stats = await res.json();
+
+    document.getElementById('kpiTotalValue').textContent = formatCurrency(stats.totalValue);
+    document.getElementById('kpiTotalSku').textContent = stats.totalSkus;
+    document.getElementById('kpiOutOfStock').textContent = stats.outOfStock;
+    document.getElementById('kpiCritical').textContent = stats.criticalStock;
+
+    // Alert bar
+    const alertBar = document.getElementById('alertBar');
+    let alertHTML = '';
+    if (stats.criticalStock > 0) {
+      alertHTML += `<span class="alert-item" style="color:#856404;">⚠️ ${stats.criticalStock} ürün kritik stokta: ${stats.criticalProducts.map(p => p.name + ' (' + p.stock_quantity + ')').join(', ')}</span>`;
+    }
+    if (stats.outOfStock > 0) {
+      alertHTML += `<span class="alert-item" style="color:#c53030;">🚫 ${stats.outOfStock} ürün tükendi: ${stats.outOfStockProducts.map(p => p.name).join(', ')}</span>`;
+    }
+    if (alertHTML) {
+      alertBar.innerHTML = alertHTML;
+      alertBar.className = 'alert-bar visible';
+      alertBar.style.background = stats.outOfStock > 0 ? '#ffeaea' : '#fff3cd';
+    } else {
+      alertBar.className = 'alert-bar';
+    }
+
+    // Charts
+    renderStockChart(stats.stockByProduct);
+    renderTypeChart(stats.stockByType);
+  } catch (err) {
+    console.error('Stats error:', err);
+  }
+}
+
+function renderStockChart(data) {
+  const ctx = document.getElementById('chartStock');
+  if (stockChart) stockChart.destroy();
+
+  const labels = data.map(d => d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name);
+  const values = data.map(d => d.stock_quantity);
+  const colors = data.map(d => {
+    if (d.stock_quantity === 0) return '#ef4444';
+    if (d.stock_quantity <= d.critical_stock) return '#f59e0b';
+    return '#16a34a';
+  });
+
+  stockChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, grid: { color: '#f3f4f6' } },
+        y: { grid: { display: false } }
+      }
+    }
+  });
+}
+
+function renderTypeChart(data) {
+  const ctx = document.getElementById('chartType');
+  if (typeChart) typeChart.destroy();
+
+  const colors = ['#2d5ab8', '#5a84d4', '#b8ccf7', '#3b9e5a', '#e6a800', '#e24b4a'];
+  const total = data.reduce((s, d) => s + parseInt(d.total_stock), 0);
+
+  typeChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: data.map(d => d.type_name),
+      datasets: [{
+        data: data.map(d => parseInt(d.total_stock)),
+        backgroundColor: colors.slice(0, data.length),
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            generateLabels: (chart) => {
+              const ds = chart.data.datasets[0];
+              return chart.data.labels.map((label, i) => ({
+                text: `${label}: ${ds.data[i]} (${total > 0 ? Math.round(ds.data[i]/total*100) : 0}%)`,
+                fillStyle: ds.backgroundColor[i],
+                index: i
+              }));
+            }
+          }
+        }
+      }
+    },
+    plugins: [{
+      id: 'centerText',
+      beforeDraw(chart) {
+        const { ctx, width, height } = chart;
+        ctx.save();
+        ctx.font = 'bold 24px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#1e3f8a';
+        const x = (chart.chartArea.left + chart.chartArea.right) / 2;
+        const y = (chart.chartArea.top + chart.chartArea.bottom) / 2;
+        ctx.fillText(total.toString(), x, y);
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillStyle = '#6b7280';
+        ctx.fillText('Toplam Stok', x, y + 20);
+        ctx.restore();
+      }
+    }]
+  });
+}
+
+// ==================== PRODUCTS / INVENTORY ====================
+async function loadProducts() {
+  const res = await apiFetch('/api/products');
+  if (!res) return;
+  products = await res.json();
+  renderInventoryTable();
+}
+
+async function loadColumnSettings() {
+  try {
+    const res = await apiFetch('/api/columns/inventory');
+    if (!res) return;
+    const saved = await res.json();
+    if (saved.length > 0) {
+      columnSettings = saved;
+    }
+  } catch (e) {}
+}
+
+function getVisibleColumns() {
+  if (columnSettings.length === 0) return DEFAULT_COLUMNS.filter(c => c.visible);
+  const merged = DEFAULT_COLUMNS.map(dc => {
+    const saved = columnSettings.find(s => s.column_key === dc.key);
+    if (saved) return { ...dc, visible: saved.is_visible, order: saved.column_order, width: saved.column_width || dc.width };
+    return dc;
+  });
+  merged.sort((a, b) => (a.order || 0) - (b.order || 0));
+  return merged.filter(c => c.visible);
+}
+
+function renderInventoryTable() {
+  const cols = getVisibleColumns();
+  const thead = document.getElementById('inventoryThead');
+  const tbody = document.getElementById('inventoryTbody');
+
+  // Build header
+  let th = '<tr>';
+  cols.forEach(col => {
+    const arrow = inventorySort.key === col.key ? (inventorySort.dir === 'asc' ? '▲' : '▼') : '↕';
+    const sorted = inventorySort.key === col.key ? ' sorted' : '';
+    th += `<th style="width:${col.width}px;" class="${sorted}" onclick="sortInventory('${col.key}')">
+      ${col.label}<span class="sort-arrow">${arrow}</span>
+      <div class="resize-handle" onmousedown="startResize(event, '${col.key}')"></div>
+    </th>`;
+  });
+  th += '</tr>';
+  thead.innerHTML = th;
+
+  // Build body
+  let filtered = filterProductList(products);
+  if (inventorySort.key) {
+    filtered.sort((a, b) => {
+      let va = a[inventorySort.key], vb = b[inventorySort.key];
+      if (inventorySort.key === 'status') {
+        va = getStatusOrder(a); vb = getStatusOrder(b);
+      }
+      if (va == null) va = '';
+      if (vb == null) vb = '';
+      if (typeof va === 'string') va = va.toLowerCase();
+      if (typeof vb === 'string') vb = vb.toLowerCase();
+      if (va < vb) return inventorySort.dir === 'asc' ? -1 : 1;
+      if (va > vb) return inventorySort.dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  let rows = '';
+  filtered.forEach(p => {
+    rows += '<tr>';
+    cols.forEach(col => {
+      rows += '<td>';
+      switch (col.key) {
+        case 'image':
+          if (p.product_image_url) {
+            rows += `<img src="${p.product_image_url}" class="product-thumb" onerror="this.style.display='none'">`;
+          } else {
+            rows += '<div class="product-thumb-placeholder">📦</div>';
+          }
+          break;
+        case 'name': rows += escHtml(p.name); break;
+        case 'product_type_name':
+          rows += p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : '-';
+          break;
+        case 'barcode': rows += escHtml(p.barcode); break;
+        case 'supplier_name': rows += escHtml(p.supplier_name || '-'); break;
+        case 'stock_quantity': rows += `<strong>${p.stock_quantity}</strong>`; break;
+        case 'cost_price': rows += formatCurrency(p.cost_price); break;
+        case 'critical_stock': rows += p.critical_stock; break;
+        case 'trendyol_price': rows += formatCurrency(p.trendyol_price); break;
+        case 'trendyol_commission': rows += p.trendyol_commission != null ? '%' + p.trendyol_commission : '-'; break;
+        case 'hepsiburada_price': rows += formatCurrency(p.hepsiburada_price); break;
+        case 'hepsiburada_commission': rows += p.hepsiburada_commission != null ? '%' + p.hepsiburada_commission : '-'; break;
+        case 'status':
+          if (p.stock_quantity === 0) rows += '<span class="status-badge outofstock">Tükendi</span>';
+          else if (p.stock_quantity <= p.critical_stock) rows += '<span class="status-badge critical">Kritik</span>';
+          else rows += '<span class="status-badge normal">Normal</span>';
+          break;
+        case 'actions':
+          rows += `<button class="btn btn-secondary btn-sm" onclick="editProduct(${p.id})" style="margin-right:4px;">Düzenle</button>`;
+          rows += `<button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id}, '${escHtml(p.name)}')">Sil</button>`;
+          break;
+        default: rows += p[col.key] || '-';
+      }
+      rows += '</td>';
+    });
+    rows += '</tr>';
+  });
+
+  tbody.innerHTML = rows || '<tr><td colspan="99" style="text-align:center;padding:40px;color:#6b7280;">Ürün bulunamadı</td></tr>';
+}
+
+function getStatusOrder(p) {
+  if (p.stock_quantity === 0) return 0;
+  if (p.stock_quantity <= p.critical_stock) return 1;
+  return 2;
+}
+
+function sortInventory(key) {
+  if (key === 'image' || key === 'actions') return;
+  if (inventorySort.key === key) {
+    inventorySort.dir = inventorySort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    inventorySort.key = key;
+    inventorySort.dir = 'asc';
+  }
+  renderInventoryTable();
+}
+
+function filterInventory() {
+  renderInventoryTable();
+}
+
+function filterProductList(list) {
+  const q = (document.getElementById('inventorySearch')?.value || '').toLowerCase().trim();
+  if (!q) return list;
+  return list.filter(p =>
+    (p.name && p.name.toLowerCase().includes(q)) ||
+    (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+    (p.product_type_name && p.product_type_name.toLowerCase().includes(q))
+  );
+}
+
+// Column resize
+let resizeCol = null, resizeStart = 0, resizeWidth = 0;
+function startResize(e, key) {
+  e.stopPropagation();
+  resizeCol = key;
+  resizeStart = e.clientX;
+  const th = e.target.parentElement;
+  resizeWidth = th.offsetWidth;
+  document.addEventListener('mousemove', doResize);
+  document.addEventListener('mouseup', stopResize);
+}
+function doResize(e) {
+  const diff = e.clientX - resizeStart;
+  const newWidth = Math.max(40, resizeWidth + diff);
+  const col = DEFAULT_COLUMNS.find(c => c.key === resizeCol);
+  if (col) col.width = newWidth;
+  renderInventoryTable();
+}
+function stopResize() {
+  document.removeEventListener('mousemove', doResize);
+  document.removeEventListener('mouseup', stopResize);
+  saveColumnSettings();
+}
+
+// Column panel
+function toggleColumnPanel() {
+  const panel = document.getElementById('columnPanel');
+  if (panel.classList.contains('active')) { panel.classList.remove('active'); return; }
+
+  let html = '';
+  DEFAULT_COLUMNS.forEach((col, i) => {
+    const checked = col.visible !== false ? 'checked' : '';
+    html += `<div class="column-panel-item" draggable="true" data-key="${col.key}">
+      <input type="checkbox" ${checked} onchange="toggleColumn('${col.key}', this.checked)">
+      <span>${col.label}</span>
+    </div>`;
+  });
+  panel.innerHTML = html;
+  panel.classList.add('active');
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function handler(e) {
+      if (!panel.contains(e.target) && !e.target.closest('.btn-secondary')) {
+        panel.classList.remove('active');
+        document.removeEventListener('click', handler);
+      }
+    });
+  }, 0);
+}
+
+function toggleColumn(key, visible) {
+  const col = DEFAULT_COLUMNS.find(c => c.key === key);
+  if (col) col.visible = visible;
+  renderInventoryTable();
+  saveColumnSettings();
+}
+
+async function saveColumnSettings() {
+  const data = DEFAULT_COLUMNS.map((col, i) => ({
+    column_key: col.key,
+    is_visible: col.visible !== false,
+    column_order: i,
+    column_width: col.width
+  }));
+  await apiFetch('/api/columns/inventory', { method: 'PUT', body: data });
+}
+
+// Product Modal
+function openProductModal(product = null) {
+  document.getElementById('productEditId').value = product ? product.id : '';
+  document.getElementById('productModalTitle').textContent = product ? 'Ürünü Düzenle' : 'Yeni Ürün Ekle';
+
+  // Fill type dropdown
+  const sel = document.getElementById('pType');
+  sel.innerHTML = '<option value="">Seçiniz</option>';
+  productTypes.forEach(t => { sel.innerHTML += `<option value="${t.id}">${escHtml(t.name)}</option>`; });
+
+  if (product) {
+    document.getElementById('pName').value = product.name || '';
+    document.getElementById('pBarcode').value = product.barcode || '';
+    document.getElementById('pType').value = product.product_type_id || '';
+    document.getElementById('pSupplier').value = product.supplier_name || '';
+    document.getElementById('pStock').value = product.stock_quantity || 0;
+    document.getElementById('pCost').value = product.cost_price || '';
+    document.getElementById('pCritical').value = product.critical_stock || 5;
+    document.getElementById('pTYPrice').value = product.trendyol_price || '';
+    document.getElementById('pTYComm').value = product.trendyol_commission || '';
+    document.getElementById('pHBPrice').value = product.hepsiburada_price || '';
+    document.getElementById('pHBComm').value = product.hepsiburada_commission || '';
+    // Image preview
+    const preview = document.getElementById('productImagePreview');
+    if (product.product_image_url) {
+      preview.src = product.product_image_url;
+      preview.style.display = 'block';
+    } else {
+      preview.style.display = 'none';
+    }
+  } else {
+    ['pName','pBarcode','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('pStock').value = 0;
+    document.getElementById('pCritical').value = 5;
+    document.getElementById('pType').value = '';
+    document.getElementById('productImagePreview').style.display = 'none';
+  }
+
+  document.getElementById('productModal').classList.add('active');
+}
+
+function closeProductModal() { document.getElementById('productModal').classList.remove('active'); }
+
+function editProduct(id) {
+  const product = products.find(p => p.id === id);
+  if (product) openProductModal(product);
+}
+
+async function saveProduct() {
+  const editId = document.getElementById('productEditId').value;
+  const data = {
+    name: document.getElementById('pName').value.trim(),
+    barcode: document.getElementById('pBarcode').value.trim(),
+    product_type_id: document.getElementById('pType').value || null,
+    supplier_name: document.getElementById('pSupplier').value.trim() || null,
+    stock_quantity: parseInt(document.getElementById('pStock').value) || 0,
+    cost_price: parseFloat(document.getElementById('pCost').value) || null,
+    critical_stock: parseInt(document.getElementById('pCritical').value) || 5,
+    trendyol_price: parseFloat(document.getElementById('pTYPrice').value) || null,
+    trendyol_commission: parseFloat(document.getElementById('pTYComm').value) || null,
+    hepsiburada_price: parseFloat(document.getElementById('pHBPrice').value) || null,
+    hepsiburada_commission: parseFloat(document.getElementById('pHBComm').value) || null
+  };
+
+  if (!data.name || !data.barcode) {
+    showToast('Ürün adı ve barkod zorunludur', 'error');
+    return;
+  }
+
+  try {
+    const url = editId ? `/api/products/${editId}` : '/api/products';
+    const method = editId ? 'PUT' : 'POST';
+    const res = await apiFetch(url, { method, body: data });
+    const result = await res.json();
+
+    if (!res.ok) { showToast(result.error || 'Hata oluştu', 'error'); return; }
+
+    // Upload image if selected
+    const fileInput = document.getElementById('productImageInput');
+    if (fileInput.files.length > 0) {
+      const productId = editId || result.id;
+      const formData = new FormData();
+      formData.append('image', fileInput.files[0]);
+      await fetch(`/api/uploads/product/${productId}`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token },
+        body: formData
+      });
+    }
+
+    showToast(editId ? 'Ürün güncellendi' : 'Ürün eklendi');
+    closeProductModal();
+    fileInput.value = '';
+    await loadProducts();
+    loadStats();
+  } catch (err) {
+    showToast('Bir hata oluştu', 'error');
+  }
+}
+
+function deleteProduct(id, name) {
+  showConfirm('Ürünü Sil', `"${name}" ürününü silmek istediğinize emin misiniz?`, 'Sil', async () => {
+    const res = await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
+    if (res?.ok) {
+      showToast('Ürün silindi');
+      loadProducts();
+      loadStats();
+    } else {
+      showToast('Silme başarısız', 'error');
+    }
+  });
+}
+
+// Image preview & drag drop
+function previewProductImage(input) {
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const preview = document.getElementById('productImagePreview');
+      preview.src = e.target.result;
+      preview.style.display = 'block';
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+const dropArea = document.getElementById('productImageDrop');
+if (dropArea) {
+  ['dragenter','dragover'].forEach(e => dropArea.addEventListener(e, (ev) => { ev.preventDefault(); dropArea.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(e => dropArea.addEventListener(e, (ev) => { ev.preventDefault(); dropArea.classList.remove('dragover'); }));
+  dropArea.addEventListener('drop', (e) => {
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      document.getElementById('productImageInput').files = files;
+      previewProductImage(document.getElementById('productImageInput'));
+    }
+  });
+}
+
+// ==================== EXPORT ====================
+function exportExcel(type) {
+  const a = document.createElement('a');
+  a.href = `/api/export/${type}`;
+  a.setAttribute('download', '');
+  // Add auth via fetch
+  apiFetch(`/api/export/${type}`).then(res => res.blob()).then(blob => {
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    const disposition = 'envanter.xlsx';
+    a.download = disposition;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// ==================== SALES ====================
+async function loadSalesView() {
+  const date = document.getElementById('salesDate').value;
+  await loadProducts();
+
+  // Render product cards
+  renderSalesProducts(products);
+
+  // Load day's sales
+  const res = await apiFetch(`/api/sales?date=${date}`);
+  if (!res) return;
+  allSales = await res.json();
+  renderSalesHistory();
+}
+
+function renderSalesProducts(list) {
+  const q = (document.getElementById('salesSearch')?.value || '').toLowerCase();
+  const filtered = q ? list.filter(p =>
+    p.name.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q)
+  ) : list;
+
+  const container = document.getElementById('salesProductList');
+  let html = '';
+
+  filtered.forEach(p => {
+    const stockColor = p.stock_quantity === 0 ? 'background:#fee2e2;color:#991b1b' :
+                        p.stock_quantity <= p.critical_stock ? 'background:#fef3c7;color:#92400e' :
+                        'background:#dcfce7;color:#166534';
+
+    html += `<div class="sales-product-card">
+      <div style="width:40px;height:40px;border-radius:6px;overflow:hidden;background:#f3f4f6;flex-shrink:0;">
+        ${p.product_image_url ? `<img src="${p.product_image_url}" style="width:100%;height:100%;object-fit:cover;">` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;">📦</div>'}
+      </div>
+      <div class="sales-product-info">
+        <div class="sales-product-name">${escHtml(p.name)}</div>
+        <div class="sales-product-meta">
+          ${p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : ''}
+          <span>${escHtml(p.barcode)}</span>
+        </div>
+      </div>
+      <span class="sales-stock-badge" style="${stockColor}">Stok: ${p.stock_quantity}</span>
+      <div class="sales-actions">
+        <input type="number" class="sales-qty-input" id="saleQty_${p.id}" value="1" min="1">
+        <button class="btn btn-success btn-sm" onclick="recordSale(${p.id}, 1)">+ Giriş</button>
+        <button class="btn btn-danger btn-sm" onclick="recordSale(${p.id}, -1)">- Çıkış</button>
+      </div>
+    </div>`;
+  });
+
+  container.innerHTML = html || '<p style="text-align:center;padding:40px;color:#6b7280;">Ürün bulunamadı</p>';
+}
+
+function filterSalesProducts() { renderSalesProducts(products); }
+
+async function recordSale(productId, direction) {
+  const qtyInput = document.getElementById(`saleQty_${productId}`);
+  const qty = parseInt(qtyInput.value) || 1;
+  const date = document.getElementById('salesDate').value;
+
+  const res = await apiFetch('/api/sales', {
+    method: 'POST',
+    body: { product_id: productId, quantity_change: qty * direction, sale_date: date, note: '' }
+  });
+
+  if (res?.ok) {
+    showToast(direction > 0 ? `${qty} adet giriş yapıldı` : `${qty} adet çıkış yapıldı`);
+    loadSalesView();
+    loadStats();
+  } else {
+    const err = await res?.json();
+    showToast(err?.error || 'Hata oluştu', 'error');
+  }
+}
+
+function renderSalesHistory() {
+  const tbody = document.getElementById('salesHistoryBody');
+  let html = '';
+  let totalIn = 0, totalOut = 0;
+
+  allSales.forEach(s => {
+    const isIn = s.quantity_change > 0;
+    if (isIn) totalIn += s.quantity_change;
+    else totalOut += Math.abs(s.quantity_change);
+
+    html += `<tr>
+      <td>${escHtml(s.product_name)}</td>
+      <td>${s.product_type_name ? `<span class="type-badge">${escHtml(s.product_type_name)}</span>` : '-'}</td>
+      <td><strong style="color:${isIn ? 'var(--green)' : 'var(--red)'};">${isIn ? '+' : ''}${s.quantity_change}</strong></td>
+      <td>${escHtml(s.note || '-')}</td>
+      <td>${escHtml(s.created_by_username || '-')}</td>
+    </tr>`;
+  });
+
+  tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#6b7280;">Kayıt yok</td></tr>';
+
+  document.getElementById('salesSummary').innerHTML = `
+    <span class="sales-summary-item" style="color:var(--green);">Toplam Giriş: +${totalIn}</span>
+    <span class="sales-summary-item" style="color:var(--red);">Toplam Çıkış: -${totalOut}</span>
+    <span class="sales-summary-item">Net: ${totalIn - totalOut}</span>
+  `;
+}
+
+// ==================== STOCK COUNT ====================
+let countSessions = [];
+let activeCountSession = null;
+
+async function loadStockCount() {
+  if (currentUser?.role !== 'admin') return;
+  switchCountView('new');
+}
+
+function switchCountView(view) {
+  document.getElementById('countToggleNew').className = 'toggle-btn' + (view === 'new' ? ' active' : '');
+  document.getElementById('countToggleHistory').className = 'toggle-btn' + (view === 'history' ? ' active' : '');
+  document.getElementById('countNewView').style.display = view === 'new' ? '' : 'none';
+  document.getElementById('countHistoryView').style.display = view === 'history' ? '' : 'none';
+
+  if (view === 'new') loadNewCount();
+  if (view === 'history') loadCountHistory();
+}
+
+async function loadNewCount() {
+  const res = await apiFetch('/api/stockcount/sessions');
+  if (!res) return;
+  const sessions = await res.json();
+
+  // Find draft session
+  const draft = sessions.find(s => s.status === 'draft');
+  if (!draft) {
+    document.getElementById('countNewView').innerHTML = `
+      <div style="text-align:center;padding:60px;">
+        <p style="color:#6b7280;margin-bottom:16px;">Aktif sayım oturumu yok</p>
+        <button class="btn btn-primary" onclick="startNewCount()">Yeni Sayım Başlat</button>
+      </div>`;
+    return;
+  }
+
+  // Load full session
+  const detRes = await apiFetch(`/api/stockcount/sessions/${draft.id}`);
+  if (!detRes) return;
+  activeCountSession = await detRes.json();
+  renderCountSession();
+}
+
+async function startNewCount() {
+  const res = await apiFetch('/api/stockcount/sessions', {
+    method: 'POST',
+    body: { count_date: new Date().toISOString().split('T')[0], note: '' }
+  });
+  if (res?.ok) {
+    showToast('Yeni sayım başlatıldı');
+    loadNewCount();
+  } else {
+    const err = await res?.json();
+    showToast(err?.error || 'Hata oluştu', 'error');
+  }
+}
+
+function renderCountSession() {
+  const s = activeCountSession;
+  if (!s) return;
+
+  const items = s.items || [];
+  const counted = items.filter(i => i.counted_quantity !== i.system_quantity).length;
+  const increased = items.filter(i => i.counted_quantity > i.system_quantity).length;
+  const decreased = items.filter(i => i.counted_quantity < i.system_quantity).length;
+  const unchanged = items.filter(i => i.counted_quantity === i.system_quantity).length;
+
+  let html = `
+    <div class="stock-count-info-bar">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:11px;">Tarih</label>
+        <input type="date" value="${s.count_date?.split('T')[0] || ''}" disabled style="font-size:12px;">
+      </div>
+      <div class="form-group" style="margin:0;flex:1;">
+        <label style="font-size:11px;">Not</label>
+        <input type="text" value="${escHtml(s.note || '')}" disabled style="font-size:12px;padding:6px 10px;">
+      </div>
+      <span class="count-progress">${counted}/${items.length} sayıldı</span>
+      <button class="btn btn-primary" onclick="openApplyModal()">Onayla ve Aktar</button>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Ürün</th>
+            <th>Sistemdeki Stok</th>
+            <th>Sayılan Adet</th>
+            <th>Fark</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+  items.forEach(item => {
+    const diff = item.counted_quantity - item.system_quantity;
+    const diffClass = diff > 0 ? 'diff-positive' : diff < 0 ? 'diff-negative' : 'diff-zero';
+    const diffText = diff > 0 ? `+${diff}` : diff === 0 ? '=' : diff.toString();
+
+    html += `<tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:32px;height:32px;border-radius:4px;overflow:hidden;background:#f3f4f6;flex-shrink:0;">
+            ${item.product_image_snapshot ? `<img src="${item.product_image_snapshot}" style="width:100%;height:100%;object-fit:cover;">` : ''}
+          </div>
+          <span>${escHtml(item.product_name_snapshot)}</span>
+        </div>
+      </td>
+      <td>${item.system_quantity}</td>
+      <td><input type="number" value="${item.counted_quantity}" min="0" class="sales-qty-input" style="width:80px;"
+           oninput="updateCountItem(${s.id}, ${item.product_id}, this.value)"></td>
+      <td><span class="${diffClass}">${diffText}</span></td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>
+    <div style="display:flex;gap:16px;margin-top:12px;font-size:13px;">
+      <span style="color:var(--green);">Artan: ${increased}</span>
+      <span style="color:var(--red);">Azalan: ${decreased}</span>
+      <span style="color:#6b7280;">Değişmeyen: ${unchanged}</span>
+    </div>`;
+
+  document.getElementById('countNewView').innerHTML = html;
+}
+
+let countDebounce = {};
+function updateCountItem(sessionId, productId, value) {
+  const key = `${sessionId}_${productId}`;
+  clearTimeout(countDebounce[key]);
+  countDebounce[key] = setTimeout(async () => {
+    await apiFetch(`/api/stockcount/sessions/${sessionId}/items`, {
+      method: 'PATCH',
+      body: { product_id: productId, counted_quantity: parseInt(value) || 0 }
+    });
+    // Reload to update diffs
+    const detRes = await apiFetch(`/api/stockcount/sessions/${sessionId}`);
+    if (detRes) {
+      activeCountSession = await detRes.json();
+      renderCountSession();
+    }
+  }, 600);
+}
+
+function openApplyModal() {
+  const s = activeCountSession;
+  if (!s) return;
+  const items = s.items || [];
+  const increased = items.filter(i => i.counted_quantity > i.system_quantity).length;
+  const decreased = items.filter(i => i.counted_quantity < i.system_quantity).length;
+  const unchanged = items.filter(i => i.counted_quantity === i.system_quantity).length;
+
+  document.getElementById('applyCountSummary').innerHTML = `
+    <div style="background:#f9fafb;border-radius:8px;padding:14px;font-size:13px;">
+      <p><strong>Tarih:</strong> ${s.count_date?.split('T')[0]}</p>
+      <p><strong>Toplam Ürün:</strong> ${items.length}</p>
+      <p style="color:var(--green);"><strong>Artan:</strong> ${increased}</p>
+      <p style="color:var(--red);"><strong>Azalan:</strong> ${decreased}</p>
+      <p><strong>Değişmeyen:</strong> ${unchanged}</p>
+    </div>`;
+
+  document.getElementById('applyCountModal').classList.add('active');
+}
+
+function closeApplyModal() { document.getElementById('applyCountModal').classList.remove('active'); }
+
+async function applyStockCount() {
+  if (!activeCountSession) return;
+  const res = await apiFetch(`/api/stockcount/sessions/${activeCountSession.id}/apply`, { method: 'POST' });
+
+  if (res?.ok) {
+    showToast('Stoklar başarıyla güncellendi!');
+    closeApplyModal();
+    loadNewCount();
+    loadStats();
+    loadProducts();
+  } else {
+    const err = await res?.json();
+    showToast(err?.error || 'Hata oluştu', 'error');
+  }
+}
+
+async function loadCountHistory() {
+  const res = await apiFetch('/api/stockcount/sessions');
+  if (!res) return;
+  countSessions = await res.json();
+
+  const container = document.getElementById('countHistoryView');
+  if (countSessions.length === 0) {
+    container.innerHTML = '<p style="text-align:center;padding:40px;color:#6b7280;">Henüz sayım kaydı yok</p>';
+    return;
+  }
+
+  let html = '';
+  countSessions.forEach(s => {
+    const date = s.count_date?.split('T')[0] || '';
+    const statusBadge = s.status === 'applied'
+      ? '<span class="status-badge normal">Uygulandı</span>'
+      : '<span class="status-badge critical">Taslak</span>';
+
+    html += `<div class="session-row" onclick="toggleSessionDetail(${s.id})">
+      <div class="session-header">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <strong>${date}</strong>
+          <span style="font-size:12px;color:#6b7280;">${escHtml(s.created_by_username || '')}</span>
+          ${statusBadge}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;">
+          <span>${s.total_products || 0} ürün</span>
+          <span style="color:var(--green);">+${s.increased_count || 0}</span>
+          <span style="color:var(--red);">-${s.decreased_count || 0}</span>
+          <span style="color:#6b7280;">=${s.unchanged_count || 0}</span>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); exportStockCount(${s.id})">Excel</button>
+          ${s.status === 'draft' ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteCountSession(${s.id})">Taslağı Sil</button>` : ''}
+        </div>
+      </div>
+      <div class="session-detail" id="sessionDetail_${s.id}"></div>
+    </div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+async function toggleSessionDetail(sessionId) {
+  const detail = document.getElementById(`sessionDetail_${sessionId}`);
+  if (detail.classList.contains('expanded')) {
+    detail.classList.remove('expanded');
+    return;
+  }
+
+  const res = await apiFetch(`/api/stockcount/sessions/${sessionId}`);
+  if (!res) return;
+  const session = await res.json();
+
+  let tableHTML = '<table style="margin-top:8px;"><thead><tr><th>Ürün</th><th>Sistem</th><th>Sayılan</th><th>Fark</th></tr></thead><tbody>';
+  (session.items || []).forEach(item => {
+    const diff = item.counted_quantity - item.system_quantity;
+    const cls = diff > 0 ? 'diff-positive' : diff < 0 ? 'diff-negative' : 'diff-zero';
+    tableHTML += `<tr><td>${escHtml(item.product_name_snapshot)}</td><td>${item.system_quantity}</td><td>${item.counted_quantity}</td><td class="${cls}">${diff > 0 ? '+' : ''}${diff}</td></tr>`;
+  });
+  tableHTML += '</tbody></table>';
+
+  detail.innerHTML = tableHTML;
+  detail.classList.add('expanded');
+}
+
+function exportStockCount(id) {
+  apiFetch(`/api/export/stock-count/${id}`).then(res => res.blob()).then(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `stok_sayim_${id}.xlsx`;
+    a.click();
+  });
+}
+
+async function deleteCountSession(id) {
+  showConfirm('Taslağı Sil', 'Bu sayım taslağını silmek istediğinize emin misiniz?', 'Sil', async () => {
+    const res = await apiFetch(`/api/stockcount/sessions/${id}`, { method: 'DELETE' });
+    if (res?.ok) {
+      showToast('Taslak silindi');
+      loadCountHistory();
+      loadNewCount();
+    } else {
+      showToast('Silme başarısız', 'error');
+    }
+  });
+}
+
+// ==================== REPORTS ====================
+function onReportTypeChange() {
+  const type = document.getElementById('reportType').value;
+  document.getElementById('reportDateFields').style.display =
+    (type === 'sales-daily' || type === 'sales-range') ? '' : 'none';
+  document.getElementById('reportSessionField').style.display =
+    type === 'stock-count' ? '' : 'none';
+
+  if (type === 'stock-count') loadReportSessions();
+}
+
+async function loadReportOptions() {
+  onReportTypeChange();
+}
+
+async function loadReportSessions() {
+  const res = await apiFetch('/api/stockcount/sessions');
+  if (!res) return;
+  const sessions = await res.json();
+  const sel = document.getElementById('reportSessionId');
+  sel.innerHTML = sessions.map(s =>
+    `<option value="${s.id}">${s.count_date?.split('T')[0]} - ${s.status === 'applied' ? 'Uygulandı' : 'Taslak'}</option>`
+  ).join('');
+}
+
+async function downloadReport() {
+  const type = document.getElementById('reportType').value;
+  let url = '';
+
+  switch (type) {
+    case 'products': url = '/api/export/products'; break;
+    case 'critical-stock': url = '/api/export/critical-stock'; break;
+    case 'sales-daily': {
+      const from = document.getElementById('reportFrom').value;
+      const to = document.getElementById('reportTo').value;
+      url = `/api/export/sales?from=${from}&to=${to || from}`;
+      break;
+    }
+    case 'sales-range': {
+      const from = document.getElementById('reportFrom').value;
+      const to = document.getElementById('reportTo').value;
+      url = `/api/export/sales?from=${from}&to=${to}`;
+      break;
+    }
+    case 'stock-value': url = '/api/export/stock-value'; break;
+    case 'stock-count': {
+      const sessionId = document.getElementById('reportSessionId').value;
+      if (!sessionId) { showToast('Oturum seçiniz', 'error'); return; }
+      url = `/api/export/stock-count/${sessionId}`;
+      break;
+    }
+  }
+
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) { showToast('Rapor oluşturulamadı', 'error'); return; }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `rapor_${new Date().toISOString().split('T')[0]}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('Rapor indirildi');
+  } catch (err) {
+    showToast('İndirme hatası', 'error');
+  }
+}
+
+// ==================== SETTINGS ====================
+function switchSettingsTab(tab) {
+  document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.settings-tab[data-tab="${tab}"]`)?.classList.add('active');
+  document.getElementById(`panel-${tab}`)?.classList.add('active');
+
+  if (tab === 'users') loadUsers();
+  if (tab === 'types') loadTypes();
+  if (tab === 'media') loadMediaPanel();
+}
+
+async function loadSettings() {
+  if (currentUser?.role === 'admin') {
+    loadUsers();
+  } else {
+    switchSettingsTab('types');
+  }
+}
+
+// Users
+async function loadUsers() {
+  if (currentUser?.role !== 'admin') return;
+  const res = await apiFetch('/api/users');
+  if (!res) return;
+  const users = await res.json();
+
+  let html = '';
+  users.forEach(u => {
+    const initials = u.username.charAt(0).toUpperCase();
+    const badge = u.role === 'admin'
+      ? '<span class="role-badge admin">Admin</span>'
+      : '<span class="role-badge standard" style="background:#f3f4f6;color:#374151;">Standart</span>';
+
+    html += `<div class="user-list-item">
+      <div class="user-list-left">
+        <div class="user-avatar" style="background:var(--navy-100);color:var(--navy-700);">${initials}</div>
+        <div>
+          <div style="font-weight:600;font-size:14px;">${escHtml(u.username)}</div>
+          ${badge}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-secondary btn-sm" onclick="editUser(${u.id}, '${escHtml(u.username)}', '${u.role}')">Düzenle</button>
+        ${u.id !== currentUser.id ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escHtml(u.username)}')">Sil</button>` : ''}
+      </div>
+    </div>`;
+  });
+  document.getElementById('usersList').innerHTML = html;
+}
+
+function openUserModal(user = null) {
+  document.getElementById('userEditId').value = user ? user.id : '';
+  document.getElementById('userModalTitle').textContent = user ? 'Kullanıcıyı Düzenle' : 'Yeni Kullanıcı';
+  document.getElementById('uName').value = user ? user.username : '';
+  document.getElementById('uPin').value = '';
+  document.getElementById('uPinConfirm').value = '';
+  document.getElementById('uRole').value = user ? user.role : 'standard';
+  document.getElementById('userModal').classList.add('active');
+}
+
+function closeUserModal() { document.getElementById('userModal').classList.remove('active'); }
+
+function editUser(id, username, role) {
+  openUserModal({ id, username, role });
+}
+
+async function saveUser() {
+  const editId = document.getElementById('userEditId').value;
+  const username = document.getElementById('uName').value.trim();
+  const pin = document.getElementById('uPin').value;
+  const pinConfirm = document.getElementById('uPinConfirm').value;
+  const role = document.getElementById('uRole').value;
+
+  if (!username) { showToast('Kullanıcı adı zorunludur', 'error'); return; }
+  if (!editId && !pin) { showToast('PIN zorunludur', 'error'); return; }
+  if (pin && pin !== pinConfirm) { showToast('PIN kodları eşleşmiyor', 'error'); return; }
+  if (pin && !/^\d{4}$/.test(pin)) { showToast('PIN 4 haneli olmalıdır', 'error'); return; }
+
+  const body = { username, role };
+  if (pin) body.pin = pin;
+
+  const url = editId ? `/api/users/${editId}` : '/api/users';
+  const method = editId ? 'PUT' : 'POST';
+
+  const res = await apiFetch(url, { method, body });
+  const data = await res?.json();
+
+  if (res?.ok) {
+    showToast(editId ? 'Kullanıcı güncellendi' : 'Kullanıcı oluşturuldu');
+    closeUserModal();
+    loadUsers();
+  } else {
+    showToast(data?.error || 'Hata oluştu', 'error');
+  }
+}
+
+function deleteUser(id, name) {
+  showConfirm('Kullanıcıyı Sil', `"${name}" kullanıcısını silmek istediğinize emin misiniz?`, 'Sil', async () => {
+    const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
+    if (res?.ok) { showToast('Kullanıcı silindi'); loadUsers(); }
+    else { const d = await res?.json(); showToast(d?.error || 'Silme başarısız', 'error'); }
+  });
+}
+
+// Product Types
+async function loadTypes() {
+  await loadProductTypes();
+  let html = '';
+  productTypes.forEach(t => {
+    html += `<div class="type-list-item">
+      <span>${escHtml(t.name)}</span>
+      <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id}, '${escHtml(t.name)}')">Sil</button>
+    </div>`;
+  });
+  document.getElementById('typesList').innerHTML = html || '<p style="color:#6b7280;">Tip bulunamadı</p>';
+}
+
+async function addProductType() {
+  const name = document.getElementById('newTypeName').value.trim();
+  if (!name) { showToast('Tip adı giriniz', 'error'); return; }
+
+  const res = await apiFetch('/api/product-types', { method: 'POST', body: { name } });
+  if (res?.ok) {
+    showToast('Tip eklendi');
+    document.getElementById('newTypeName').value = '';
+    loadTypes();
+  } else {
+    const d = await res?.json();
+    showToast(d?.error || 'Hata', 'error');
+  }
+}
+
+function deleteType(id, name) {
+  showConfirm('Tipi Sil', `"${name}" tipini silmek istediğinize emin misiniz?`, 'Sil', async () => {
+    const res = await apiFetch(`/api/product-types/${id}`, { method: 'DELETE' });
+    if (res?.ok) { showToast('Tip silindi'); loadTypes(); }
+    else showToast('Silme başarısız', 'error');
+  });
+}
+
+// Media / Logo
+async function loadMediaPanel() {
+  // Logo preview
+  const logoPreview = document.getElementById('logoPreview');
+  const img = new Image();
+  img.onload = () => { logoPreview.innerHTML = ''; logoPreview.appendChild(img); img.style.cssText = 'width:100%;height:100%;object-fit:contain;'; };
+  img.src = '/uploads/logo/logo.png?t=' + Date.now();
+
+  // Product list with image upload
+  await loadProducts();
+  let html = '';
+  products.forEach(p => {
+    html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6;">
+      <div style="width:48px;height:48px;border-radius:6px;overflow:hidden;background:#f3f4f6;">
+        ${p.product_image_url ? `<img src="${p.product_image_url}" style="width:100%;height:100%;object-fit:cover;">` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;">📦</div>'}
+      </div>
+      <span style="flex:1;font-size:13px;font-weight:500;">${escHtml(p.name)}</span>
+      <input type="file" id="mediaUpload_${p.id}" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="uploadProductImage(${p.id}, this)">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('mediaUpload_${p.id}').click()">Görsel Yükle</button>
+    </div>`;
+  });
+  document.getElementById('mediaProductList').innerHTML = html;
+}
+
+async function uploadLogo() {
+  const input = document.getElementById('logoInput');
+  if (!input.files.length) return;
+  const formData = new FormData();
+  formData.append('logo', input.files[0]);
+
+  const res = await fetch('/api/uploads/logo', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token },
+    body: formData
+  });
+
+  if (res.ok) {
+    showToast('Logo güncellendi');
+    loadMediaPanel();
+    // Update topbar logo
+    const topLogo = document.getElementById('topbarLogo');
+    topLogo.innerHTML = `<img src="/uploads/logo/${(await res.json()).filename}">`;
+  } else {
+    showToast('Logo yüklenemedi', 'error');
+  }
+}
+
+async function uploadProductImage(productId, input) {
+  if (!input.files.length) return;
+  const formData = new FormData();
+  formData.append('image', input.files[0]);
+
+  const res = await fetch(`/api/uploads/product/${productId}`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token },
+    body: formData
+  });
+
+  if (res.ok) {
+    showToast('Görsel güncellendi');
+    loadMediaPanel();
+    loadProducts();
+  } else {
+    showToast('Görsel yüklenemedi', 'error');
+  }
+}
+
+// Change Password
+async function changePassword() {
+  const currentPin = document.getElementById('currentPin').value;
+  const newPin = document.getElementById('newPin').value;
+  const newPinConfirm = document.getElementById('newPinConfirm').value;
+
+  if (!currentPin || !newPin || !newPinConfirm) {
+    showToast('Tüm alanları doldurunuz', 'error'); return;
+  }
+  if (newPin !== newPinConfirm) {
+    showToast('Yeni PIN kodları eşleşmiyor', 'error'); return;
+  }
+  if (!/^\d{4}$/.test(newPin)) {
+    showToast('PIN 4 haneli olmalıdır', 'error'); return;
+  }
+
+  // Verify current pin
+  const loginRes = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: currentUser.username, pin: currentPin })
+  });
+
+  if (!loginRes.ok) {
+    showToast('Mevcut PIN hatalı', 'error'); return;
+  }
+
+  const res = await apiFetch(`/api/users/${currentUser.id}`, {
+    method: 'PUT',
+    body: { username: currentUser.username, pin: newPin, role: currentUser.role }
+  });
+
+  if (res?.ok) {
+    showToast('PIN değiştirildi');
+    document.getElementById('currentPin').value = '';
+    document.getElementById('newPin').value = '';
+    document.getElementById('newPinConfirm').value = '';
+  } else {
+    showToast('PIN değiştirilemedi', 'error');
+  }
+}
+
+// Backup
+function downloadBackup() {
+  apiFetch('/api/backup').then(res => {
+    if (!res.ok) throw new Error();
+    return res.blob();
+  }).then(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `yedek_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('Yedek indirildi');
+  }).catch(() => showToast('Yedekleme hatası', 'error'));
+}
+
+// ==================== UTILS ====================
+function escHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}

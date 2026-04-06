@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Çanta Stok - Giriş</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e3f8a;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 48px 40px;
+      width: 380px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      text-align: center;
+    }
+    .logo-area {
+      width: 80px; height: 80px;
+      margin: 0 auto 24px;
+      background: #f0f4ff;
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; font-weight: 700; color: #1e3f8a;
+    }
+    .logo-area img { width: 64px; height: 64px; object-fit: contain; border-radius: 8px; }
+    h1 { font-size: 22px; color: #1e3f8a; margin-bottom: 8px; }
+    .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 32px; }
+    .form-group { margin-bottom: 20px; text-align: left; }
+    .form-group label { font-size: 13px; font-weight: 600; color: #374151; display: block; margin-bottom: 6px; }
+    .form-group input[type="text"] {
+      width: 100%; padding: 12px 14px; border: 2px solid #e5e7eb; border-radius: 10px;
+      font-size: 15px; outline: none; transition: border-color .2s;
+    }
+    .form-group input[type="text"]:focus { border-color: #2d5ab8; }
+    .pin-label { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; text-align: left; }
+    .pin-inputs { display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; }
+    .pin-inputs input {
+      width: 56px; height: 56px; text-align: center; font-size: 24px; font-weight: 700;
+      border: 2px solid #e5e7eb; border-radius: 12px; outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      -moz-appearance: textfield;
+    }
+    .pin-inputs input::-webkit-outer-spin-button,
+    .pin-inputs input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .pin-inputs input:focus { border-color: #2d5ab8; box-shadow: 0 0 0 3px rgba(45,90,184,0.15); }
+    .pin-inputs input.error { border-color: #ef4444; }
+    .login-btn {
+      width: 100%; padding: 14px; background: #1e3f8a; color: #fff; border: none;
+      border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer;
+      transition: background .2s;
+    }
+    .login-btn:hover { background: #15306e; }
+    .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .error-msg {
+      color: #ef4444; font-size: 13px; margin-top: 12px; min-height: 20px;
+      transition: opacity .2s;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 50%, 90% { transform: translateX(-6px); }
+      30%, 70% { transform: translateX(6px); }
+    }
+    .shake { animation: shake 0.5s ease-in-out; }
+  </style>
+</head>
+<body>
+  <div class="login-card" id="loginCard">
+    <div class="logo-area" id="logoArea">ÇS</div>
+    <h1>Çanta Stok Yönetimi</h1>
+    <p class="subtitle">Hesabınıza giriş yapın</p>
+
+    <div class="form-group">
+      <label for="username">Kullanıcı Adı</label>
+      <input type="text" id="username" placeholder="Kullanıcı adınızı girin" autocomplete="off">
+    </div>
+
+    <div class="pin-label">PIN Kodu</div>
+    <div class="pin-inputs">
+      <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" data-index="0" autocomplete="off">
+      <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" data-index="1" autocomplete="off">
+      <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" data-index="2" autocomplete="off">
+      <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" data-index="3" autocomplete="off">
+    </div>
+
+    <button class="login-btn" id="loginBtn">Giriş Yap</button>
+    <p class="error-msg" id="errorMsg"></p>
+  </div>
+
+  <script>
+    // Zaten giriş yapılmışsa yönlendir
+    if (localStorage.getItem('token')) {
+      window.location.href = '/dashboard.html';
+    }
+
+    // Logo yükle
+    const logoImg = new Image();
+    logoImg.onload = () => {
+      const logoArea = document.getElementById('logoArea');
+      logoArea.innerHTML = '';
+      logoArea.appendChild(logoImg);
+    };
+    logoImg.src = '/uploads/logo/logo.png';
+
+    const pinDigits = document.querySelectorAll('.pin-digit');
+    const loginBtn = document.getElementById('loginBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    const loginCard = document.getElementById('loginCard');
+
+    // PIN input navigasyonu
+    pinDigits.forEach((input, i) => {
+      input.addEventListener('input', (e) => {
+        const val = e.target.value.replace(/\D/g, '');
+        e.target.value = val.slice(-1);
+        if (val && i < 3) {
+          pinDigits[i + 1].focus();
+        }
+        if (i === 3 && val) {
+          loginBtn.focus();
+        }
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !e.target.value && i > 0) {
+          pinDigits[i - 1].focus();
+          pinDigits[i - 1].value = '';
+        }
+        if (e.key === 'Enter') {
+          doLogin();
+        }
+      });
+
+      input.addEventListener('focus', () => {
+        e => e.target.select();
+      });
+    });
+
+    document.getElementById('username').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') pinDigits[0].focus();
+    });
+
+    loginBtn.addEventListener('click', doLogin);
+
+    async function doLogin() {
+      const username = document.getElementById('username').value.trim();
+      const pin = Array.from(pinDigits).map(d => d.value).join('');
+
+      if (!username) {
+        showError('Kullanıcı adını girin');
+        return;
+      }
+      if (pin.length !== 4) {
+        showError('4 haneli PIN kodunu girin');
+        return;
+      }
+
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Giriş yapılıyor...';
+      errorMsg.textContent = '';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, pin })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Giriş başarısız');
+        }
+
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        window.location.href = '/dashboard.html';
+      } catch (err) {
+        showError(err.message);
+        loginCard.classList.add('shake');
+        pinDigits.forEach(d => { d.value = ''; d.classList.add('error'); });
+        pinDigits[0].focus();
+        setTimeout(() => {
+          loginCard.classList.remove('shake');
+          pinDigits.forEach(d => d.classList.remove('error'));
+        }, 600);
+      } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Giriş Yap';
+      }
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+    }
+  </script>
+</body>
+</html>
