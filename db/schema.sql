@@ -77,6 +77,15 @@ CREATE TABLE IF NOT EXISTS stock_count_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+  id SERIAL PRIMARY KEY,
+  key VARCHAR(100) UNIQUE NOT NULL,
+  value TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100);
+
 -- Varsayılan ürün tipleri
 INSERT INTO product_types (name) VALUES
   ('Deri'),('Suni Deri'),('Kumaş'),('Hasır'),('Naylon'),('Diğer')

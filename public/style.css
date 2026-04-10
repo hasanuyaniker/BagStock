@@ -251,12 +251,20 @@ body {
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  overflow: hidden;
 }
 
 .chart-card h3 {
   font-size: 15px;
   color: var(--navy-700);
   margin-bottom: 16px;
+}
+
+.chart-wrapper {
+  position: relative;
+  height: 280px;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* ========== TOOLBAR ========== */

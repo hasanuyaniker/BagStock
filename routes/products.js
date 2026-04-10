@@ -73,7 +73,7 @@ router.post('/', async (req, res) => {
   try {
     const {
       name, barcode, product_type_id, supplier_name, stock_quantity,
-      product_image_url, cost_price, critical_stock,
+      product_image_url, cost_price, critical_stock, color,
       trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission
     } = req.body;
 
@@ -83,11 +83,11 @@ router.post('/', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO products (name, barcode, product_type_id, supplier_name, stock_quantity,
-        product_image_url, cost_price, critical_stock,
+        product_image_url, cost_price, critical_stock, color,
         trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [name, barcode, product_type_id || null, supplier_name || null, stock_quantity || 0,
-       product_image_url || null, cost_price || null, critical_stock || 5,
+       product_image_url || null, cost_price || null, critical_stock || 5, color || null,
        trendyol_price || null, trendyol_commission || null,
        hepsiburada_price || null, hepsiburada_commission || null]
     );
@@ -108,20 +108,20 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const {
       name, barcode, product_type_id, supplier_name, stock_quantity,
-      product_image_url, cost_price, critical_stock,
+      product_image_url, cost_price, critical_stock, color,
       trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission
     } = req.body;
 
     const result = await pool.query(
       `UPDATE products SET
         name=$1, barcode=$2, product_type_id=$3, supplier_name=$4, stock_quantity=$5,
-        product_image_url=$6, cost_price=$7, critical_stock=$8,
-        trendyol_price=$9, trendyol_commission=$10,
-        hepsiburada_price=$11, hepsiburada_commission=$12,
+        product_image_url=$6, cost_price=$7, critical_stock=$8, color=$9,
+        trendyol_price=$10, trendyol_commission=$11,
+        hepsiburada_price=$12, hepsiburada_commission=$13,
         updated_at=NOW()
-       WHERE id=$13 RETURNING *`,
+       WHERE id=$14 RETURNING *`,
       [name, barcode, product_type_id || null, supplier_name || null, stock_quantity || 0,
-       product_image_url || null, cost_price || null, critical_stock || 5,
+       product_image_url || null, cost_price || null, critical_stock || 5, color || null,
        trendyol_price || null, trendyol_commission || null,
        hepsiburada_price || null, hepsiburada_commission || null, id]
     );

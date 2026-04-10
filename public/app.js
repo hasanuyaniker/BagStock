@@ -11,6 +11,7 @@ let currentCountSession = null;
 const DEFAULT_COLUMNS = [
   { key: 'image', label: 'Görsel', visible: true, width: 60 },
   { key: 'name', label: 'Ürün Adı', visible: true, width: 180 },
+  { key: 'color', label: 'Renk', visible: true, width: 90 },
   { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 100 },
   { key: 'barcode', label: 'Barkod', visible: true, width: 120 },
   { key: 'supplier_name', label: 'Tedarikçi', visible: true, width: 120 },
@@ -80,7 +81,7 @@ function logout() {
     if (saved && saved !== 'stockcount') switchSection(saved);
     else if (saved === 'stockcount' && currentUser.role === 'admin') switchSection(saved);
 
-    await Promise.all([loadProductTypes(), loadProducts(), loadStats()]);
+    await Promise.all([loadProductTypes(), loadProducts(), loadStats(), loadLogoFromDB()]);
 
     // Set today on sales date
     document.getElementById('salesDate').value = new Date().toISOString().split('T')[0];
@@ -197,11 +198,14 @@ async function loadStats() {
 
 function renderStockChart(data) {
   const ctx = document.getElementById('chartStock');
-  if (stockChart) stockChart.destroy();
+  if (stockChart) { stockChart.destroy(); stockChart = null; }
+  if (!data || data.length === 0) return;
 
-  const labels = data.map(d => d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name);
-  const values = data.map(d => d.stock_quantity);
-  const colors = data.map(d => {
+  // Maksimum 15 ürün göster
+  const sliced = data.slice(0, 15);
+  const labels = sliced.map(d => d.name.length > 22 ? d.name.substring(0, 22) + '…' : d.name);
+  const values = sliced.map(d => parseInt(d.stock_quantity) || 0);
+  const colors = sliced.map(d => {
     if (d.stock_quantity === 0) return '#ef4444';
     if (d.stock_quantity <= d.critical_stock) return '#f59e0b';
     return '#16a34a';
@@ -211,16 +215,17 @@ function renderStockChart(data) {
     type: 'bar',
     data: {
       labels,
-      datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }]
+      datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, barThickness: 14 }]
     },
     options: {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { beginAtZero: true, grid: { color: '#f3f4f6' } },
-        y: { grid: { display: false } }
+        x: { beginAtZero: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } },
+        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
       }
     }
   });
@@ -228,17 +233,18 @@ function renderStockChart(data) {
 
 function renderTypeChart(data) {
   const ctx = document.getElementById('chartType');
-  if (typeChart) typeChart.destroy();
+  if (typeChart) { typeChart.destroy(); typeChart = null; }
+  if (!data || data.length === 0) return;
 
   const colors = ['#2d5ab8', '#5a84d4', '#b8ccf7', '#3b9e5a', '#e6a800', '#e24b4a'];
-  const total = data.reduce((s, d) => s + parseInt(d.total_stock), 0);
+  const total = data.reduce((s, d) => s + parseInt(d.total_stock || 0), 0);
 
   typeChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels: data.map(d => d.type_name),
       datasets: [{
-        data: data.map(d => parseInt(d.total_stock)),
+        data: data.map(d => parseInt(d.total_stock || 0)),
         backgroundColor: colors.slice(0, data.length),
         borderWidth: 2,
         borderColor: '#fff'
@@ -247,15 +253,19 @@ function renderTypeChart(data) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      cutout: '60%',
+      animation: false,
+      cutout: '58%',
       plugins: {
         legend: {
           position: 'right',
           labels: {
+            font: { size: 11 },
+            boxWidth: 12,
+            padding: 8,
             generateLabels: (chart) => {
               const ds = chart.data.datasets[0];
               return chart.data.labels.map((label, i) => ({
-                text: `${label}: ${ds.data[i]} (${total > 0 ? Math.round(ds.data[i]/total*100) : 0}%)`,
+                text: `${label}: ${ds.data[i]} (%${total > 0 ? Math.round(ds.data[i]/total*100) : 0})`,
                 fillStyle: ds.backgroundColor[i],
                 index: i
               }));
@@ -267,18 +277,19 @@ function renderTypeChart(data) {
     plugins: [{
       id: 'centerText',
       beforeDraw(chart) {
-        const { ctx, width, height } = chart;
+        if (!chart.chartArea) return;
+        const { ctx } = chart;
         ctx.save();
-        ctx.font = 'bold 24px -apple-system, sans-serif';
+        const x = (chart.chartArea.left + chart.chartArea.right) / 2;
+        const y = (chart.chartArea.top + chart.chartArea.bottom) / 2;
+        ctx.font = 'bold 22px -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#1e3f8a';
-        const x = (chart.chartArea.left + chart.chartArea.right) / 2;
-        const y = (chart.chartArea.top + chart.chartArea.bottom) / 2;
-        ctx.fillText(total.toString(), x, y);
-        ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillText(total.toString(), x, y - 8);
+        ctx.font = '10px -apple-system, sans-serif';
         ctx.fillStyle = '#6b7280';
-        ctx.fillText('Toplam Stok', x, y + 20);
+        ctx.fillText('Toplam Stok', x, y + 10);
         ctx.restore();
       }
     }]
@@ -369,6 +380,7 @@ function renderInventoryTable() {
           rows += p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : '-';
           break;
         case 'barcode': rows += escHtml(p.barcode); break;
+        case 'color': rows += p.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(p.color)}</span>` : '-'; break;
         case 'supplier_name': rows += escHtml(p.supplier_name || '-'); break;
         case 'stock_quantity': rows += `<strong>${p.stock_quantity}</strong>`; break;
         case 'cost_price': rows += formatCurrency(p.cost_price); break;
@@ -509,6 +521,7 @@ function openProductModal(product = null) {
     document.getElementById('pName').value = product.name || '';
     document.getElementById('pBarcode').value = product.barcode || '';
     document.getElementById('pType').value = product.product_type_id || '';
+    document.getElementById('pColor').value = product.color || '';
     document.getElementById('pSupplier').value = product.supplier_name || '';
     document.getElementById('pStock').value = product.stock_quantity || 0;
     document.getElementById('pCost').value = product.cost_price || '';
@@ -526,7 +539,7 @@ function openProductModal(product = null) {
       preview.style.display = 'none';
     }
   } else {
-    ['pName','pBarcode','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
+    ['pName','pBarcode','pColor','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('pStock').value = 0;
     document.getElementById('pCritical').value = 5;
     document.getElementById('pType').value = '';
@@ -549,6 +562,7 @@ async function saveProduct() {
     name: document.getElementById('pName').value.trim(),
     barcode: document.getElementById('pBarcode').value.trim(),
     product_type_id: document.getElementById('pType').value || null,
+    color: document.getElementById('pColor').value.trim() || null,
     supplier_name: document.getElementById('pSupplier').value.trim() || null,
     stock_quantity: parseInt(document.getElementById('pStock').value) || 0,
     cost_price: parseFloat(document.getElementById('pCost').value) || null,
@@ -1226,12 +1240,33 @@ function deleteType(id, name) {
 }
 
 // Media / Logo
+async function loadLogoFromDB() {
+  try {
+    const res = await apiFetch('/api/settings/logo');
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data.logo) {
+        // Topbar logo güncelle
+        const topLogo = document.getElementById('topbarLogo');
+        if (topLogo) topLogo.innerHTML = `<img src="${data.logo}" style="width:100%;height:100%;object-fit:contain;">`;
+        // Login sayfası için localStorage'a kaydet
+        localStorage.setItem('appLogo', data.logo);
+        return data.logo;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function loadMediaPanel() {
-  // Logo preview
+  // Logo preview DB'den yükle
   const logoPreview = document.getElementById('logoPreview');
-  const img = new Image();
-  img.onload = () => { logoPreview.innerHTML = ''; logoPreview.appendChild(img); img.style.cssText = 'width:100%;height:100%;object-fit:contain;'; };
-  img.src = '/uploads/logo/logo.png?t=' + Date.now();
+  const logoData = await loadLogoFromDB();
+  if (logoData) {
+    logoPreview.innerHTML = `<img src="${logoData}" style="width:100%;height:100%;object-fit:contain;">`;
+  } else {
+    logoPreview.innerHTML = '<span style="color:var(--navy-400);font-size:24px;">ÇS</span>';
+  }
 
   // Product list with image upload
   await loadProducts();
@@ -1255,7 +1290,7 @@ async function uploadLogo() {
   const formData = new FormData();
   formData.append('logo', input.files[0]);
 
-  const res = await fetch('/api/uploads/logo', {
+  const res = await fetch('/api/settings/logo', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + token },
     body: formData
@@ -1264,9 +1299,7 @@ async function uploadLogo() {
   if (res.ok) {
     showToast('Logo güncellendi');
     loadMediaPanel();
-    // Update topbar logo
-    const topLogo = document.getElementById('topbarLogo');
-    topLogo.innerHTML = `<img src="/uploads/logo/${(await res.json()).filename}">`;
+    loadLogoFromDB();
   } else {
     showToast('Logo yüklenemedi', 'error');
   }

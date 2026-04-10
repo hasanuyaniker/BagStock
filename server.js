@@ -33,6 +33,7 @@ app.use('/api/columns', require('./routes/columns'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/stockcount', require('./routes/stockcount'));
+app.use('/api/settings', require('./routes/settings'));
 
 // Yedekleme endpoint
 app.get('/api/backup', require('./middleware/auth'), async (req, res) => {

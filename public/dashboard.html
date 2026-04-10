@@ -84,12 +84,14 @@
           <div class="charts-row">
             <div class="chart-card">
               <h3>Ürün Stok Miktarları</h3>
-              <canvas id="chartStock" height="300"></canvas>
+              <div class="chart-wrapper">
+                <canvas id="chartStock"></canvas>
+              </div>
             </div>
             <div class="chart-card">
               <h3>Ürün Tipi Dağılımı</h3>
-              <div style="position:relative;">
-                <canvas id="chartType" height="300"></canvas>
+              <div class="chart-wrapper">
+                <canvas id="chartType"></canvas>
               </div>
             </div>
           </div>
@@ -299,6 +301,10 @@
         <div class="form-group">
           <label>Ürün Tipi</label>
           <select id="pType"><option value="">Seçiniz</option></select>
+        </div>
+        <div class="form-group">
+          <label>Renk</label>
+          <input type="text" id="pColor" placeholder="Örn: Siyah, Kırmızı, Bej">
         </div>
         <div class="form-group">
           <label>Tedarikçi</label>
