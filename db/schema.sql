@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   username VARCHAR(50) UNIQUE NOT NULL,
   pin_hash VARCHAR(255) NOT NULL,
   role VARCHAR(20) DEFAULT 'standard',
+  email VARCHAR(200),
+  phone VARCHAR(30),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

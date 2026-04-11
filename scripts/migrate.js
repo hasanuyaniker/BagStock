@@ -23,6 +23,11 @@ async function migrate() {
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100)`);
     console.log('✓ products.color kolonu eklendi');
 
+    // users tablosuna email ve phone kolonları
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
+    console.log('✓ users.email ve users.phone kolonları eklendi');
+
     console.log('✓ Migration tamamlandı!');
   } catch (err) {
     console.error('Migration hatası:', err.message);

@@ -16,7 +16,9 @@ router.use(adminOnly);
 // GET /api/users
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username, role, created_at FROM users ORDER BY created_at');
+    const result = await pool.query(
+      'SELECT id, username, role, email, phone, created_at FROM users ORDER BY created_at'
+    );
     res.json(result.rows);
   } catch (err) {
     console.error('Kullanıcı listeleme hatası:', err);
@@ -27,7 +29,7 @@ router.get('/', async (req, res) => {
 // POST /api/users
 router.post('/', async (req, res) => {
   try {
-    const { username, pin, role } = req.body;
+    const { username, pin, role, email, phone } = req.body;
     if (!username || !pin) {
       return res.status(400).json({ error: 'Kullanıcı adı ve PIN zorunludur' });
     }
@@ -37,8 +39,10 @@ router.post('/', async (req, res) => {
 
     const pinHash = await bcrypt.hash(pin.toString(), 10);
     const result = await pool.query(
-      'INSERT INTO users (username, pin_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role, created_at',
-      [username, pinHash, role || 'standard']
+      `INSERT INTO users (username, pin_hash, role, email, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, username, role, email, phone, created_at`,
+      [username, pinHash, role || 'standard', email || null, phone || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -54,7 +58,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, pin, role } = req.body;
+    const { username, pin, role, email, phone } = req.body;
 
     let query, params;
     if (pin) {
@@ -62,11 +66,13 @@ router.put('/:id', async (req, res) => {
         return res.status(400).json({ error: 'PIN 4 haneli bir sayı olmalıdır' });
       }
       const pinHash = await bcrypt.hash(pin.toString(), 10);
-      query = 'UPDATE users SET username=$1, pin_hash=$2, role=$3 WHERE id=$4 RETURNING id, username, role, created_at';
-      params = [username, pinHash, role || 'standard', id];
+      query = `UPDATE users SET username=$1, pin_hash=$2, role=$3, email=$4, phone=$5
+               WHERE id=$6 RETURNING id, username, role, email, phone, created_at`;
+      params = [username, pinHash, role || 'standard', email || null, phone || null, id];
     } else {
-      query = 'UPDATE users SET username=$1, role=$2 WHERE id=$3 RETURNING id, username, role, created_at';
-      params = [username, role || 'standard', id];
+      query = `UPDATE users SET username=$1, role=$2, email=$3, phone=$4
+               WHERE id=$5 RETURNING id, username, role, email, phone, created_at`;
+      params = [username, role || 'standard', email || null, phone || null, id];
     }
 
     const result = await pool.query(query, params);

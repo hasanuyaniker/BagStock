@@ -3,6 +3,7 @@ const router = express.Router();
 const { Pool } = require('pg');
 const authMiddleware = require('../middleware/auth');
 const { adminOnly } = require('../middleware/auth');
+const { sendStockAlert } = require('../services/notify');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -164,16 +165,21 @@ router.post('/sessions/:id/apply', async (req, res) => {
       return res.status(400).json({ error: 'Bu sayım zaten uygulanmış' });
     }
 
-    const items = await client.query(
-      'SELECT product_id, counted_quantity FROM stock_count_items WHERE session_id = $1',
+    // Sayım öncesi stok ve ürün bilgilerini al (bildirim için)
+    const beforeItems = await client.query(
+      `SELECT sci.product_id, sci.system_quantity AS prev_stock, sci.counted_quantity AS new_stock,
+              p.name, p.barcode, p.color, p.critical_stock
+       FROM stock_count_items sci
+       JOIN products p ON p.id = sci.product_id
+       WHERE sci.session_id = $1`,
       [req.params.id]
     );
 
     let appliedCount = 0;
-    for (const item of items.rows) {
+    for (const item of beforeItems.rows) {
       await client.query(
         'UPDATE products SET stock_quantity = $1, updated_at = NOW() WHERE id = $2',
-        [item.counted_quantity, item.product_id]
+        [item.new_stock, item.product_id]
       );
       appliedCount++;
     }
@@ -198,6 +204,18 @@ router.post('/sessions/:id/apply', async (req, res) => {
     res.json({
       applied_count: appliedCount,
       summary: summary.rows[0]
+    });
+
+    // Stok uyarısı — commit sonrası async
+    setImmediate(() => {
+      sendStockAlert(beforeItems.rows.map(item => ({
+        name: item.name,
+        barcode: item.barcode,
+        color: item.color,
+        critical_stock: item.critical_stock,
+        prev_stock: parseInt(item.prev_stock),
+        new_stock: parseInt(item.new_stock)
+      }))).catch(err => console.error('Sayım bildirim hatası:', err.message));
     });
   } catch (err) {
     await client.query('ROLLBACK');

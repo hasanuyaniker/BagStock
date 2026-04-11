@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
 const authMiddleware = require('../middleware/auth');
+const { sendStockAlert } = require('../services/notify');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -22,14 +23,18 @@ router.post('/', async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Mevcut stoğu al
-    const product = await client.query('SELECT stock_quantity FROM products WHERE id = $1 FOR UPDATE', [product_id]);
+    // Mevcut stoğu al (ürün bilgileriyle birlikte)
+    const product = await client.query(
+      'SELECT stock_quantity, name, barcode, color, critical_stock FROM products WHERE id = $1 FOR UPDATE',
+      [product_id]
+    );
     if (product.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Ürün bulunamadı' });
     }
 
-    const currentStock = product.rows[0].stock_quantity;
+    const p = product.rows[0];
+    const currentStock = p.stock_quantity;
     const newStock = Math.max(0, currentStock + quantity_change);
 
     // Stoğu güncelle
@@ -47,6 +52,18 @@ router.post('/', async (req, res) => {
     res.status(201).json({
       sale: saleResult.rows[0],
       new_stock: newStock
+    });
+
+    // Stok uyarısı — commit sonrası async (response'u bloklamaz)
+    setImmediate(() => {
+      sendStockAlert([{
+        name: p.name,
+        barcode: p.barcode,
+        color: p.color,
+        critical_stock: p.critical_stock,
+        prev_stock: currentStock,
+        new_stock: newStock
+      }]).catch(err => console.error('Bildirim hatası:', err.message));
     });
   } catch (err) {
     await client.query('ROLLBACK');

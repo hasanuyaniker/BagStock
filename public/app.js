@@ -1145,16 +1145,22 @@ async function loadUsers() {
       ? '<span class="role-badge admin">Admin</span>'
       : '<span class="role-badge standard" style="background:#f3f4f6;color:#374151;">Standart</span>';
 
+    const contactInfo = [
+      u.email ? `<span title="E-posta">📧 ${escHtml(u.email)}</span>` : '',
+      u.phone ? `<span title="Telefon">📱 ${escHtml(u.phone)}</span>` : ''
+    ].filter(Boolean).join(' &nbsp;');
+
     html += `<div class="user-list-item">
       <div class="user-list-left">
         <div class="user-avatar" style="background:var(--navy-100);color:var(--navy-700);">${initials}</div>
         <div>
           <div style="font-weight:600;font-size:14px;">${escHtml(u.username)}</div>
           ${badge}
+          ${contactInfo ? `<div style="font-size:11px;color:#6b7280;margin-top:3px;">${contactInfo}</div>` : ''}
         </div>
       </div>
       <div style="display:flex;gap:6px;">
-        <button class="btn btn-secondary btn-sm" onclick="editUser(${u.id}, '${escHtml(u.username)}', '${u.role}')">Düzenle</button>
+        <button class="btn btn-secondary btn-sm" onclick="editUser(${u.id}, '${escHtml(u.username)}', '${u.role}', '${escHtml(u.email || '')}', '${escHtml(u.phone || '')}')">Düzenle</button>
         ${u.id !== currentUser.id ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escHtml(u.username)}')">Sil</button>` : ''}
       </div>
     </div>`;
@@ -1169,13 +1175,15 @@ function openUserModal(user = null) {
   document.getElementById('uPin').value = '';
   document.getElementById('uPinConfirm').value = '';
   document.getElementById('uRole').value = user ? user.role : 'standard';
+  document.getElementById('uEmail').value = user ? (user.email || '') : '';
+  document.getElementById('uPhone').value = user ? (user.phone || '') : '';
   document.getElementById('userModal').classList.add('active');
 }
 
 function closeUserModal() { document.getElementById('userModal').classList.remove('active'); }
 
-function editUser(id, username, role) {
-  openUserModal({ id, username, role });
+function editUser(id, username, role, email, phone) {
+  openUserModal({ id, username, role, email, phone });
 }
 
 async function saveUser() {
@@ -1190,7 +1198,10 @@ async function saveUser() {
   if (pin && pin !== pinConfirm) { showToast('PIN kodları eşleşmiyor', 'error'); return; }
   if (pin && !/^\d{4}$/.test(pin)) { showToast('PIN 4 haneli olmalıdır', 'error'); return; }
 
-  const body = { username, role };
+  const email = document.getElementById('uEmail').value.trim() || null;
+  const phone = document.getElementById('uPhone').value.trim() || null;
+
+  const body = { username, role, email, phone };
   if (pin) body.pin = pin;
 
   const url = editId ? `/api/users/${editId}` : '/api/users';
