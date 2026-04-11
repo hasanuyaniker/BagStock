@@ -1,6 +1,6 @@
 /**
  * Stok Takip Sistemi — Email Bildirim Servisi
- * Kritik stok ve tükenen ürünlerde admin kullanıcılara email gönderir.
+ * Kritik stok ve tükenen ürünlerde tüm kullanıcılara email gönderir.
  * Gerekli Railway env değişkenleri: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
  */
 const nodemailer = require('nodemailer');
@@ -11,10 +11,28 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
 });
 
+// Aynı ürün için 2 saat içinde tekrar bildirim gönderme
+const alertCooldown = new Map();
+const COOLDOWN_MS = 2 * 60 * 60 * 1000;
+
+function checkCooldown(prefix, product) {
+  const key = prefix + '_' + (product.barcode || product.name);
+  const last = alertCooldown.get(key);
+  const now = Date.now();
+  if (!last || now - last > COOLDOWN_MS) {
+    alertCooldown.set(key, now);
+    return true;
+  }
+  return false;
+}
+
 // ── Email transporter ──────────────────────────────────────────────────────
 function createTransporter() {
   const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    console.log('[Bildirim] SMTP ayarları eksik. Kontrol et: SMTP_HOST, SMTP_USER, SMTP_PASS');
+    return null;
+  }
 
   return nodemailer.createTransport({
     host: SMTP_HOST,
@@ -33,7 +51,7 @@ async function getAllUserEmails() {
     );
     return result.rows;
   } catch (err) {
-    console.error('Kullanıcı email listesi hatası:', err.message);
+    console.error('[Bildirim] Kullanıcı email listesi hatası:', err.message);
     return [];
   }
 }
@@ -121,25 +139,38 @@ function buildEmailHtml(outOfStock, critical) {
 async function sendStockAlert(products) {
   if (!products || products.length === 0) return;
 
-  // Sadece eşiği yeni geçen ürünleri al (flood önleme)
-  const outOfStock = products.filter(p => p.new_stock === 0 && p.prev_stock > 0);
-  const critical   = products.filter(p =>
-    p.new_stock > 0 &&
-    p.new_stock <= p.critical_stock &&
-    p.prev_stock > p.critical_stock
-  );
+  // Stoğu sıfır olanlar
+  const outOfStock = products
+    .filter(p => p.new_stock === 0)
+    .filter(p => checkCooldown('out', p));
 
-  if (outOfStock.length === 0 && critical.length === 0) return;
+  // Kritik seviyede olanlar (sıfır değil, ama kritik seviye tanımlıysa)
+  const critical = products
+    .filter(p => p.new_stock > 0 && p.critical_stock > 0 && p.new_stock <= p.critical_stock)
+    .filter(p => checkCooldown('crit', p));
+
+  console.log(`[Bildirim] Kontrol: ${products.length} ürün → ${outOfStock.length} tükendi, ${critical.length} kritik`);
+
+  if (outOfStock.length === 0 && critical.length === 0) {
+    console.log('[Bildirim] Gönderilecek ürün yok (stok normal veya cooldown aktif)');
+    return;
+  }
 
   const transporter = createTransporter();
-  if (!transporter) {
-    console.log('Email bildirimi atlandı: SMTP ayarları eksik (SMTP_HOST, SMTP_USER, SMTP_PASS)');
+  if (!transporter) return;
+
+  // Bağlantıyı test et
+  try {
+    await transporter.verify();
+    console.log('[Bildirim] SMTP bağlantısı başarılı');
+  } catch (err) {
+    console.error('[Bildirim] SMTP bağlantı hatası:', err.message);
     return;
   }
 
   const users = await getAllUserEmails();
   if (users.length === 0) {
-    console.log('Bildirim gönderilecek kullanıcı email adresi bulunamadı');
+    console.log('[Bildirim] Kayıtlı email adresi olan kullanıcı yok');
     return;
   }
 
@@ -150,7 +181,7 @@ async function sendStockAlert(products) {
     ? `🚫 Stok Uyarısı: ${outCount} ürün tükendi`
     : `⚠️ Stok Uyarısı: ${critCount} ürün kritik seviyede`;
 
-  console.log(`Email bildirimi gönderiliyor: ${outCount} tükendi, ${critCount} kritik → ${users.length} kullanıcı`);
+  console.log(`[Bildirim] ${users.length} kullanıcıya email gönderiliyor...`);
 
   for (const user of users) {
     try {
@@ -160,11 +191,11 @@ async function sendStockAlert(products) {
         subject,
         html
       });
-      console.log(`✓ Email gönderildi → ${user.email}`);
+      console.log(`[Bildirim] ✓ Gönderildi → ${user.email}`);
     } catch (err) {
-      console.error(`✗ Email hatası (${user.email}):`, err.message);
+      console.error(`[Bildirim] ✗ Hata (${user.email}):`, err.message);
     }
   }
 }
 
-module.exports = { sendStockAlert };
+module.exports = { sendStockAlert, createTransporter, getAllUserEmails };
