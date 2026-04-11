@@ -83,5 +83,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Çanta Stok Yönetim Sistemi - Port: ${PORT}`);
+  console.log(`Stok Takip Sistemi - Port: ${PORT}`);
 });

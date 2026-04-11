@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Çanta Stok - Giriş</title>
+  <title>Stok Takip Sistemi - Giriş</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -73,8 +73,8 @@
 </head>
 <body>
   <div class="login-card" id="loginCard">
-    <div class="logo-area" id="logoArea">ÇS</div>
-    <h1>Çanta Stok Yönetimi</h1>
+    <div class="logo-area" id="logoArea">ST</div>
+    <h1>Stok Takip Sistemi</h1>
     <p class="subtitle">Hesabınıza giriş yapın</p>
 
     <div class="form-group">
@@ -100,14 +100,16 @@
       window.location.href = '/dashboard.html';
     }
 
-    // Logo yükle
-    const logoImg = new Image();
-    logoImg.onload = () => {
-      const logoArea = document.getElementById('logoArea');
-      logoArea.innerHTML = '';
-      logoArea.appendChild(logoImg);
-    };
-    logoImg.src = '/uploads/logo/logo.png';
+    // Logo yükle (DB'den API ile)
+    fetch('/api/settings/logo')
+      .then(res => { if (res.ok) return res.json(); throw new Error(); })
+      .then(data => {
+        if (data && data.logo) {
+          const logoArea = document.getElementById('logoArea');
+          logoArea.innerHTML = `<img src="${data.logo}">`;
+        }
+      })
+      .catch(() => {});
 
     const pinDigits = document.querySelectorAll('.pin-digit');
     const loginBtn = document.getElementById('loginBtn');

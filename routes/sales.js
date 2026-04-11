@@ -63,6 +63,7 @@ router.get('/', async (req, res) => {
     const { date, from, to } = req.query;
     let query = `
       SELECT s.*, p.name AS product_name, p.barcode AS product_barcode,
+             p.color AS product_color, p.cost_price AS product_cost_price,
              pt.name AS product_type_name, p.product_image_url,
              u.username AS created_by_username
       FROM sales s
@@ -87,6 +88,53 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('Satış listeleme hatası:', err);
     res.status(500).json({ error: 'Satışlar alınamadı' });
+  }
+});
+
+// GET /api/sales/report — Satış raporu (tarih aralığı, ürün bazlı özet)
+router.get('/report', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) {
+      return res.status(400).json({ error: 'Başlangıç ve bitiş tarihi gereklidir' });
+    }
+
+    // Detaylı satış kayıtları
+    const detailResult = await pool.query(`
+      SELECT s.sale_date, p.name AS product_name, p.color, p.barcode, p.cost_price,
+             s.quantity_change, pt.name AS product_type_name,
+             u.username AS created_by_username
+      FROM sales s
+      JOIN products p ON s.product_id = p.id
+      LEFT JOIN product_types pt ON p.product_type_id = pt.id
+      LEFT JOIN users u ON s.created_by = u.id
+      WHERE s.sale_date >= $1 AND s.sale_date <= $2
+      ORDER BY s.sale_date DESC, p.name
+    `, [from, to]);
+
+    // Ürün bazlı özet (sadece çıkışlar = satışlar)
+    const summaryResult = await pool.query(`
+      SELECT p.name AS product_name, p.color, p.barcode, p.cost_price,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS total_sold,
+             SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END) AS total_in,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) * COALESCE(p.cost_price, 0) AS total_cost
+      FROM sales s
+      JOIN products p ON s.product_id = p.id
+      LEFT JOIN product_types pt ON p.product_type_id = pt.id
+      WHERE s.sale_date >= $1 AND s.sale_date <= $2
+      GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
+      HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
+      ORDER BY total_sold DESC
+    `, [from, to]);
+
+    res.json({
+      details: detailResult.rows,
+      summary: summaryResult.rows,
+      period: { from, to }
+    });
+  } catch (err) {
+    console.error('Satış raporu hatası:', err);
+    res.status(500).json({ error: 'Rapor oluşturulamadı' });
   }
 });
 

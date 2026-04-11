@@ -8,6 +8,7 @@ const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: fals
 
 async function migrate() {
   try {
+    // app_settings tablosu
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
         id SERIAL PRIMARY KEY,
@@ -18,6 +19,7 @@ async function migrate() {
     `);
     console.log('✓ app_settings tablosu hazır');
 
+    // products tablosuna color kolonu
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100)`);
     console.log('✓ products.color kolonu eklendi');
 

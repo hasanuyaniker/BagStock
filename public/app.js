@@ -113,6 +113,7 @@ function switchSection(name) {
   if (name === 'dashboard') loadStats();
   if (name === 'inventory') { loadProducts(); loadColumnSettings(); }
   if (name === 'sales') loadSalesView();
+  if (name === 'salesreport') initSalesReport();
   if (name === 'stockcount') loadStockCount();
   if (name === 'settings') loadSettings();
   if (name === 'reports') loadReportOptions();
@@ -222,6 +223,7 @@ function renderStockChart(data) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      resizeDelay: 200,
       plugins: { legend: { display: false } },
       scales: {
         x: { beginAtZero: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } },
@@ -254,6 +256,7 @@ function renderTypeChart(data) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      resizeDelay: 200,
       cutout: '58%',
       plugins: {
         legend: {
@@ -435,7 +438,8 @@ function filterProductList(list) {
   return list.filter(p =>
     (p.name && p.name.toLowerCase().includes(q)) ||
     (p.barcode && p.barcode.toLowerCase().includes(q)) ||
-    (p.product_type_name && p.product_type_name.toLowerCase().includes(q))
+    (p.product_type_name && p.product_type_name.toLowerCase().includes(q)) ||
+    (p.color && p.color.toLowerCase().includes(q))
   );
 }
 
@@ -1265,7 +1269,7 @@ async function loadMediaPanel() {
   if (logoData) {
     logoPreview.innerHTML = `<img src="${logoData}" style="width:100%;height:100%;object-fit:contain;">`;
   } else {
-    logoPreview.innerHTML = '<span style="color:var(--navy-400);font-size:24px;">ÇS</span>';
+    logoPreview.innerHTML = '<span style="color:var(--navy-400);font-size:24px;">ST</span>';
   }
 
   // Product list with image upload
@@ -1380,6 +1384,132 @@ function downloadBackup() {
     URL.revokeObjectURL(a.href);
     showToast('Yedek indirildi');
   }).catch(() => showToast('Yedekleme hatası', 'error'));
+}
+
+// ==================== SALES REPORT ====================
+function initSalesReport() {
+  // Varsayılan tarihler: bu ayın 1'i ile bugün
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  document.getElementById('srFrom').value = firstDay.toISOString().split('T')[0];
+  document.getElementById('srTo').value = today.toISOString().split('T')[0];
+}
+
+async function loadSalesReport() {
+  const from = document.getElementById('srFrom').value;
+  const to = document.getElementById('srTo').value;
+
+  if (!from || !to) {
+    showToast('Başlangıç ve bitiş tarihi seçiniz', 'error');
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/api/sales/report?from=${from}&to=${to}`);
+    if (!res || !res.ok) {
+      showToast('Rapor alınamadı', 'error');
+      return;
+    }
+
+    const data = await res.json();
+    renderSalesReport(data);
+  } catch (err) {
+    showToast('Rapor yüklenirken hata oluştu', 'error');
+  }
+}
+
+function renderSalesReport(data) {
+  const { details, summary } = data;
+
+  // Özet kartları
+  const totalSold = summary.reduce((s, r) => s + parseInt(r.total_sold || 0), 0);
+  const totalCost = summary.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
+  const uniqueProducts = summary.length;
+
+  document.getElementById('srSummary').style.display = '';
+  document.getElementById('srTotalQty').textContent = formatNumber(totalSold);
+  document.getElementById('srTotalCost').textContent = formatCurrency(totalCost);
+  document.getElementById('srUniqueProducts').textContent = uniqueProducts;
+
+  // Ürün bazlı özet tablo
+  let html = '<h4 style="font-size:14px;color:var(--navy-700);margin:16px 0 8px;">Ürün Bazlı Satış Özeti</h4>';
+  html += '<div class="table-container"><table><thead><tr>';
+  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyeti</th><th>Satılan Adet</th><th>Toplam Maliyet</th>';
+  html += '</tr></thead><tbody>';
+
+  if (summary.length === 0) {
+    html += '<tr><td colspan="6" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
+  } else {
+    summary.forEach(row => {
+      html += `<tr>
+        <td><strong>${escHtml(row.product_name)}</strong></td>
+        <td>${row.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(row.color)}</span>` : '-'}</td>
+        <td>${escHtml(row.barcode)}</td>
+        <td>${formatCurrency(row.cost_price)}</td>
+        <td><strong style="color:var(--red);">${row.total_sold}</strong></td>
+        <td>${formatCurrency(row.total_cost)}</td>
+      </tr>`;
+    });
+
+    // Toplam satırı
+    html += `<tr style="background:#f9fafb;font-weight:700;">
+      <td colspan="4" style="text-align:right;">TOPLAM</td>
+      <td style="color:var(--red);">${totalSold}</td>
+      <td>${formatCurrency(totalCost)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+
+  // Detaylı satış kayıtları
+  if (details.length > 0) {
+    html += '<h4 style="font-size:14px;color:var(--navy-700);margin:24px 0 8px;">Detaylı Satış Kayıtları</h4>';
+    html += '<div class="table-container"><table><thead><tr>';
+    html += '<th>Satış Tarihi</th><th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyeti</th><th>Miktar</th>';
+    html += '</tr></thead><tbody>';
+
+    details.forEach(row => {
+      const isOut = row.quantity_change < 0;
+      const dateStr = row.sale_date ? new Date(row.sale_date).toLocaleDateString('tr-TR') : '-';
+
+      html += `<tr>
+        <td>${dateStr}</td>
+        <td>${escHtml(row.product_name)}</td>
+        <td>${row.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(row.color)}</span>` : '-'}</td>
+        <td>${escHtml(row.barcode)}</td>
+        <td>${formatCurrency(row.cost_price)}</td>
+        <td><strong style="color:${isOut ? 'var(--red)' : 'var(--green)'};">${isOut ? '' : '+'}${row.quantity_change}</strong></td>
+      </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+  }
+
+  document.getElementById('srResults').innerHTML = html;
+}
+
+function exportSalesReport() {
+  const from = document.getElementById('srFrom').value;
+  const to = document.getElementById('srTo').value;
+
+  if (!from || !to) {
+    showToast('Tarih aralığı seçiniz', 'error');
+    return;
+  }
+
+  apiFetch(`/api/export/sales-report?from=${from}&to=${to}`)
+    .then(res => {
+      if (!res.ok) throw new Error();
+      return res.blob();
+    })
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `satis_raporu_${from}_${to}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast('Rapor indirildi');
+    })
+    .catch(() => showToast('İndirme hatası', 'error'));
 }
 
 // ==================== UTILS ====================

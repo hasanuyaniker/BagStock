@@ -87,8 +87,8 @@ router.get('/sales', async (req, res) => {
   try {
     const { from, to } = req.query;
     let query = `
-      SELECT s.sale_date, p.name AS product_name, p.barcode, pt.name AS product_type,
-             s.quantity_change, s.note, u.username AS created_by
+      SELECT s.sale_date, p.name AS product_name, p.color, p.barcode, p.cost_price,
+             pt.name AS product_type, s.quantity_change, s.note, u.username AS created_by
       FROM sales s
       JOIN products p ON s.product_id = p.id
       LEFT JOIN product_types pt ON p.product_type_id = pt.id
@@ -109,7 +109,9 @@ router.get('/sales', async (req, res) => {
     sheet.columns = [
       { header: 'Tarih', key: 'sale_date', width: 14 },
       { header: 'Ürün Adı', key: 'product_name', width: 30 },
+      { header: 'Renk', key: 'color', width: 15 },
       { header: 'Barkod', key: 'barcode', width: 20 },
+      { header: 'Alış Maliyeti', key: 'cost_price', width: 15 },
       { header: 'Ürün Tipi', key: 'product_type', width: 15 },
       { header: 'Miktar Değişimi', key: 'quantity_change', width: 16 },
       { header: 'Not', key: 'note', width: 25 },
@@ -122,6 +124,8 @@ router.get('/sales', async (req, res) => {
     });
     styleHeaderRow(sheet);
 
+    sheet.getColumn('E').numFmt = CURRENCY_FORMAT;
+
     const today = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Disposition', `attachment; filename=satis_raporu_${today}.xlsx`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -129,6 +133,60 @@ router.get('/sales', async (req, res) => {
     res.end();
   } catch (err) {
     console.error('Satış export hatası:', err);
+    res.status(500).json({ error: 'Excel oluşturulamadı' });
+  }
+});
+
+// GET /api/export/sales-report — Ürün bazlı satış özet raporu
+router.get('/sales-report', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'Tarih aralığı gerekli' });
+
+    const result = await pool.query(`
+      SELECT p.name AS product_name, p.color, p.barcode, p.cost_price,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS total_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) * COALESCE(p.cost_price, 0) AS total_cost
+      FROM sales s
+      JOIN products p ON s.product_id = p.id
+      WHERE s.sale_date >= $1 AND s.sale_date <= $2
+      GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
+      HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
+      ORDER BY total_sold DESC
+    `, [from, to]);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Satış Özet Raporu');
+
+    sheet.columns = [
+      { header: 'Ürün Adı', key: 'product_name', width: 30 },
+      { header: 'Renk', key: 'color', width: 15 },
+      { header: 'Barkod', key: 'barcode', width: 20 },
+      { header: 'Alış Maliyeti', key: 'cost_price', width: 15 },
+      { header: 'Satılan Adet', key: 'total_sold', width: 14 },
+      { header: 'Toplam Maliyet', key: 'total_cost', width: 18 }
+    ];
+
+    result.rows.forEach(row => sheet.addRow(row));
+    styleHeaderRow(sheet);
+
+    sheet.getColumn('D').numFmt = CURRENCY_FORMAT;
+    sheet.getColumn('F').numFmt = CURRENCY_FORMAT;
+
+    // Toplam satırı
+    const totalRow = sheet.addRow({
+      product_name: 'TOPLAM',
+      total_sold: result.rows.reduce((s, r) => s + parseInt(r.total_sold || 0), 0),
+      total_cost: result.rows.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0)
+    });
+    totalRow.font = { bold: true };
+
+    res.setHeader('Content-Disposition', `attachment; filename=satis_ozet_${from}_${to}.xlsx`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Satış özet export hatası:', err);
     res.status(500).json({ error: 'Excel oluşturulamadı' });
   }
 });

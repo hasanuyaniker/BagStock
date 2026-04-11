@@ -19,9 +19,7 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-router.use(authMiddleware);
-
-// GET /api/settings/logo — logoyu base64 olarak döner
+// GET /api/settings/logo — logoyu base64 olarak döner (auth gerekmez - login sayfasında da kullanılır)
 router.get('/logo', async (req, res) => {
   try {
     const result = await pool.query(
@@ -36,8 +34,8 @@ router.get('/logo', async (req, res) => {
   }
 });
 
-// POST /api/settings/logo — logoyu DB'ye base64 olarak kaydet
-router.post('/logo', upload.single('logo'), async (req, res) => {
+// POST /api/settings/logo — logoyu DB'ye base64 olarak kaydet (auth gerekli)
+router.post('/logo', authMiddleware, upload.single('logo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Dosya gerekli' });
   try {
     const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;

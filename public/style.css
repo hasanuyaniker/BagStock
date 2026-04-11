@@ -263,8 +263,15 @@ body {
 .chart-wrapper {
   position: relative;
   height: 280px;
+  max-height: 280px;
   width: 100%;
   overflow: hidden;
+}
+
+.chart-wrapper canvas {
+  display: block;
+  max-width: 100% !important;
+  max-height: 280px !important;
 }
 
 /* ========== TOOLBAR ========== */
@@ -810,6 +817,10 @@ tr:hover td { background: #f9fafb; }
   .toolbar { flex-direction: column; align-items: stretch; }
   .search-input { width: 100%; }
   .form-row { grid-template-columns: 1fr; }
+  .chart-wrapper { height: 220px; max-height: 220px; }
+  .chart-wrapper canvas { max-height: 220px !important; }
+  .sales-report-filters { flex-direction: column; }
+  .sales-report-filters .form-group { width: 100%; }
 }
 
 /* ========== TOGGLE ========== */
@@ -849,6 +860,39 @@ input[type="date"] {
 }
 
 input[type="date"]:focus { border-color: var(--navy-400); }
+
+/* ========== SALES REPORT ========== */
+.sales-report-container {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.sales-report-filters {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.sales-report-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.sales-summary-card {
+  background: #f9fafb;
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+
+.sales-summary-card .label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+.sales-summary-card .value { font-size: 22px; font-weight: 700; color: var(--navy-700); }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

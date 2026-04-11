@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Çanta Stok - Panel</title>
+  <title>Stok Takip Sistemi - Panel</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
@@ -12,8 +12,8 @@
     <!-- TOPBAR -->
     <div class="topbar">
       <div class="topbar-left">
-        <div class="topbar-logo" id="topbarLogo">ÇS</div>
-        <span class="topbar-title">Çanta Stok Yönetimi</span>
+        <div class="topbar-logo" id="topbarLogo">ST</div>
+        <span class="topbar-title">Stok Takip Sistemi</span>
       </div>
       <div class="topbar-right">
         <div class="user-chip">
@@ -48,6 +48,10 @@
         <div class="sidebar-item" data-section="stockcount" id="stockcountNav" style="display:none;" onclick="switchSection('stockcount')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
           <span>Stok Sayım</span>
+        </div>
+        <div class="sidebar-item" data-section="salesreport" onclick="switchSection('salesreport')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+          <span>Satış Raporu</span>
         </div>
         <div class="sidebar-item" data-section="reports" onclick="switchSection('reports')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -159,6 +163,40 @@
           </div>
           <div id="countNewView"></div>
           <div id="countHistoryView" style="display:none;"></div>
+        </div>
+
+        <!-- SALES REPORT -->
+        <div class="section" id="section-salesreport">
+          <div class="sales-report-container">
+            <h3 style="font-size:16px;color:var(--navy-700);margin-bottom:16px;">Satış Raporları</h3>
+            <div class="sales-report-filters">
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Başlangıç Tarihi</label>
+                <input type="date" id="srFrom">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Bitiş Tarihi</label>
+                <input type="date" id="srTo">
+              </div>
+              <button class="btn btn-primary" onclick="loadSalesReport()">Raporu Getir</button>
+              <button class="btn btn-success" onclick="exportSalesReport()">Excel İndir</button>
+            </div>
+            <div class="sales-report-summary" id="srSummary" style="display:none;">
+              <div class="sales-summary-card">
+                <div class="label">Toplam Satış Adedi</div>
+                <div class="value" id="srTotalQty">0</div>
+              </div>
+              <div class="sales-summary-card">
+                <div class="label">Toplam Maliyet</div>
+                <div class="value" id="srTotalCost" style="font-size:18px;">₺0</div>
+              </div>
+              <div class="sales-summary-card">
+                <div class="label">Farklı Ürün Sayısı</div>
+                <div class="value" id="srUniqueProducts">0</div>
+              </div>
+            </div>
+            <div id="srResults"></div>
+          </div>
         </div>
 
         <!-- REPORTS -->
