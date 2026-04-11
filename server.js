@@ -107,6 +107,18 @@ app.use((err, req, res, next) => {
 
 // Migration çalıştır, sonra sunucuyu başlat
 runMigrations().then(() => {
+  // SMTP durum kontrolü
+  const smtp = {
+    SMTP_HOST:   process.env.SMTP_HOST   || '✗ EKSİK',
+    SMTP_PORT:   process.env.SMTP_PORT   || '587 (varsayılan)',
+    SMTP_USER:   process.env.SMTP_USER   || '✗ EKSİK',
+    SMTP_PASS:   process.env.SMTP_PASS   ? '✓ MEVCUT' : '✗ EKSİK',
+    SMTP_SECURE: process.env.SMTP_SECURE || 'false (varsayılan)',
+  };
+  console.log('── SMTP Durumu ──────────────────────────────');
+  Object.entries(smtp).forEach(([k, v]) => console.log(`  ${k}: ${v}`));
+  console.log('─────────────────────────────────────────────');
+
   app.listen(PORT, () => {
     console.log(`Stok Takip Sistemi - Port: ${PORT}`);
   });

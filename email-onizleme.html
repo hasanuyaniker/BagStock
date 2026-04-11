@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Email Önizleme — Stok Takip Sistemi</title>
+<style>
+  body { background:#f3f4f6; padding:30px; font-family:sans-serif; }
+  h2 { color:#374151; margin-bottom:6px; }
+  p { color:#6b7280; margin-top:0; }
+</style>
+</head>
+<body>
+<h2>Email Önizleme</h2>
+<p>Aşağıda kullanıcılara gönderilecek email içeriği görünüyor.</p>
+
+<!-- ─── EMAIL IÇERIĞI ─── -->
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#1e3f8a;color:#fff;padding:20px 28px;border-radius:10px 10px 0 0;">
+    <h2 style="margin:0;font-size:20px;">📦 Stok Takip Sistemi — Stok Uyarısı</h2>
+    <p style="margin:6px 0 0;opacity:.8;font-size:13px;">11.04.2026 14:35:22</p>
+  </div>
+  <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;">
+
+    <!-- Tükenen ürünler -->
+    <h3 style="color:#ef4444;margin-top:0;">🚫 Tükenen Ürünler (2 adet)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
+      <thead>
+        <tr style="background:#fef2f2;">
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Ürün Adı</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Renk</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Barkod</th>
+          <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fee2e2;">Durum</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">Deri Omuz Çanta</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">Siyah</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">8691234567890</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
+            <span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">TÜKENDİ</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">Mini Baguette Çanta</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">Bej</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">8699876543210</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
+            <span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">TÜKENDİ</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Kritik ürünler -->
+    <h3 style="color:#d97706;margin-top:16px;">⚠️ Kritik Stok Ürünler (1 adet)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="background:#fffbeb;">
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Ürün Adı</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Renk</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Barkod</th>
+          <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fde68a;">Mevcut Stok</th>
+          <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fde68a;">Kritik Seviye</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">Hasır Plaj Çantası</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">Naturel</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">8695551234567</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
+            <strong style="color:#d97706;">3</strong>
+          </td>
+          <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">5</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;">
+      Bu mesaj Stok Takip Sistemi tarafından otomatik gönderilmiştir.
+    </p>
+  </div>
+</div>
+</body>
+</html>
