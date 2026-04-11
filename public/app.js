@@ -1405,6 +1405,47 @@ function downloadBackup() {
   }).catch(() => showToast('Yedekleme hatası', 'error'));
 }
 
+// ==================== EMAIL TEST ====================
+async function testEmail() {
+  const btn = document.getElementById('testEmailBtn');
+  const resultDiv = document.getElementById('testEmailResult');
+  btn.disabled = true;
+  btn.textContent = 'Gönderiliyor...';
+  resultDiv.style.display = 'none';
+
+  try {
+    const res = await apiFetch('/api/settings/test-email', { method: 'POST' });
+    const data = await res.json();
+
+    let html = '';
+    if (data.ok) {
+      html = `<div style="background:#dcfce7;border:1px solid #bbf7d0;border-radius:8px;padding:14px;">
+        <strong style="color:#166534;">✅ ${data.message}</strong>
+        ${data.results ? '<ul style="margin:8px 0 0;padding-left:20px;font-size:13px;">' +
+          data.results.map(r => `<li style="color:${r.status==='ok'?'#166534':'#991b1b'};">${r.email} — ${r.status==='ok'?'Gönderildi':'HATA: '+r.detail}</li>`).join('') +
+          '</ul>' : ''}
+      </div>`;
+    } else {
+      const adim = { config: '1. Ayar Kontrolü', connection: '2. SMTP Bağlantısı', recipients: '3. Alıcı Kontrolü', send: '4. Gönderme' };
+      html = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;">
+        <strong style="color:#991b1b;">❌ Hata — ${adim[data.step] || data.step}</strong>
+        <p style="margin:6px 0 0;font-size:13px;color:#7f1d1d;">${data.error}</p>
+        ${data.detail ? `<p style="margin:4px 0 0;font-size:12px;color:#9ca3af;word-break:break-all;">${typeof data.detail === 'object' ? JSON.stringify(data.detail) : data.detail}</p>` : ''}
+        ${data.tip ? `<p style="margin:8px 0 0;font-size:12px;color:#92400e;background:#fef3c7;padding:8px;border-radius:6px;">💡 ${data.tip}</p>` : ''}
+      </div>`;
+    }
+
+    resultDiv.innerHTML = html;
+    resultDiv.style.display = 'block';
+  } catch (err) {
+    resultDiv.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;color:#991b1b;">❌ İstek başarısız: ${err.message}</div>`;
+    resultDiv.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Test Emaili Gönder';
+}
+
 // ==================== SALES REPORT ====================
 function initSalesReport() {
   // Varsayılan tarihler: bu ayın 1'i ile bugün
