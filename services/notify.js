@@ -26,8 +26,15 @@ async function sendViaResend(to, subject, html) {
     body: JSON.stringify({ from, to, subject, html })
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || data.name || JSON.stringify(data));
+  let data;
+  try { data = await res.json(); } catch(e) { data = {}; }
+
+  console.log(`[Resend] HTTP ${res.status}:`, JSON.stringify(data));
+
+  if (!res.ok) {
+    const msg = data.message || data.name || data.error || JSON.stringify(data) || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
   return data;
 }
 

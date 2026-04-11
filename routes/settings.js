@@ -91,7 +91,7 @@ router.post('/test-email', authMiddleware, async (req, res) => {
         );
         results.push({ email: user.email, status: 'ok' });
       } catch (err) {
-        results.push({ email: user.email, status: 'error', detail: err.message });
+        results.push({ email: user.email, status: 'error', detail: err.message || String(err) });
       }
     }
 
