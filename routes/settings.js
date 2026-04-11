@@ -65,20 +65,25 @@ router.post('/test-email', authMiddleware, async (req, res) => {
       });
     }
 
-    // 2. Kullanıcı email listesi
-    const users = await getAllUserEmails();
-    if (users.length === 0) {
-      return res.status(400).json({
-        ok: false,
-        step: 'recipients',
-        error: 'Kayıtlı email adresi olan kullanıcı bulunamadı',
-        detail: 'Ayarlar → Kullanıcılar bölümünden kullanıcılara email adresi ekleyin'
-      });
+    // 2. Alıcı listesi
+    let recipients;
+    if (process.env.NOTIFY_TO) {
+      recipients = [{ email: process.env.NOTIFY_TO, username: 'admin' }];
+    } else {
+      recipients = await getAllUserEmails();
+      if (recipients.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          step: 'recipients',
+          error: 'Kayıtlı email adresi olan kullanıcı bulunamadı',
+          detail: 'Ayarlar → Kullanıcılar bölümünden kullanıcılara email adresi ekleyin'
+        });
+      }
     }
 
     // 3. Test emaili gönder
     const results = [];
-    for (const user of users) {
+    for (const user of recipients) {
       try {
         await sendViaResend(
           user.email,

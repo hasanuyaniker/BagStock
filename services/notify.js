@@ -142,18 +142,26 @@ async function sendStockAlert(products) {
     return;
   }
 
-  const users = await getAllUserEmails();
-  if (users.length === 0) {
-    console.log('[Bildirim] Email adresi olan kullanıcı yok');
-    return;
-  }
-
   const html = buildEmailHtml(outOfStock, critical);
   const subject = outOfStock.length > 0
     ? `🚫 Stok Uyarısı: ${outOfStock.length} ürün tükendi`
     : `⚠️ Stok Uyarısı: ${critical.length} ürün kritik seviyede`;
 
-  for (const user of users) {
+  // NOTIFY_TO varsa sadece o adrese gönder (domain doğrulaması olmadan)
+  // Yoksa tüm kullanıcılara gönder (domain doğrulaması gerekir)
+  let recipients;
+  if (process.env.NOTIFY_TO) {
+    recipients = [{ email: process.env.NOTIFY_TO, username: 'admin' }];
+    console.log(`[Bildirim] Sabit adrese gönderiliyor: ${process.env.NOTIFY_TO}`);
+  } else {
+    recipients = await getAllUserEmails();
+    if (recipients.length === 0) {
+      console.log('[Bildirim] Email adresi olan kullanıcı yok');
+      return;
+    }
+  }
+
+  for (const user of recipients) {
     try {
       await sendViaResend(user.email, subject, html);
       console.log(`[Bildirim] ✓ Gönderildi → ${user.email}`);
