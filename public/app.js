@@ -1425,11 +1425,19 @@ async function testEmail() {
           data.results.map(r => `<li style="color:${r.status==='ok'?'#166534':'#991b1b'};">${r.email} — ${r.status==='ok'?'Gönderildi':'HATA: '+r.detail}</li>`).join('') +
           '</ul>' : ''}
       </div>`;
+    } else if (data.step === 'send' && data.results) {
+      // Gönderim adımında sonuçları göster
+      html = `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:14px;">
+        <strong style="color:#92400e;">⚠️ ${data.message || 'Bazı emailler gönderilemedi'}</strong>
+        <ul style="margin:8px 0 0;padding-left:20px;font-size:13px;">
+          ${data.results.map(r => `<li style="color:${r.status==='ok'?'#166534':'#991b1b'};">${r.email} — ${r.status==='ok'?'✓ Gönderildi':'✗ '+r.detail}</li>`).join('')}
+        </ul>
+      </div>`;
     } else {
-      const adim = { config: '1. Ayar Kontrolü', connection: '2. SMTP Bağlantısı', recipients: '3. Alıcı Kontrolü', send: '4. Gönderme' };
+      const adim = { config: '1. Ayar Kontrolü', recipients: '2. Alıcı Kontrolü', error: 'Hata', timeout: 'Zaman Aşımı' };
       html = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;">
-        <strong style="color:#991b1b;">❌ Hata — ${adim[data.step] || data.step}</strong>
-        <p style="margin:6px 0 0;font-size:13px;color:#7f1d1d;">${data.error}</p>
+        <strong style="color:#991b1b;">❌ ${adim[data.step] || data.step || 'Hata'}</strong>
+        <p style="margin:6px 0 0;font-size:13px;color:#7f1d1d;">${data.error || data.message || 'Bilinmeyen hata'}</p>
         ${data.detail ? `<p style="margin:4px 0 0;font-size:12px;color:#9ca3af;word-break:break-all;">${typeof data.detail === 'object' ? JSON.stringify(data.detail) : data.detail}</p>` : ''}
         ${data.tip ? `<p style="margin:8px 0 0;font-size:12px;color:#92400e;background:#fef3c7;padding:8px;border-radius:6px;">💡 ${data.tip}</p>` : ''}
       </div>`;
