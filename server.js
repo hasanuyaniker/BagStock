@@ -2,9 +2,32 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ── Otomatik Migration ────────────────────────────────────────────────────
+async function runMigrations() {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
+  });
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS app_settings (
+      id SERIAL PRIMARY KEY, key VARCHAR(100) UNIQUE NOT NULL,
+      value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
+    console.log('✓ Migration tamam');
+  } catch (err) {
+    console.error('Migration hatası (kritik değil):', err.message);
+  } finally {
+    await pool.end();
+  }
+}
 
 // CORS ayarları
 app.use(cors({
@@ -82,6 +105,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Sunucu hatası oluştu' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Stok Takip Sistemi - Port: ${PORT}`);
+// Migration çalıştır, sonra sunucuyu başlat
+runMigrations().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Stok Takip Sistemi - Port: ${PORT}`);
+  });
 });
