@@ -25,15 +25,15 @@ function createTransporter() {
   });
 }
 
-// ── Admin email listesini getir ────────────────────────────────────────────
-async function getAdminEmails() {
+// ── Tüm kullanıcıların email listesini getir ──────────────────────────────
+async function getAllUserEmails() {
   try {
     const result = await pool.query(
-      `SELECT username, email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email <> ''`
+      `SELECT username, email FROM users WHERE email IS NOT NULL AND email <> ''`
     );
     return result.rows;
   } catch (err) {
-    console.error('Admin email listesi hatası:', err.message);
+    console.error('Kullanıcı email listesi hatası:', err.message);
     return [];
   }
 }
@@ -137,9 +137,9 @@ async function sendStockAlert(products) {
     return;
   }
 
-  const admins = await getAdminEmails();
-  if (admins.length === 0) {
-    console.log('Bildirim gönderilecek admin email bulunamadı');
+  const users = await getAllUserEmails();
+  if (users.length === 0) {
+    console.log('Bildirim gönderilecek kullanıcı email adresi bulunamadı');
     return;
   }
 
@@ -150,19 +150,19 @@ async function sendStockAlert(products) {
     ? `🚫 Stok Uyarısı: ${outCount} ürün tükendi`
     : `⚠️ Stok Uyarısı: ${critCount} ürün kritik seviyede`;
 
-  console.log(`Email bildirimi gönderiliyor: ${outCount} tükendi, ${critCount} kritik`);
+  console.log(`Email bildirimi gönderiliyor: ${outCount} tükendi, ${critCount} kritik → ${users.length} kullanıcı`);
 
-  for (const admin of admins) {
+  for (const user of users) {
     try {
       await transporter.sendMail({
         from: `"Stok Takip Sistemi" <${process.env.SMTP_USER}>`,
-        to: admin.email,
+        to: user.email,
         subject,
         html
       });
-      console.log(`✓ Email gönderildi → ${admin.email}`);
+      console.log(`✓ Email gönderildi → ${user.email}`);
     } catch (err) {
-      console.error(`✗ Email hatası (${admin.email}):`, err.message);
+      console.error(`✗ Email hatası (${user.email}):`, err.message);
     }
   }
 }
