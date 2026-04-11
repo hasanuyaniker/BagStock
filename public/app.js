@@ -714,6 +714,7 @@ function renderSalesProducts(list) {
         <div class="sales-product-name">${escHtml(p.name)}</div>
         <div class="sales-product-meta">
           ${p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : ''}
+          ${p.color ? `<span class="type-badge" style="background:#ede9fe;color:#6d28d9;">${escHtml(p.color)}</span>` : ''}
           <span>${escHtml(p.barcode)}</span>
         </div>
       </div>
@@ -763,6 +764,7 @@ function renderSalesHistory() {
 
     html += `<tr>
       <td>${escHtml(s.product_name)}</td>
+      <td>${s.product_color ? `<span class="type-badge" style="background:#ede9fe;color:#6d28d9;">${escHtml(s.product_color)}</span>` : '-'}</td>
       <td>${s.product_type_name ? `<span class="type-badge">${escHtml(s.product_type_name)}</span>` : '-'}</td>
       <td><strong style="color:${isIn ? 'var(--green)' : 'var(--red)'};">${isIn ? '+' : ''}${s.quantity_change}</strong></td>
       <td>${escHtml(s.note || '-')}</td>
@@ -770,7 +772,7 @@ function renderSalesHistory() {
     </tr>`;
   });
 
-  tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#6b7280;">Kayıt yok</td></tr>';
+  tbody.innerHTML = html || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#6b7280;">Kayıt yok</td></tr>';
 
   document.getElementById('salesSummary').innerHTML = `
     <span class="sales-summary-item" style="color:var(--green);">Toplam Giriş: +${totalIn}</span>

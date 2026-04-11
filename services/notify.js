@@ -11,33 +11,23 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
 });
 
-// Aynı ürün için 2 saat içinde tekrar bildirim gönderme
-const alertCooldown = new Map();
-const COOLDOWN_MS = 2 * 60 * 60 * 1000;
-
-function checkCooldown(prefix, product) {
-  const key = prefix + '_' + (product.barcode || product.name);
-  const last = alertCooldown.get(key);
-  const now = Date.now();
-  if (!last || now - last > COOLDOWN_MS) {
-    alertCooldown.set(key, now);
-    return true;
-  }
-  return false;
-}
-
 // ── Email transporter ──────────────────────────────────────────────────────
 function createTransporter() {
   const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    console.log('[Bildirim] SMTP ayarları eksik. Kontrol et: SMTP_HOST, SMTP_USER, SMTP_PASS');
+    console.log('[Bildirim] SMTP ayarları eksik. Railway Variables kontrol et: SMTP_HOST, SMTP_USER, SMTP_PASS');
     return null;
   }
 
+  const port = parseInt(process.env.SMTP_PORT) || 587;
+  const secure = process.env.SMTP_SECURE === 'true';
+
+  console.log(`[Bildirim] Transporter: host=${SMTP_HOST} port=${port} secure=${secure} user=${SMTP_USER}`);
+
   return nodemailer.createTransport({
     host: SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
+    port,
+    secure,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
     tls: { rejectUnauthorized: false }
   });
@@ -139,34 +129,24 @@ function buildEmailHtml(outOfStock, critical) {
 async function sendStockAlert(products) {
   if (!products || products.length === 0) return;
 
-  // Stoğu sıfır olanlar
-  const outOfStock = products
-    .filter(p => p.new_stock === 0)
-    .filter(p => checkCooldown('out', p));
+  // Sadece eşiği yeni geçen ürünleri al (flood önleme)
+  const outOfStock = products.filter(p => p.new_stock === 0 && p.prev_stock > 0);
+  const critical   = products.filter(p =>
+    p.new_stock > 0 &&
+    p.critical_stock > 0 &&
+    p.new_stock <= p.critical_stock &&
+    p.prev_stock > p.critical_stock
+  );
 
-  // Kritik seviyede olanlar (sıfır değil, ama kritik seviye tanımlıysa)
-  const critical = products
-    .filter(p => p.new_stock > 0 && p.critical_stock > 0 && p.new_stock <= p.critical_stock)
-    .filter(p => checkCooldown('crit', p));
-
-  console.log(`[Bildirim] Kontrol: ${products.length} ürün → ${outOfStock.length} tükendi, ${critical.length} kritik`);
+  console.log(`[Bildirim] Kontrol: ${products.length} ürün → ${outOfStock.length} yeni tükendi, ${critical.length} yeni kritik`);
 
   if (outOfStock.length === 0 && critical.length === 0) {
-    console.log('[Bildirim] Gönderilecek ürün yok (stok normal veya cooldown aktif)');
+    console.log('[Bildirim] Bildirim gönderilmedi: stok geçiş yok');
     return;
   }
 
   const transporter = createTransporter();
   if (!transporter) return;
-
-  // Bağlantıyı test et
-  try {
-    await transporter.verify();
-    console.log('[Bildirim] SMTP bağlantısı başarılı');
-  } catch (err) {
-    console.error('[Bildirim] SMTP bağlantı hatası:', err.message);
-    return;
-  }
 
   const users = await getAllUserEmails();
   if (users.length === 0) {
@@ -181,7 +161,7 @@ async function sendStockAlert(products) {
     ? `🚫 Stok Uyarısı: ${outCount} ürün tükendi`
     : `⚠️ Stok Uyarısı: ${critCount} ürün kritik seviyede`;
 
-  console.log(`[Bildirim] ${users.length} kullanıcıya email gönderiliyor...`);
+  console.log(`[Bildirim] ${users.length} kullanıcıya gönderiliyor: "${subject}"`);
 
   for (const user of users) {
     try {
@@ -193,7 +173,7 @@ async function sendStockAlert(products) {
       });
       console.log(`[Bildirim] ✓ Gönderildi → ${user.email}`);
     } catch (err) {
-      console.error(`[Bildirim] ✗ Hata (${user.email}):`, err.message);
+      console.error(`[Bildirim] ✗ Hata (${user.email}): ${err.message}`);
     }
   }
 }
