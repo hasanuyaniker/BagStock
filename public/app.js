@@ -1123,6 +1123,7 @@ function switchSettingsTab(tab) {
   if (tab === 'users') loadUsers();
   if (tab === 'types') loadTypes();
   if (tab === 'media') loadMediaPanel();
+  if (tab === 'email') loadEmailSettings();
 }
 
 async function loadSettings() {
@@ -1452,6 +1453,57 @@ async function testEmail() {
 
   btn.disabled = false;
   btn.textContent = 'Test Emaili Gönder';
+}
+
+// ── Günlük rapor ayarları ─────────────────────────────────────────────────
+async function loadEmailSettings() {
+  const res = await apiFetch('/api/settings/daily-report-time');
+  if (!res) return;
+  const data = await res.json();
+  const input = document.getElementById('dailyReportTime');
+  const status = document.getElementById('dailyReportStatus');
+  if (input) input.value = data.time || '';
+  if (status) status.textContent = data.time
+    ? `✓ Otomatik rapor her gün saat ${data.time}'de gönderilir (İstanbul saati)`
+    : 'Otomatik gönderim kapalı';
+}
+
+async function saveDailyReportTime() {
+  const time = document.getElementById('dailyReportTime').value;
+  if (!time) { showToast('Lütfen bir saat seçin', 'error'); return; }
+  const res = await apiFetch('/api/settings/daily-report-time', { method: 'POST', body: { time } });
+  if (res?.ok) {
+    showToast(`Günlük rapor saati ${time} olarak kaydedildi`);
+    loadEmailSettings();
+  }
+}
+
+async function clearDailyReportTime() {
+  const res = await apiFetch('/api/settings/daily-report-time', { method: 'POST', body: { time: '' } });
+  if (res?.ok) {
+    document.getElementById('dailyReportTime').value = '';
+    document.getElementById('dailyReportStatus').textContent = 'Otomatik gönderim kapalı';
+    showToast('Günlük rapor otomatik gönderimi kapatıldı');
+  }
+}
+
+async function sendDailyReportNow() {
+  const btn = document.getElementById('sendDailyReportBtn');
+  const resultDiv = document.getElementById('dailyReportResult');
+  btn.disabled = true;
+  btn.textContent = 'Gönderiliyor...';
+
+  const res = await apiFetch('/api/settings/send-daily-report', { method: 'POST' });
+  const data = await res?.json();
+
+  if (data?.ok) {
+    resultDiv.innerHTML = `<div style="background:#dcfce7;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:13px;color:#166534;">✅ ${data.message}</div>`;
+  } else {
+    resultDiv.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;font-size:13px;color:#991b1b;">❌ ${data?.error || 'Hata oluştu'}</div>`;
+  }
+  resultDiv.style.display = 'block';
+  btn.disabled = false;
+  btn.textContent = 'Şimdi Gönder';
 }
 
 // ==================== SALES REPORT ====================

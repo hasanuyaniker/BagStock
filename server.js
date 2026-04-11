@@ -105,6 +105,39 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Sunucu hatası oluştu' });
 });
 
+// ── Günlük rapor zamanlayıcı ──────────────────────────────────────────────
+function startDailyReportScheduler(appPool) {
+  const { sendDailySalesReport, getIstanbulDateTime } = require('./services/notify');
+
+  setInterval(async () => {
+    try {
+      const { date, hhmm } = getIstanbulDateTime();
+
+      // Ayarlanan saati DB'den al
+      const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
+      if (!timeRow.rows.length || !timeRow.rows[0].value) return;
+      if (timeRow.rows[0].value !== hhmm) return;
+
+      // Bugün zaten gönderildi mi?
+      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent'");
+      if (sentRow.rows.length && sentRow.rows[0].value === date) return;
+
+      // Gönderildi olarak işaretle
+      await appPool.query(
+        `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent', $1)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`, [date]
+      );
+
+      console.log(`[Günlük Rapor] Saat ${hhmm} — rapor gönderiliyor...`);
+      sendDailySalesReport().catch(err => console.error('[Günlük Rapor] Hata:', err.message));
+    } catch (err) {
+      console.error('[Günlük Rapor Zamanlayıcı] Hata:', err.message);
+    }
+  }, 60 * 1000); // Her dakika kontrol
+
+  console.log('✓ Günlük rapor zamanlayıcı başlatıldı');
+}
+
 // Migration çalıştır, sonra sunucuyu başlat
 runMigrations().then(() => {
   // Email bildirim durum kontrolü
@@ -113,6 +146,13 @@ runMigrations().then(() => {
   console.log(`  RESEND_API_KEY: ${resendKey ? '✓ MEVCUT' : '✗ EKSİK — bildirimler çalışmaz'}`);
   console.log(`  NOTIFY_FROM: ${process.env.NOTIFY_FROM || 'onboarding@resend.dev (varsayılan)'}`);
   console.log('─────────────────────────────────────────────');
+
+  const appPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
+  });
+
+  startDailyReportScheduler(appPool);
 
   app.listen(PORT, () => {
     console.log(`Stok Takip Sistemi - Port: ${PORT}`);

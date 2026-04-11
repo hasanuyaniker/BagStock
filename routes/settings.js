@@ -3,7 +3,7 @@ const router = express.Router();
 const { Pool } = require('pg');
 const multer = require('multer');
 const authMiddleware = require('../middleware/auth');
-const { sendViaResend, getAllUserEmails } = require('../services/notify');
+const { sendViaResend, getRecipients, sendDailySalesReport } = require('../services/notify');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -52,6 +52,47 @@ router.post('/logo', authMiddleware, upload.single('logo'), async (req, res) => 
   }
 });
 
+// GET /api/settings/daily-report-time
+router.get('/daily-report-time', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
+    res.json({ time: result.rows[0]?.value || '' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/settings/daily-report-time
+router.post('/daily-report-time', authMiddleware, async (req, res) => {
+  try {
+    const { time } = req.body; // "20:00"
+    if (time && !/^\d{2}:\d{2}$/.test(time)) {
+      return res.status(400).json({ error: 'Geçersiz saat formatı (HH:MM olmalı)' });
+    }
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ('daily_report_time', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [time || null]
+    );
+    res.json({ ok: true, time });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/settings/send-daily-report — Manuel tetikleme
+router.post('/send-daily-report', authMiddleware, async (req, res) => {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(400).json({ ok: false, error: 'RESEND_API_KEY eksik' });
+    }
+    sendDailySalesReport().catch(err => console.error('[Manuel Rapor]', err.message));
+    res.json({ ok: true, message: 'Günlük rapor gönderimi başlatıldı' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // POST /api/settings/test-email — Resend HTTP API ile test emaili gönder
 router.post('/test-email', authMiddleware, async (req, res) => {
   try {
@@ -70,7 +111,7 @@ router.post('/test-email', authMiddleware, async (req, res) => {
     if (process.env.NOTIFY_TO) {
       recipients = [{ email: process.env.NOTIFY_TO, username: 'admin' }];
     } else {
-      recipients = await getAllUserEmails();
+      recipients = await getRecipients();
       if (recipients.length === 0) {
         return res.status(400).json({
           ok: false,

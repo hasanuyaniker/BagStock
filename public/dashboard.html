@@ -311,13 +311,31 @@
 
           <!-- Email Test Panel -->
           <div class="settings-panel" id="panel-email">
-            <div class="settings-card" style="max-width:500px;">
-              <h3 style="font-size:15px;margin-bottom:8px;">📧 Email Bildirim Testi</h3>
-              <p style="font-size:13px;color:#6b7280;margin-bottom:20px;">
-                Bu butona basınca sistemdeki email adresi olan tüm kullanıcılara test emaili gönderilir. SMTP ayarlarının doğru çalışıp çalışmadığını anlarsınız.
+            <!-- Stok Uyarı Testi -->
+            <div class="settings-card" style="max-width:500px;margin-bottom:16px;">
+              <h3 style="font-size:15px;margin-bottom:8px;">📧 Stok Uyarı Email Testi</h3>
+              <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">
+                Email adresli tüm kullanıcılara test emaili gönderir. Bildirimlerin çalışıp çalışmadığını kontrol eder.
               </p>
               <button class="btn btn-primary" onclick="testEmail()" id="testEmailBtn">Test Emaili Gönder</button>
               <div id="testEmailResult" style="margin-top:16px;display:none;"></div>
+            </div>
+
+            <!-- Günlük Rapor Ayarları -->
+            <div class="settings-card" style="max-width:500px;">
+              <h3 style="font-size:15px;margin-bottom:8px;">📊 Günlük Satış Raporu</h3>
+              <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">
+                Her gün belirlenen saatte o günkü tüm satışları email ile gönderir. Boş bırakılırsa otomatik gönderim kapalıdır.
+              </p>
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                <label style="font-size:13px;font-weight:500;white-space:nowrap;">Gönderim Saati</label>
+                <input type="time" id="dailyReportTime" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;">
+                <button class="btn btn-primary btn-sm" onclick="saveDailyReportTime()">Kaydet</button>
+                <button class="btn btn-secondary btn-sm" onclick="clearDailyReportTime()">Kapat</button>
+              </div>
+              <p style="font-size:12px;color:#9ca3af;margin-bottom:16px;" id="dailyReportStatus"></p>
+              <button class="btn btn-success btn-sm" onclick="sendDailyReportNow()" id="sendDailyReportBtn">Şimdi Gönder</button>
+              <div id="dailyReportResult" style="margin-top:12px;display:none;"></div>
             </div>
           </div>
 
