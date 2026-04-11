@@ -534,6 +534,8 @@ function openProductModal(product = null) {
     document.getElementById('pTYComm').value = product.trendyol_commission || '';
     document.getElementById('pHBPrice').value = product.hepsiburada_price || '';
     document.getElementById('pHBComm').value = product.hepsiburada_commission || '';
+    // Mevcut görsel URL'sini sakla — kaydetme sırasında kullanılır
+    document.getElementById('productCurrentImageUrl').value = product.product_image_url || '';
     // Image preview
     const preview = document.getElementById('productImagePreview');
     if (product.product_image_url) {
@@ -547,6 +549,7 @@ function openProductModal(product = null) {
     document.getElementById('pStock').value = 0;
     document.getElementById('pCritical').value = 5;
     document.getElementById('pType').value = '';
+    document.getElementById('productCurrentImageUrl').value = '';
     document.getElementById('productImagePreview').style.display = 'none';
   }
 
@@ -562,6 +565,11 @@ function editProduct(id) {
 
 async function saveProduct() {
   const editId = document.getElementById('productEditId').value;
+  const fileInput = document.getElementById('productImageInput');
+  const hasNewImage = fileInput.files.length > 0;
+  // Düzenlemede yeni görsel seçilmediyse mevcut URL'yi koru
+  const existingImageUrl = document.getElementById('productCurrentImageUrl').value || null;
+
   const data = {
     name: document.getElementById('pName').value.trim(),
     barcode: document.getElementById('pBarcode').value.trim(),
@@ -574,7 +582,9 @@ async function saveProduct() {
     trendyol_price: parseFloat(document.getElementById('pTYPrice').value) || null,
     trendyol_commission: parseFloat(document.getElementById('pTYComm').value) || null,
     hepsiburada_price: parseFloat(document.getElementById('pHBPrice').value) || null,
-    hepsiburada_commission: parseFloat(document.getElementById('pHBComm').value) || null
+    hepsiburada_commission: parseFloat(document.getElementById('pHBComm').value) || null,
+    // Mevcut görsel URL'sini koru — yeni görsel yüklendiyse upload endpoint ayrıca günceller
+    product_image_url: existingImageUrl
   };
 
   if (!data.name || !data.barcode) {
@@ -591,8 +601,7 @@ async function saveProduct() {
     if (!res.ok) { showToast(result.error || 'Hata oluştu', 'error'); return; }
 
     // Upload image if selected
-    const fileInput = document.getElementById('productImageInput');
-    if (fileInput.files.length > 0) {
+    if (hasNewImage) {
       const productId = editId || result.id;
       const formData = new FormData();
       formData.append('image', fileInput.files[0]);
