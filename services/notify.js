@@ -1,7 +1,7 @@
 /**
- * Stok Takip Sistemi — Bildirim Servisi
- * Email: nodemailer (SMTP)
- * SMS:   Twilio (isteğe bağlı)
+ * Stok Takip Sistemi — Email Bildirim Servisi
+ * Kritik stok ve tükenen ürünlerde admin kullanıcılara email gönderir.
+ * Gerekli Railway env değişkenleri: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
  */
 const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
@@ -25,34 +25,15 @@ function createTransporter() {
   });
 }
 
-// ── SMS (Twilio) ───────────────────────────────────────────────────────────
-async function sendSMS(to, message) {
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM) return false;
-
-  try {
-    // Twilio yüklüyse kullan
-    const twilio = require('twilio');
-    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-    await client.messages.create({ body: message, from: TWILIO_FROM, to });
-    console.log(`SMS gönderildi: ${to}`);
-    return true;
-  } catch (err) {
-    console.error(`SMS hatası (${to}):`, err.message);
-    return false;
-  }
-}
-
-// ── Admin kullanıcılarının iletişim bilgilerini getir ─────────────────────
-async function getAdminContacts() {
+// ── Admin email listesini getir ────────────────────────────────────────────
+async function getAdminEmails() {
   try {
     const result = await pool.query(
-      `SELECT username, email, phone FROM users
-       WHERE role = 'admin' AND (email IS NOT NULL OR phone IS NOT NULL)`
+      `SELECT username, email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email <> ''`
     );
     return result.rows;
   } catch (err) {
-    console.error('Admin iletişim hatası:', err.message);
+    console.error('Admin email listesi hatası:', err.message);
     return [];
   }
 }
@@ -140,56 +121,48 @@ function buildEmailHtml(outOfStock, critical) {
 async function sendStockAlert(products) {
   if (!products || products.length === 0) return;
 
-  // Sadece eşiği geçen geçişler (flood önleme)
+  // Sadece eşiği yeni geçen ürünleri al (flood önleme)
   const outOfStock = products.filter(p => p.new_stock === 0 && p.prev_stock > 0);
-  const critical   = products.filter(p => p.new_stock > 0 && p.new_stock <= p.critical_stock && p.prev_stock > p.critical_stock);
+  const critical   = products.filter(p =>
+    p.new_stock > 0 &&
+    p.new_stock <= p.critical_stock &&
+    p.prev_stock > p.critical_stock
+  );
 
   if (outOfStock.length === 0 && critical.length === 0) return;
 
-  console.log(`Bildirim tetiklendi: ${outOfStock.length} tükendi, ${critical.length} kritik`);
-
-  const admins = await getAdminContacts();
-  if (admins.length === 0) {
-    console.log('Bildirim gönderilecek admin bulunamadı (email/telefon yok)');
+  const transporter = createTransporter();
+  if (!transporter) {
+    console.log('Email bildirimi atlandı: SMTP ayarları eksik (SMTP_HOST, SMTP_USER, SMTP_PASS)');
     return;
   }
 
-  // ── Email ──
-  const transporter = createTransporter();
-  if (transporter) {
-    const html = buildEmailHtml(outOfStock, critical);
-    const outCount = outOfStock.length;
-    const critCount = critical.length;
-    const subject = outCount > 0
-      ? `🚫 Stok Uyarısı: ${outCount} ürün tükendi`
-      : `⚠️ Stok Uyarısı: ${critCount} ürün kritik seviyede`;
-
-    for (const admin of admins) {
-      if (!admin.email) continue;
-      try {
-        await transporter.sendMail({
-          from: `"Stok Takip Sistemi" <${process.env.SMTP_USER}>`,
-          to: admin.email,
-          subject,
-          html
-        });
-        console.log(`Email gönderildi → ${admin.email}`);
-      } catch (err) {
-        console.error(`Email hatası (${admin.email}):`, err.message);
-      }
-    }
+  const admins = await getAdminEmails();
+  if (admins.length === 0) {
+    console.log('Bildirim gönderilecek admin email bulunamadı');
+    return;
   }
 
-  // ── SMS ──
-  if (process.env.TWILIO_ACCOUNT_SID) {
-    let smsLines = ['⚠️ STOK UYARISI - Stok Takip Sistemi'];
-    outOfStock.forEach(p => smsLines.push(`🚫 TÜKENDI: ${p.name}${p.color ? ' (' + p.color + ')' : ''}`));
-    critical.forEach(p => smsLines.push(`⚠️ KRİTİK: ${p.name}${p.color ? ' (' + p.color + ')' : ''} — ${p.new_stock}/${p.critical_stock}`));
-    const smsText = smsLines.join('\n');
+  const html = buildEmailHtml(outOfStock, critical);
+  const outCount = outOfStock.length;
+  const critCount = critical.length;
+  const subject = outCount > 0
+    ? `🚫 Stok Uyarısı: ${outCount} ürün tükendi`
+    : `⚠️ Stok Uyarısı: ${critCount} ürün kritik seviyede`;
 
-    for (const admin of admins) {
-      if (!admin.phone) continue;
-      await sendSMS(admin.phone, smsText);
+  console.log(`Email bildirimi gönderiliyor: ${outCount} tükendi, ${critCount} kritik`);
+
+  for (const admin of admins) {
+    try {
+      await transporter.sendMail({
+        from: `"Stok Takip Sistemi" <${process.env.SMTP_USER}>`,
+        to: admin.email,
+        subject,
+        html
+      });
+      console.log(`✓ Email gönderildi → ${admin.email}`);
+    } catch (err) {
+      console.error(`✗ Email hatası (${admin.email}):`, err.message);
     }
   }
 }
