@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
 
     // Mevcut stoğu al (ürün bilgileriyle birlikte)
     const product = await client.query(
-      'SELECT stock_quantity, name, barcode, color, critical_stock FROM products WHERE id = $1 FOR UPDATE',
+      'SELECT stock_quantity, name, barcode, color, critical_stock, product_image_url FROM products WHERE id = $1 FOR UPDATE',
       [product_id]
     );
     if (product.rows.length === 0) {
@@ -61,6 +61,7 @@ router.post('/', async (req, res) => {
         barcode: p.barcode,
         color: p.color,
         critical_stock: p.critical_stock,
+        product_image_url: p.product_image_url,
         prev_stock: currentStock,
         new_stock: newStock
       }]).catch(err => console.error('Bildirim hatası:', err.message));

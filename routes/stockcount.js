@@ -168,7 +168,7 @@ router.post('/sessions/:id/apply', async (req, res) => {
     // Sayım öncesi stok ve ürün bilgilerini al (bildirim için)
     const beforeItems = await client.query(
       `SELECT sci.product_id, sci.system_quantity AS prev_stock, sci.counted_quantity AS new_stock,
-              p.name, p.barcode, p.color, p.critical_stock
+              p.name, p.barcode, p.color, p.critical_stock, p.product_image_url
        FROM stock_count_items sci
        JOIN products p ON p.id = sci.product_id
        WHERE sci.session_id = $1`,
@@ -213,6 +213,7 @@ router.post('/sessions/:id/apply', async (req, res) => {
         barcode: item.barcode,
         color: item.color,
         critical_stock: item.critical_stock,
+        product_image_url: item.product_image_url,
         prev_stock: parseInt(item.prev_stock),
         new_stock: parseInt(item.new_stock)
       }))).catch(err => console.error('Sayım bildirim hatası:', err.message));
