@@ -1,9 +1,8 @@
 /**
  * Stok Takip Sistemi — Email Bildirim Servisi
- * Kritik stok ve tükenen ürünlerde tüm kullanıcılara email gönderir.
- * Gerekli Railway env değişkenleri: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+ * Resend HTTP API kullanır (SMTP port engeli yok)
+ * Gerekli Railway env: RESEND_API_KEY
  */
-const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
 
 const pool = new Pool({
@@ -11,29 +10,25 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
 });
 
-// ── Email transporter ──────────────────────────────────────────────────────
-function createTransporter() {
-  const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    console.log('[Bildirim] SMTP ayarları eksik. Railway Variables kontrol et: SMTP_HOST, SMTP_USER, SMTP_PASS');
-    return null;
-  }
+// ── Resend HTTP API ile email gönder ──────────────────────────────────────
+async function sendViaResend(to, subject, html) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error('RESEND_API_KEY eksik');
 
-  const port = parseInt(process.env.SMTP_PORT) || 587;
-  const secure = process.env.SMTP_SECURE === 'true';
+  const from = process.env.NOTIFY_FROM || 'onboarding@resend.dev';
 
-  console.log(`[Bildirim] Transporter: host=${SMTP_HOST} port=${port} secure=${secure} user=${SMTP_USER}`);
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port,
-    secure,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-    tls: { rejectUnauthorized: false },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ from, to, subject, html })
   });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || data.name || JSON.stringify(data));
+  return data;
 }
 
 // ── Tüm kullanıcıların email listesini getir ──────────────────────────────
@@ -65,25 +60,21 @@ function buildEmailHtml(outOfStock, critical) {
     html += `
       <h3 style="color:#ef4444;margin-top:0;">🚫 Tükenen Ürünler (${outOfStock.length} adet)</h3>
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
-        <thead>
-          <tr style="background:#fef2f2;">
-            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Ürün Adı</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Renk</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Barkod</th>
-            <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fee2e2;">Durum</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:#fef2f2;">
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Ürün Adı</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Renk</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fee2e2;">Barkod</th>
+          <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fee2e2;">Durum</th>
+        </tr></thead>
         <tbody>`;
     outOfStock.forEach(p => {
-      html += `
-          <tr>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">${p.name}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">${p.color || '-'}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">${p.barcode || '-'}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
-              <span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">TÜKENDİ</span>
-            </td>
-          </tr>`;
+      html += `<tr>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">${p.name}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">${p.color || '-'}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">${p.barcode || '-'}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
+          <span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">TÜKENDİ</span>
+        </td></tr>`;
     });
     html += `</tbody></table>`;
   }
@@ -92,27 +83,24 @@ function buildEmailHtml(outOfStock, critical) {
     html += `
       <h3 style="color:#d97706;margin-top:${outOfStock.length > 0 ? '16px' : '0'};">⚠️ Kritik Stok Ürünler (${critical.length} adet)</h3>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead>
-          <tr style="background:#fffbeb;">
-            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Ürün Adı</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Renk</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Barkod</th>
-            <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fde68a;">Mevcut Stok</th>
-            <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fde68a;">Kritik Seviye</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:#fffbeb;">
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Ürün Adı</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Renk</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #fde68a;">Barkod</th>
+          <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fde68a;">Mevcut Stok</th>
+          <th style="padding:10px 12px;text-align:center;border-bottom:2px solid #fde68a;">Kritik Seviye</th>
+        </tr></thead>
         <tbody>`;
     critical.forEach(p => {
-      html += `
-          <tr>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">${p.name}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">${p.color || '-'}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">${p.barcode || '-'}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
-              <strong style="color:#d97706;">${p.new_stock}</strong>
-            </td>
-            <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">${p.critical_stock}</td>
-          </tr>`;
+      html += `<tr>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-weight:600;">${p.name}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;">${p.color || '-'}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;">${p.barcode || '-'}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
+          <strong style="color:#d97706;">${p.new_stock}</strong>
+        </td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">${p.critical_stock}</td>
+      </tr>`;
     });
     html += `</tbody></table>`;
   }
@@ -128,11 +116,9 @@ function buildEmailHtml(outOfStock, critical) {
 }
 
 // ── Ana fonksiyon: stok uyarısı gönder ────────────────────────────────────
-// products: [{ name, barcode, color, new_stock, critical_stock, prev_stock }]
 async function sendStockAlert(products) {
   if (!products || products.length === 0) return;
 
-  // Sadece eşiği yeni geçen ürünleri al (flood önleme)
   const outOfStock = products.filter(p => p.new_stock === 0 && p.prev_stock > 0);
   const critical   = products.filter(p =>
     p.new_stock > 0 &&
@@ -141,39 +127,28 @@ async function sendStockAlert(products) {
     p.prev_stock > p.critical_stock
   );
 
-  console.log(`[Bildirim] Kontrol: ${products.length} ürün → ${outOfStock.length} yeni tükendi, ${critical.length} yeni kritik`);
+  console.log(`[Bildirim] ${products.length} ürün → ${outOfStock.length} tükendi, ${critical.length} kritik`);
+  if (outOfStock.length === 0 && critical.length === 0) return;
 
-  if (outOfStock.length === 0 && critical.length === 0) {
-    console.log('[Bildirim] Bildirim gönderilmedi: stok geçiş yok');
+  if (!process.env.RESEND_API_KEY) {
+    console.log('[Bildirim] RESEND_API_KEY eksik, bildirim atlandı');
     return;
   }
 
-  const transporter = createTransporter();
-  if (!transporter) return;
-
   const users = await getAllUserEmails();
   if (users.length === 0) {
-    console.log('[Bildirim] Kayıtlı email adresi olan kullanıcı yok');
+    console.log('[Bildirim] Email adresi olan kullanıcı yok');
     return;
   }
 
   const html = buildEmailHtml(outOfStock, critical);
-  const outCount = outOfStock.length;
-  const critCount = critical.length;
-  const subject = outCount > 0
-    ? `🚫 Stok Uyarısı: ${outCount} ürün tükendi`
-    : `⚠️ Stok Uyarısı: ${critCount} ürün kritik seviyede`;
-
-  console.log(`[Bildirim] ${users.length} kullanıcıya gönderiliyor: "${subject}"`);
+  const subject = outOfStock.length > 0
+    ? `🚫 Stok Uyarısı: ${outOfStock.length} ürün tükendi`
+    : `⚠️ Stok Uyarısı: ${critical.length} ürün kritik seviyede`;
 
   for (const user of users) {
     try {
-      await transporter.sendMail({
-        from: `"Stok Takip Sistemi" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
-        to: user.email,
-        subject,
-        html
-      });
+      await sendViaResend(user.email, subject, html);
       console.log(`[Bildirim] ✓ Gönderildi → ${user.email}`);
     } catch (err) {
       console.error(`[Bildirim] ✗ Hata (${user.email}): ${err.message}`);
@@ -181,4 +156,4 @@ async function sendStockAlert(products) {
   }
 }
 
-module.exports = { sendStockAlert, createTransporter, getAllUserEmails };
+module.exports = { sendStockAlert, sendViaResend, getAllUserEmails };

@@ -107,16 +107,11 @@ app.use((err, req, res, next) => {
 
 // Migration çalıştır, sonra sunucuyu başlat
 runMigrations().then(() => {
-  // SMTP durum kontrolü
-  const smtp = {
-    SMTP_HOST:   process.env.SMTP_HOST   || '✗ EKSİK',
-    SMTP_PORT:   process.env.SMTP_PORT   || '587 (varsayılan)',
-    SMTP_USER:   process.env.SMTP_USER   || '✗ EKSİK',
-    SMTP_PASS:   process.env.SMTP_PASS   ? '✓ MEVCUT' : '✗ EKSİK',
-    SMTP_SECURE: process.env.SMTP_SECURE || 'false (varsayılan)',
-  };
-  console.log('── SMTP Durumu ──────────────────────────────');
-  Object.entries(smtp).forEach(([k, v]) => console.log(`  ${k}: ${v}`));
+  // Email bildirim durum kontrolü
+  const resendKey = process.env.RESEND_API_KEY;
+  console.log('── Email Bildirim Durumu ────────────────────');
+  console.log(`  RESEND_API_KEY: ${resendKey ? '✓ MEVCUT' : '✗ EKSİK — bildirimler çalışmaz'}`);
+  console.log(`  NOTIFY_FROM: ${process.env.NOTIFY_FROM || 'onboarding@resend.dev (varsayılan)'}`);
   console.log('─────────────────────────────────────────────');
 
   app.listen(PORT, () => {
