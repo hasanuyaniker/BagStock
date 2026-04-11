@@ -166,7 +166,7 @@ async function sendStockAlert(products) {
   for (const user of users) {
     try {
       await transporter.sendMail({
-        from: `"Stok Takip Sistemi" <${process.env.SMTP_USER}>`,
+        from: `"Stok Takip Sistemi" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
         to: user.email,
         subject,
         html

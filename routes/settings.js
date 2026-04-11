@@ -105,7 +105,7 @@ router.post('/test-email', authMiddleware, async (req, res) => {
   for (const user of users) {
     try {
       await transporter.sendMail({
-        from: `"Stok Takip Sistemi" <${SMTP_USER}>`,
+        from: `"Stok Takip Sistemi" <${process.env.SMTP_FROM || SMTP_USER}>`,
         to: user.email,
         subject: '✅ Stok Takip Sistemi — Email Test',
         html: `
