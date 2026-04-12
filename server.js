@@ -110,28 +110,34 @@ app.use((err, req, res, next) => {
 function startDailyReportScheduler(appPool) {
   const { sendDailySalesReport, getIstanbulDateTime } = require('./services/notify');
 
-  setInterval(async () => {
+  async function checkAndSend() {
     try {
       const { date, hhmm } = getIstanbulDateTime();
 
       // Ayarlanan saati DB'den al
       const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
-      const reportTime = timeRow.rows[0]?.value;
+      const reportTime = timeRow.rows[0]?.value || null;
 
-      // Saat ayarlı değilse atla
+      // Saat ayarlı değilse atla (log yok — her dakika çalışır)
       if (!reportTime) return;
+
+      // Bugün zaten gönderilmiş mi?
+      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
+      const lastSentDate = sentRow.rows[0]?.value || null;
+
+      console.log(`[Zamanlayıcı] Şu an: ${date} ${hhmm} | Ayarlı: ${reportTime} | Son gönderim: ${lastSentDate || 'hiç'}`);
+
+      if (lastSentDate === date) {
+        // Bugün zaten gönderildi — sessizce atla (log sadece debug için)
+        return;
+      }
 
       // Ayarlanan saat henüz gelmemiş — atla
       if (hhmm < reportTime) return;
 
-      // Bugün zaten gönderilmiş mi? (tarih bazlı kontrol — saat bağımsız)
-      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
-      const lastSentDate = sentRow.rows[0]?.value || null;
-      if (lastSentDate === date) return; // Bugün zaten gönderildi
+      console.log(`[Günlük Rapor] Saat ${hhmm} >= ${reportTime}, gönderiliyor...`);
 
-      console.log(`[Günlük Rapor] ${date} ${hhmm} — rapor gönderiliyor (ayarlanan saat: ${reportTime})...`);
-
-      // Tarih'i hemen kaydet (duplicate önleme) — başarısız olursa ertesi gün tekrar gönderilir
+      // Tarihi kaydet (duplicate önleme)
       await appPool.query(
         `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_date', $1)
          ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
@@ -139,11 +145,19 @@ function startDailyReportScheduler(appPool) {
       );
 
       sendDailySalesReport()
-        .catch(err => console.error('[Günlük Rapor] Hata:', err.message));
+        .then(() => console.log(`[Günlük Rapor] ✓ ${date} raporu gönderildi`))
+        .catch(err => console.error('[Günlük Rapor] ✗ Hata:', err.message));
+
     } catch (err) {
       console.error('[Günlük Rapor Zamanlayıcı] Hata:', err.message);
     }
-  }, 60 * 1000); // Her dakika kontrol
+  }
+
+  // Sunucu başlangıcında hemen bir kez kontrol et (deploy sonrası kaçırılan saatleri yakala)
+  setTimeout(checkAndSend, 5000);
+
+  // Sonra her dakika kontrol et
+  setInterval(checkAndSend, 60 * 1000);
 
   console.log('✓ Günlük rapor zamanlayıcı başlatıldı');
 }
