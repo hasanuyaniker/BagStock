@@ -111,21 +111,24 @@ function startDailyReportScheduler(appPool) {
 
   setInterval(async () => {
     try {
-      const { date, hhmm } = getIstanbulDateTime();
+      const { hhmm } = getIstanbulDateTime();
 
       // Ayarlanan saati DB'den al
       const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
-      if (!timeRow.rows.length || !timeRow.rows[0].value) return;
-      if (timeRow.rows[0].value !== hhmm) return;
+      const reportTime = timeRow.rows[0]?.value;
+      if (!reportTime || reportTime !== hhmm) return;
 
-      // Bugün zaten gönderildi mi?
-      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent'");
-      if (sentRow.rows.length && sentRow.rows[0].value === date) return;
+      // Son gönderim zamanını kontrol et (2 saat içinde tekrar gönderme)
+      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_at'");
+      const lastSentAt = sentRow.rows[0]?.value ? new Date(sentRow.rows[0].value) : null;
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      if (lastSentAt && lastSentAt > twoHoursAgo) return; // Zaten gönderildi
 
       // Gönderildi olarak işaretle
       await appPool.query(
-        `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent', $1)
-         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`, [date]
+        `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_at', $1)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [new Date().toISOString()]
       );
 
       console.log(`[Günlük Rapor] Saat ${hhmm} — rapor gönderiliyor...`);

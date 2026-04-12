@@ -52,6 +52,22 @@ router.post('/logo', authMiddleware, upload.single('logo'), async (req, res) => 
   }
 });
 
+// GET /api/settings/logo-img — logoyu doğrudan image olarak serve et (email için, auth gerekmez)
+router.get('/logo-img', async (req, res) => {
+  try {
+    const result = await pool.query("SELECT value FROM app_settings WHERE key = 'logo'");
+    const dataUrl = result.rows[0]?.value;
+    if (!dataUrl || !dataUrl.startsWith('data:')) return res.status(404).end();
+    const [meta, base64] = dataUrl.split(',');
+    const mimeType = meta.match(/data:([^;]+)/)[1];
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(Buffer.from(base64, 'base64'));
+  } catch (err) {
+    res.status(500).end();
+  }
+});
+
 // GET /api/settings/daily-report-time
 router.get('/daily-report-time', authMiddleware, async (req, res) => {
   try {

@@ -64,18 +64,19 @@ async function getRecipients() {
   }
 }
 
-// ── Logoyu DB'den al ─────────────────────────────────────────────────────
-async function getLogo() {
+// ── Logo URL'si (email istemcileri data: URI desteklemez, HTTP URL gerekir) ──
+async function getLogoUrl() {
   try {
     const result = await pool.query("SELECT value FROM app_settings WHERE key = 'logo'");
-    return result.rows[0]?.value || null;
+    if (!result.rows[0]?.value) return null;
+    return `${getBaseUrl()}/api/settings/logo-img`;
   } catch { return null; }
 }
 
 // ── Email başlığı (logo ile) ──────────────────────────────────────────────
-function emailHeader(logo, title, subtitle) {
-  const logoHtml = logo
-    ? `<img src="${logo}" style="height:40px;max-width:120px;object-fit:contain;margin-bottom:8px;display:block;">`
+function emailHeader(logoUrl, title, subtitle) {
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" style="height:44px;max-width:140px;object-fit:contain;margin-bottom:10px;display:block;">`
     : '';
   return `
   <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:620px;margin:0 auto;">
@@ -106,9 +107,9 @@ function productImg(url) {
 
 // ── Stok uyarı emaili HTML ────────────────────────────────────────────────
 async function buildStockAlertHtml(outOfStock, critical) {
-  const logo = await getLogo();
+  const logoUrl = await getLogoUrl();
   const now = new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
-  let html = emailHeader(logo, '📦 Stok Uyarısı', now);
+  let html = emailHeader(logoUrl, '📦 Stok Uyarısı', now);
 
   if (outOfStock.length > 0) {
     html += `<h3 style="color:#ef4444;margin-top:0;">🚫 Tükenen Ürünler (${outOfStock.length} adet)</h3>
@@ -162,13 +163,13 @@ async function buildStockAlertHtml(outOfStock, critical) {
 
 // ── Günlük satış raporu emaili HTML ──────────────────────────────────────
 async function buildDailySalesHtml(sales, date) {
-  const logo = await getLogo();
+  const logoUrl = await getLogoUrl();
   const dateStr = new Date(date + 'T00:00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
 
   let totalOut = 0, totalIn = 0;
   sales.forEach(s => { totalOut += Number(s.sold || 0); totalIn += Number(s.received || 0); });
 
-  let html = emailHeader(logo, '📊 Günlük Satış Raporu', dateStr);
+  let html = emailHeader(logoUrl, '📊 Günlük Satış Raporu', dateStr);
 
   if (sales.length === 0) {
     html += `<p style="color:#6b7280;text-align:center;padding:20px;">Bugün kayıt yok.</p>`;
