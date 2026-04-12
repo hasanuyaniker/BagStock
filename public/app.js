@@ -14,6 +14,7 @@ const DEFAULT_COLUMNS = [
   { key: 'name', label: 'Ürün Adı', visible: true, width: 180 },
   { key: 'color', label: 'Renk', visible: true, width: 90 },
   { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 100 },
+  { key: 'material_name', label: 'Materyal', visible: true, width: 100 },
   { key: 'barcode', label: 'Barkod', visible: true, width: 120 },
   { key: 'supplier_name', label: 'Tedarikçi', visible: true, width: 120 },
   { key: 'stock_quantity', label: 'Stok', visible: true, width: 70 },
@@ -392,6 +393,9 @@ function renderInventoryTable() {
         case 'name': rows += escHtml(p.name); break;
         case 'product_type_name':
           rows += p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : '-';
+          break;
+        case 'material_name':
+          rows += p.material_name ? `<span class="type-badge" style="background:#e0f2fe;color:#0369a1;">${escHtml(p.material_name)}</span>` : '-';
           break;
         case 'barcode': rows += escHtml(p.barcode); break;
         case 'color': rows += p.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(p.color)}</span>` : '-'; break;
