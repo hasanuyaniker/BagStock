@@ -42,6 +42,30 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /api/product-types/:id
+router.put('/:id', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Tip adı zorunludur' });
+    }
+    const result = await pool.query(
+      'UPDATE product_types SET name = $1 WHERE id = $2 RETURNING *',
+      [name.trim(), req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Tip bulunamadı' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(400).json({ error: 'Bu tip adı zaten mevcut' });
+    }
+    console.error('Tip güncelleme hatası:', err);
+    res.status(500).json({ error: 'Tip güncellenemedi' });
+  }
+});
+
 // DELETE /api/product-types/:id
 router.delete('/:id', async (req, res) => {
   try {

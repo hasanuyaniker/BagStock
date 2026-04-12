@@ -30,6 +30,11 @@
     <!-- ALERT BAR -->
     <div class="alert-bar" id="alertBar"></div>
 
+    <!-- LIGHTBOX -->
+    <div id="imageLightbox" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out;">
+      <img id="lightboxImg" src="" style="max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.6);object-fit:contain;">
+    </div>
+
     <div class="main-area">
       <!-- SIDEBAR -->
       <div class="sidebar" id="sidebar">
@@ -73,7 +78,7 @@
               <div class="kpi-value green" id="kpiTotalValue">₺0</div>
             </div>
             <div class="kpi-card blue">
-              <div class="kpi-label">Toplam SKU</div>
+              <div class="kpi-label">Toplam Model Sayısı</div>
               <div class="kpi-value" id="kpiTotalSku">0</div>
             </div>
             <div class="kpi-card red">

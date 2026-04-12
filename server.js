@@ -22,6 +22,7 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
     await pool.query(`ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT`);
+    await pool.query(`ALTER TABLE stock_count_items ALTER COLUMN product_image_snapshot TYPE TEXT`);
     // Eski ISO timestamp anahtarını temizle (artık kullanılmıyor)
     await pool.query(`DELETE FROM app_settings WHERE key = 'daily_report_sent_at'`);
     console.log('✓ Migration tamam');
@@ -127,10 +128,12 @@ function startDailyReportScheduler(appPool) {
       // Ayarlanan saat henüz gelmemiş
       if (hhmm < reportTime) return;
 
-      // Bugün zaten başarıyla gönderilmiş mi?
-      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
-      const lastSentDate = sentRow.rows[0]?.value || null;
-      if (lastSentDate === date) return; // bugün zaten gönderildi
+      // Bu tarih+saat kombinasyonu için daha önce gönderilmiş mi?
+      // Anahtar: "2026-04-12|20:00" — saat değişirse veya yeni gün gelirse tekrar gönderilir
+      const sentKey = `${date}|${reportTime}`;
+      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_key'");
+      const lastSentKey = sentRow.rows[0]?.value || null;
+      if (lastSentKey === sentKey) return; // bu zamanlama için zaten gönderildi
 
       console.log(`[Günlük Rapor] ${date} ${hhmm} — gönderim başlıyor (ayarlı: ${reportTime})`);
       isSending = true;
@@ -138,13 +141,13 @@ function startDailyReportScheduler(appPool) {
       try {
         await sendDailySalesReport();
 
-        // Yalnızca BAŞARILI gönderimden sonra tarihi kaydet
+        // Yalnızca BAŞARILI gönderimden sonra anahtarı kaydet
         await appPool.query(
-          `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_date', $1)
+          `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_key', $1)
            ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-          [date]
+          [sentKey]
         );
-        console.log(`[Günlük Rapor] ✓ ${date} raporu başarıyla gönderildi`);
+        console.log(`[Günlük Rapor] ✓ ${sentKey} raporu başarıyla gönderildi`);
       } catch (sendErr) {
         // Gönderim hata verdi — tarih kaydedilmez, bir sonraki dakika tekrar denenecek
         console.error(`[Günlük Rapor] ✗ Gönderim hatası (tekrar denenecek): ${sendErr.message}`);

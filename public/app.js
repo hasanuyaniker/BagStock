@@ -376,7 +376,7 @@ function renderInventoryTable() {
       switch (col.key) {
         case 'image':
           if (p.product_image_url) {
-            rows += `<img src="${p.product_image_url}" class="product-thumb" onerror="this.style.display='none'">`;
+            rows += `<img src="${p.product_image_url}" class="product-thumb" style="cursor:zoom-in;" onclick="openLightbox('${p.product_image_url.startsWith('data:') ? `/api/products/${p.id}/image` : p.product_image_url}')" onerror="this.style.display='none'">`;
           } else {
             rows += '<div class="product-thumb-placeholder">📦</div>';
           }
@@ -711,7 +711,7 @@ function renderSalesProducts(list) {
 
     html += `<div class="sales-product-card">
       <div style="width:40px;height:40px;border-radius:6px;overflow:hidden;background:#f3f4f6;flex-shrink:0;">
-        ${p.product_image_url ? `<img src="${p.product_image_url}" style="width:100%;height:100%;object-fit:cover;">` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;">📦</div>'}
+        ${p.product_image_url ? `<img src="/api/products/${p.id}/image" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;" onclick="openLightbox('/api/products/${p.id}/image')">` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;">📦</div>'}
       </div>
       <div class="sales-product-info">
         <div class="sales-product-name">${escHtml(p.name)}</div>
@@ -724,8 +724,8 @@ function renderSalesProducts(list) {
       <span class="sales-stock-badge" style="${stockColor}">Stok: ${p.stock_quantity}</span>
       <div class="sales-actions">
         <input type="number" class="sales-qty-input" id="saleQty_${p.id}" value="1" min="1">
-        <button class="btn btn-success btn-sm" onclick="recordSale(${p.id}, 1)">+ Giriş</button>
-        <button class="btn btn-danger btn-sm" onclick="recordSale(${p.id}, -1)">- Çıkış</button>
+        <button class="btn btn-success btn-sm" onclick="confirmSale(${p.id}, 1)">+ Giriş</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmSale(${p.id}, -1)">- Çıkış</button>
       </div>
     </div>`;
   });
@@ -735,9 +735,19 @@ function renderSalesProducts(list) {
 
 function filterSalesProducts() { renderSalesProducts(products); }
 
+function confirmSale(productId, direction) {
+  const qtyInput = document.getElementById(`saleQty_${productId}`);
+  const qty = parseInt(qtyInput?.value) || 1;
+  if (qty <= 0) { showToast('Geçerli bir miktar girin', 'error'); return; }
+  const msg = direction > 0
+    ? `${qty} adet stok girişi yapmak istediğinizden emin misiniz?`
+    : `${qty} adet stok çıkışı yapmak istediğinizden emin misiniz?`;
+  showConfirm(direction > 0 ? 'Stok Girişi' : 'Stok Çıkışı', msg, 'Evet', () => recordSale(productId, direction));
+}
+
 async function recordSale(productId, direction) {
   const qtyInput = document.getElementById(`saleQty_${productId}`);
-  const qty = parseInt(qtyInput.value) || 1;
+  const qty = parseInt(qtyInput?.value) || 1;
   const date = document.getElementById('salesDate').value;
 
   const res = await apiFetch('/api/sales', {
@@ -1235,9 +1245,15 @@ async function loadTypes() {
   await loadProductTypes();
   let html = '';
   productTypes.forEach(t => {
-    html += `<div class="type-list-item">
-      <span>${escHtml(t.name)}</span>
-      <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id}, '${escHtml(t.name)}')">Sil</button>
+    html += `<div class="type-list-item" id="typeItem_${t.id}">
+      <span id="typeName_${t.id}">${escHtml(t.name)}</span>
+      <input id="typeInput_${t.id}" type="text" class="form-control" value="${escHtml(t.name)}" style="display:none;max-width:200px;padding:4px 8px;font-size:13px;">
+      <div style="display:flex;gap:6px;">
+        <button id="typeEditBtn_${t.id}" class="btn btn-secondary btn-sm" onclick="startEditType(${t.id})">Düzenle</button>
+        <button id="typeSaveBtn_${t.id}" class="btn btn-primary btn-sm" style="display:none;" onclick="saveEditType(${t.id})">Kaydet</button>
+        <button id="typeCancelBtn_${t.id}" class="btn btn-secondary btn-sm" style="display:none;" onclick="cancelEditType(${t.id}, '${escHtml(t.name)}')">İptal</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteType(${t.id}, '${escHtml(t.name)}')">Sil</button>
+      </div>
     </div>`;
   });
   document.getElementById('typesList').innerHTML = html || '<p style="color:#6b7280;">Tip bulunamadı</p>';
@@ -1255,6 +1271,38 @@ async function addProductType() {
   } else {
     const d = await res?.json();
     showToast(d?.error || 'Hata', 'error');
+  }
+}
+
+function startEditType(id) {
+  document.getElementById(`typeName_${id}`).style.display = 'none';
+  document.getElementById(`typeInput_${id}`).style.display = '';
+  document.getElementById(`typeEditBtn_${id}`).style.display = 'none';
+  document.getElementById(`typeSaveBtn_${id}`).style.display = '';
+  document.getElementById(`typeCancelBtn_${id}`).style.display = '';
+  document.getElementById(`typeInput_${id}`).focus();
+}
+
+function cancelEditType(id, originalName) {
+  document.getElementById(`typeName_${id}`).style.display = '';
+  document.getElementById(`typeInput_${id}`).style.display = 'none';
+  document.getElementById(`typeInput_${id}`).value = originalName;
+  document.getElementById(`typeEditBtn_${id}`).style.display = '';
+  document.getElementById(`typeSaveBtn_${id}`).style.display = 'none';
+  document.getElementById(`typeCancelBtn_${id}`).style.display = 'none';
+}
+
+async function saveEditType(id) {
+  const newName = document.getElementById(`typeInput_${id}`).value.trim();
+  if (!newName) { showToast('Tip adı boş olamaz', 'error'); return; }
+  const res = await apiFetch(`/api/product-types/${id}`, { method: 'PUT', body: { name: newName } });
+  if (res?.ok) {
+    showToast('Tip güncellendi');
+    loadTypes();
+    loadProductTypes();
+  } else {
+    const d = await res?.json();
+    showToast(d?.error || 'Güncelleme başarısız', 'error');
   }
 }
 
@@ -1642,3 +1690,19 @@ function escHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ── Lightbox ──────────────────────────────────────────────────────────────
+function openLightbox(src) {
+  const lb = document.getElementById('imageLightbox');
+  const img = document.getElementById('lightboxImg');
+  img.src = src;
+  lb.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  document.getElementById('imageLightbox').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });

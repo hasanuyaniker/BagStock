@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS stock_count_items (
   session_id INTEGER REFERENCES stock_count_sessions(id) ON DELETE CASCADE,
   product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
   product_name_snapshot VARCHAR(200),
-  product_image_snapshot VARCHAR(500),
+  product_image_snapshot TEXT,
   system_quantity INTEGER NOT NULL,
   counted_quantity INTEGER NOT NULL,
   difference INTEGER GENERATED ALWAYS AS (counted_quantity - system_quantity) STORED,
