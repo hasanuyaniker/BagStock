@@ -29,7 +29,9 @@ async function sendViaResend(to, subject, html) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error('RESEND_API_KEY eksik');
 
-  const from = process.env.NOTIFY_FROM || 'onboarding@resend.dev';
+  const fromAddress = process.env.NOTIFY_FROM || 'onboarding@resend.dev';
+  const fromName = process.env.NOTIFY_FROM_NAME || 'HUFlex Stok Takip';
+  const from = `${fromName} <${fromAddress}>`;
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -230,8 +232,8 @@ async function sendStockAlert(products) {
 
   const html = await buildStockAlertHtml(outWithImg, critWithImg);
   const subject = outOfStock.length > 0
-    ? `🚫 Stok Uyarısı: ${outOfStock.length} ürün tükendi`
-    : `⚠️ Stok Uyarısı: ${critical.length} ürün kritik seviyede`;
+    ? `HUFlex Stok Bilgilendirme — ${outOfStock.length} ürün tükendi`
+    : `HUFlex Stok Bilgilendirme — ${critical.length} ürün kritik seviyede`;
 
   for (const user of recipients) {
     try {
@@ -269,7 +271,7 @@ async function sendDailySalesReport() {
     }
 
     const html = await buildDailySalesHtml(sales, date);
-    const subject = `📊 Günlük Satış Raporu — ${new Date(date + 'T00:00:00').toLocaleDateString('tr-TR')}`;
+    const subject = `HUFlex Günlük Satış Bilgilendirme — ${new Date(date + 'T00:00:00').toLocaleDateString('tr-TR')}`;
 
     const recipients = await getRecipients();
     for (const user of recipients) {
