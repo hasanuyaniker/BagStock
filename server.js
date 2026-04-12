@@ -21,6 +21,7 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100)`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
+    await pool.query(`ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT`);
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);

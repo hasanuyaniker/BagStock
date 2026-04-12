@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS products (
   product_type_id INTEGER REFERENCES product_types(id) ON DELETE SET NULL,
   supplier_name VARCHAR(200),
   stock_quantity INTEGER DEFAULT 0,
-  product_image_url VARCHAR(500),
+  product_image_url TEXT,
   cost_price NUMERIC(10,2),
   critical_stock INTEGER DEFAULT 5,
   trendyol_price NUMERIC(10,2),
@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100);
+
+-- Base64 resim desteği için kolon tipini TEXT yap (VARCHAR(500) yeterli değil)
+ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT;
 
 -- Varsayılan ürün tipleri
 INSERT INTO product_types (name) VALUES
