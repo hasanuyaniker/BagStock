@@ -176,17 +176,20 @@ async function loadStats() {
     const alertBar = document.getElementById('alertBar');
     let alertHTML = '';
     if (stats.criticalStock > 0) {
-      alertHTML += `<span class="alert-item" style="color:#856404;">⚠️ ${stats.criticalStock} ürün kritik stokta: ${stats.criticalProducts.map(p => p.name + ' (' + p.stock_quantity + ')').join(', ')}</span>`;
+      alertHTML += `<span class="alert-item" style="color:#fff;">⚠️ ${stats.criticalStock} ürün kritik stokta: ${stats.criticalProducts.map(p => p.name + ' (' + p.stock_quantity + ')').join(', ')}</span>`;
     }
     if (stats.outOfStock > 0) {
-      alertHTML += `<span class="alert-item" style="color:#c53030;">🚫 ${stats.outOfStock} ürün tükendi: ${stats.outOfStockProducts.map(p => p.name).join(', ')}</span>`;
+      alertHTML += `<span class="alert-item" style="color:#fff;">🚫 ${stats.outOfStock} ürün tükendi: ${stats.outOfStockProducts.map(p => p.name).join(', ')}</span>`;
     }
     if (alertHTML) {
       alertBar.innerHTML = alertHTML;
       alertBar.className = 'alert-bar visible';
-      alertBar.style.background = stats.outOfStock > 0 ? '#ffeaea' : '#fff3cd';
+      alertBar.style.background = stats.outOfStock > 0 ? '#dc2626' : '#d97706';
+      alertBar.style.color = '#fff';
     } else {
       alertBar.className = 'alert-bar';
+      alertBar.style.background = '';
+      alertBar.style.color = '';
     }
 
     // Charts

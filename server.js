@@ -125,15 +125,16 @@ function startDailyReportScheduler(appPool) {
       const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
       if (lastSentAt && lastSentAt > twoHoursAgo) return; // Zaten gönderildi
 
-      // Gönderildi olarak işaretle
-      await appPool.query(
-        `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_at', $1)
-         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-        [new Date().toISOString()]
-      );
-
       console.log(`[Günlük Rapor] Saat ${hhmm} — rapor gönderiliyor...`);
-      sendDailySalesReport().catch(err => console.error('[Günlük Rapor] Hata:', err.message));
+
+      // Önce gönder, başarılıysa sent_at'i güncelle (hata durumunda tekrar denenebilsin)
+      sendDailySalesReport()
+        .then(() => appPool.query(
+          `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_at', $1)
+           ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+          [new Date().toISOString()]
+        ))
+        .catch(err => console.error('[Günlük Rapor] Hata:', err.message));
     } catch (err) {
       console.error('[Günlük Rapor Zamanlayıcı] Hata:', err.message);
     }

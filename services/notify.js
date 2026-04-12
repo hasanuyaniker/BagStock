@@ -267,7 +267,7 @@ async function sendDailySalesReport() {
       FROM sales s
       JOIN products p ON s.product_id = p.id
       WHERE s.sale_date = $1
-      GROUP BY p.id, p.name, p.color, p.barcode, p.product_image_url
+      GROUP BY p.id
       ORDER BY sold DESC, received DESC
     `, [date]);
 

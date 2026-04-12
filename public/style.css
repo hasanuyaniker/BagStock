@@ -137,13 +137,13 @@ body {
 .alert-bar.visible { display: flex; }
 
 .alert-critical {
-  background: #fff3cd;
-  color: #856404;
+  background: #d97706;
+  color: #ffffff;
 }
 
 .alert-outofstock {
-  background: #ffeaea;
-  color: #c53030;
+  background: #dc2626;
+  color: #ffffff;
 }
 
 .alert-bar .alert-item {
