@@ -86,7 +86,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS materials (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL;
 
 -- Base64 resim desteği için kolon tipini TEXT yap (VARCHAR(500) yeterli değil)
 ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT;
@@ -94,4 +101,9 @@ ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT;
 -- Varsayılan ürün tipleri
 INSERT INTO product_types (name) VALUES
   ('Deri'),('Suni Deri'),('Kumaş'),('Hasır'),('Naylon'),('Diğer')
+ON CONFLICT (name) DO NOTHING;
+
+-- Varsayılan materyaller
+INSERT INTO materials (name) VALUES
+  ('Deri'),('Suni Deri'),('Kumaş'),('Hasır'),('Naylon'),('Süet'),('Diğer')
 ON CONFLICT (name) DO NOTHING;

@@ -247,6 +247,7 @@
           <div class="settings-tabs" id="settingsTabs">
             <div class="settings-tab active" data-tab="users" onclick="switchSettingsTab('users')" id="settingsTabUsers">Kullanıcılar</div>
             <div class="settings-tab" data-tab="types" onclick="switchSettingsTab('types')">Ürün Tipleri</div>
+            <div class="settings-tab" data-tab="materials" onclick="switchSettingsTab('materials')">Materyaller</div>
             <div class="settings-tab" data-tab="media" onclick="switchSettingsTab('media')">Logo ve Görseller</div>
             <div class="settings-tab" data-tab="password" onclick="switchSettingsTab('password')">Şifre Değiştir</div>
             <div class="settings-tab" data-tab="backup" onclick="switchSettingsTab('backup')">Yedekleme</div>
@@ -273,6 +274,18 @@
                 <button class="btn btn-primary btn-sm" onclick="addProductType()">Ekle</button>
               </div>
               <div id="typesList"></div>
+            </div>
+          </div>
+
+          <!-- Materials Panel -->
+          <div class="settings-panel" id="panel-materials">
+            <div class="settings-card">
+              <h3 style="font-size:15px;margin-bottom:16px;">Materyaller</h3>
+              <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <input type="text" id="newMaterialName" placeholder="Yeni materyal adı..." style="flex:1;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;">
+                <button class="btn btn-primary btn-sm" onclick="addMaterial()">Ekle</button>
+              </div>
+              <div id="materialsList"></div>
             </div>
           </div>
 
@@ -377,6 +390,10 @@
         <div class="form-group">
           <label>Ürün Tipi</label>
           <select id="pType"><option value="">Seçiniz</option></select>
+        </div>
+        <div class="form-group">
+          <label>Materyal</label>
+          <select id="pMaterial"><option value="">Seçiniz</option></select>
         </div>
         <div class="form-group">
           <label>Renk</label>

@@ -23,6 +23,9 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
     await pool.query(`ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT`);
     await pool.query(`ALTER TABLE stock_count_items ALTER COLUMN product_image_snapshot TYPE TEXT`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS materials (id SERIAL PRIMARY KEY, name VARCHAR(100) UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL`);
+    await pool.query(`INSERT INTO materials (name) VALUES ('Deri'),('Suni Deri'),('Kumaş'),('Hasır'),('Naylon'),('Süet'),('Diğer') ON CONFLICT (name) DO NOTHING`);
     // Eski ISO timestamp anahtarını temizle (artık kullanılmıyor)
     await pool.query(`DELETE FROM app_settings WHERE key = 'daily_report_sent_at'`);
     console.log('✓ Migration tamam');
@@ -54,6 +57,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/products', require('./routes/products'));
 app.use('/api/product-types', require('./routes/product-types'));
+app.use('/api/materials', require('./routes/materials'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/columns', require('./routes/columns'));

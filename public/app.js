@@ -2,6 +2,7 @@
 let currentUser = null;
 let products = [];
 let productTypes = [];
+let materials = [];
 let allSales = [];
 let columnSettings = [];
 let stockChart = null;
@@ -81,7 +82,7 @@ function logout() {
     if (saved && saved !== 'stockcount') switchSection(saved);
     else if (saved === 'stockcount' && currentUser.role === 'admin') switchSection(saved);
 
-    await Promise.all([loadProductTypes(), loadProducts(), loadStats(), loadLogoFromDB()]);
+    await Promise.all([loadProductTypes(), loadMaterials(), loadProducts(), loadStats(), loadLogoFromDB()]);
 
     // Set today on sales date
     document.getElementById('salesDate').value = new Date().toISOString().split('T')[0];
@@ -158,6 +159,13 @@ async function loadProductTypes() {
   const res = await apiFetch('/api/product-types');
   if (!res) return;
   productTypes = await res.json();
+}
+
+// ==================== MATERIALS ====================
+async function loadMaterials() {
+  const res = await apiFetch('/api/materials');
+  if (!res) return;
+  materials = await res.json();
 }
 
 // ==================== STATS / DASHBOARD ====================
@@ -524,10 +532,16 @@ function openProductModal(product = null) {
   sel.innerHTML = '<option value="">Seçiniz</option>';
   productTypes.forEach(t => { sel.innerHTML += `<option value="${t.id}">${escHtml(t.name)}</option>`; });
 
+  // Fill material dropdown
+  const msel = document.getElementById('pMaterial');
+  msel.innerHTML = '<option value="">Seçiniz</option>';
+  materials.forEach(m => { msel.innerHTML += `<option value="${m.id}">${escHtml(m.name)}</option>`; });
+
   if (product) {
     document.getElementById('pName').value = product.name || '';
     document.getElementById('pBarcode').value = product.barcode || '';
     document.getElementById('pType').value = product.product_type_id || '';
+    document.getElementById('pMaterial').value = product.material_id || '';
     document.getElementById('pColor').value = product.color || '';
     document.getElementById('pSupplier').value = product.supplier_name || '';
     document.getElementById('pStock').value = product.stock_quantity || 0;
@@ -552,6 +566,7 @@ function openProductModal(product = null) {
     document.getElementById('pStock').value = 0;
     document.getElementById('pCritical').value = 5;
     document.getElementById('pType').value = '';
+    document.getElementById('pMaterial').value = '';
     document.getElementById('productCurrentImageUrl').value = '';
     document.getElementById('productImagePreview').style.display = 'none';
   }
@@ -577,6 +592,7 @@ async function saveProduct() {
     name: document.getElementById('pName').value.trim(),
     barcode: document.getElementById('pBarcode').value.trim(),
     product_type_id: document.getElementById('pType').value || null,
+    material_id: document.getElementById('pMaterial').value || null,
     color: document.getElementById('pColor').value.trim() || null,
     supplier_name: document.getElementById('pSupplier').value.trim() || null,
     stock_quantity: parseInt(document.getElementById('pStock').value) || 0,
@@ -717,6 +733,7 @@ function renderSalesProducts(list) {
         <div class="sales-product-name">${escHtml(p.name)}</div>
         <div class="sales-product-meta">
           ${p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : ''}
+          ${p.material_name ? `<span class="type-badge" style="background:#e0f2fe;color:#0369a1;">${escHtml(p.material_name)}</span>` : ''}
           ${p.color ? `<span class="type-badge" style="background:#ede9fe;color:#6d28d9;">${escHtml(p.color)}</span>` : ''}
           <span>${escHtml(p.barcode)}</span>
         </div>
@@ -1135,6 +1152,7 @@ function switchSettingsTab(tab) {
 
   if (tab === 'users') loadUsers();
   if (tab === 'types') loadTypes();
+  if (tab === 'materials') loadMaterialsPanel();
   if (tab === 'media') loadMediaPanel();
   if (tab === 'email') loadEmailSettings();
 }
@@ -1310,6 +1328,80 @@ function deleteType(id, name) {
   showConfirm('Tipi Sil', `"${name}" tipini silmek istediğinize emin misiniz?`, 'Sil', async () => {
     const res = await apiFetch(`/api/product-types/${id}`, { method: 'DELETE' });
     if (res?.ok) { showToast('Tip silindi'); loadTypes(); }
+    else showToast('Silme başarısız', 'error');
+  });
+}
+
+// ==================== MATERIALS PANEL ====================
+async function loadMaterialsPanel() {
+  await loadMaterials();
+  let html = '';
+  materials.forEach(m => {
+    html += `<div class="type-list-item" id="matItem_${m.id}">
+      <span id="matName_${m.id}">${escHtml(m.name)}</span>
+      <input id="matInput_${m.id}" type="text" class="form-control" value="${escHtml(m.name)}" style="display:none;max-width:200px;padding:4px 8px;font-size:13px;">
+      <div style="display:flex;gap:6px;">
+        <button id="matEditBtn_${m.id}" class="btn btn-secondary btn-sm" onclick="startEditMaterial(${m.id})">Düzenle</button>
+        <button id="matSaveBtn_${m.id}" class="btn btn-primary btn-sm" style="display:none;" onclick="saveEditMaterial(${m.id})">Kaydet</button>
+        <button id="matCancelBtn_${m.id}" class="btn btn-secondary btn-sm" style="display:none;" onclick="cancelEditMaterial(${m.id}, '${escHtml(m.name)}')">İptal</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteMaterial(${m.id}, '${escHtml(m.name)}')">Sil</button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('materialsList').innerHTML = html || '<p style="color:#6b7280;">Materyal bulunamadı</p>';
+}
+
+async function addMaterial() {
+  const name = document.getElementById('newMaterialName').value.trim();
+  if (!name) { showToast('Materyal adı giriniz', 'error'); return; }
+  const res = await apiFetch('/api/materials', { method: 'POST', body: { name } });
+  if (res?.ok) {
+    showToast('Materyal eklendi');
+    document.getElementById('newMaterialName').value = '';
+    loadMaterialsPanel();
+    loadMaterials();
+  } else {
+    const d = await res?.json();
+    showToast(d?.error || 'Hata', 'error');
+  }
+}
+
+function startEditMaterial(id) {
+  document.getElementById(`matName_${id}`).style.display = 'none';
+  document.getElementById(`matInput_${id}`).style.display = '';
+  document.getElementById(`matEditBtn_${id}`).style.display = 'none';
+  document.getElementById(`matSaveBtn_${id}`).style.display = '';
+  document.getElementById(`matCancelBtn_${id}`).style.display = '';
+  document.getElementById(`matInput_${id}`).focus();
+}
+
+function cancelEditMaterial(id, originalName) {
+  document.getElementById(`matName_${id}`).style.display = '';
+  document.getElementById(`matInput_${id}`).style.display = 'none';
+  document.getElementById(`matInput_${id}`).value = originalName;
+  document.getElementById(`matEditBtn_${id}`).style.display = '';
+  document.getElementById(`matSaveBtn_${id}`).style.display = 'none';
+  document.getElementById(`matCancelBtn_${id}`).style.display = 'none';
+}
+
+async function saveEditMaterial(id) {
+  const newName = document.getElementById(`matInput_${id}`).value.trim();
+  if (!newName) { showToast('Materyal adı boş olamaz', 'error'); return; }
+  const res = await apiFetch(`/api/materials/${id}`, { method: 'PUT', body: { name: newName } });
+  if (res?.ok) {
+    showToast('Materyal güncellendi');
+    loadMaterialsPanel();
+    loadMaterials();
+  } else {
+    const d = await res?.json();
+    showToast(d?.error || 'Güncelleme başarısız', 'error');
+  }
+}
+
+function deleteMaterial(id, name) {
+  showConfirm('Materyal Sil', `"${name}" materyalini silmek istediğinize emin misiniz?`, 'Sil', async () => {
+    const res = await apiFetch(`/api/materials/${id}`, { method: 'DELETE' });
+    if (res?.ok) { showToast('Materyal silindi'); loadMaterialsPanel(); loadMaterials(); }
     else showToast('Silme başarısız', 'error');
   });
 }
