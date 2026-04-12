@@ -125,10 +125,8 @@ function startDailyReportScheduler(appPool) {
       const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
       const lastSentDate = sentRow.rows[0]?.value || null;
 
-      console.log(`[Zamanlayıcı] Şu an: ${date} ${hhmm} | Ayarlı: ${reportTime} | Son gönderim: ${lastSentDate || 'hiç'}`);
-
       if (lastSentDate === date) {
-        // Bugün zaten gönderildi — sessizce atla (log sadece debug için)
+        // Bugün zaten gönderildi — atla
         return;
       }
 
