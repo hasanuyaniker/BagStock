@@ -112,28 +112,33 @@ function startDailyReportScheduler(appPool) {
 
   setInterval(async () => {
     try {
-      const { hhmm } = getIstanbulDateTime();
+      const { date, hhmm } = getIstanbulDateTime();
 
       // Ayarlanan saati DB'den al
       const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
       const reportTime = timeRow.rows[0]?.value;
-      if (!reportTime || reportTime !== hhmm) return;
 
-      // Son gönderim zamanını kontrol et (2 saat içinde tekrar gönderme)
-      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_at'");
-      const lastSentAt = sentRow.rows[0]?.value ? new Date(sentRow.rows[0].value) : null;
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-      if (lastSentAt && lastSentAt > twoHoursAgo) return; // Zaten gönderildi
+      // Saat ayarlı değilse atla
+      if (!reportTime) return;
 
-      console.log(`[Günlük Rapor] Saat ${hhmm} — rapor gönderiliyor...`);
+      // Ayarlanan saat henüz gelmemiş — atla
+      if (hhmm < reportTime) return;
 
-      // Önce gönder, başarılıysa sent_at'i güncelle (hata durumunda tekrar denenebilsin)
+      // Bugün zaten gönderilmiş mi? (tarih bazlı kontrol — saat bağımsız)
+      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
+      const lastSentDate = sentRow.rows[0]?.value || null;
+      if (lastSentDate === date) return; // Bugün zaten gönderildi
+
+      console.log(`[Günlük Rapor] ${date} ${hhmm} — rapor gönderiliyor (ayarlanan saat: ${reportTime})...`);
+
+      // Tarih'i hemen kaydet (duplicate önleme) — başarısız olursa ertesi gün tekrar gönderilir
+      await appPool.query(
+        `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_date', $1)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [date]
+      );
+
       sendDailySalesReport()
-        .then(() => appPool.query(
-          `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_at', $1)
-           ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-          [new Date().toISOString()]
-        ))
         .catch(err => console.error('[Günlük Rapor] Hata:', err.message));
     } catch (err) {
       console.error('[Günlük Rapor Zamanlayıcı] Hata:', err.message);
