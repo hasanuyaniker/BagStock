@@ -22,6 +22,8 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`);
     await pool.query(`ALTER TABLE products ALTER COLUMN product_image_url TYPE TEXT`);
+    // Eski ISO timestamp anahtarını temizle (artık kullanılmıyor)
+    await pool.query(`DELETE FROM app_settings WHERE key = 'daily_report_sent_at'`);
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);
@@ -109,52 +111,57 @@ app.use((err, req, res, next) => {
 // ── Günlük rapor zamanlayıcı ──────────────────────────────────────────────
 function startDailyReportScheduler(appPool) {
   const { sendDailySalesReport, getIstanbulDateTime } = require('./services/notify');
+  let isSending = false; // eşzamanlı çift gönderim önleme
 
   async function checkAndSend() {
+    if (isSending) return; // zaten gönderim yapılıyor
+
     try {
       const { date, hhmm } = getIstanbulDateTime();
 
       // Ayarlanan saati DB'den al
       const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
       const reportTime = timeRow.rows[0]?.value || null;
+      if (!reportTime) return; // saat ayarlanmamış
 
-      // Saat ayarlı değilse atla (log yok — her dakika çalışır)
-      if (!reportTime) return;
-
-      // Bugün zaten gönderilmiş mi?
-      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
-      const lastSentDate = sentRow.rows[0]?.value || null;
-
-      if (lastSentDate === date) {
-        // Bugün zaten gönderildi — atla
-        return;
-      }
-
-      // Ayarlanan saat henüz gelmemiş — atla
+      // Ayarlanan saat henüz gelmemiş
       if (hhmm < reportTime) return;
 
-      console.log(`[Günlük Rapor] Saat ${hhmm} >= ${reportTime}, gönderiliyor...`);
+      // Bugün zaten başarıyla gönderilmiş mi?
+      const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_date'");
+      const lastSentDate = sentRow.rows[0]?.value || null;
+      if (lastSentDate === date) return; // bugün zaten gönderildi
 
-      // Tarihi kaydet (duplicate önleme)
-      await appPool.query(
-        `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_date', $1)
-         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-        [date]
-      );
+      console.log(`[Günlük Rapor] ${date} ${hhmm} — gönderim başlıyor (ayarlı: ${reportTime})`);
+      isSending = true;
 
-      sendDailySalesReport()
-        .then(() => console.log(`[Günlük Rapor] ✓ ${date} raporu gönderildi`))
-        .catch(err => console.error('[Günlük Rapor] ✗ Hata:', err.message));
+      try {
+        await sendDailySalesReport();
+
+        // Yalnızca BAŞARILI gönderimden sonra tarihi kaydet
+        await appPool.query(
+          `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_date', $1)
+           ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+          [date]
+        );
+        console.log(`[Günlük Rapor] ✓ ${date} raporu başarıyla gönderildi`);
+      } catch (sendErr) {
+        // Gönderim hata verdi — tarih kaydedilmez, bir sonraki dakika tekrar denenecek
+        console.error(`[Günlük Rapor] ✗ Gönderim hatası (tekrar denenecek): ${sendErr.message}`);
+      } finally {
+        isSending = false;
+      }
 
     } catch (err) {
+      isSending = false;
       console.error('[Günlük Rapor Zamanlayıcı] Hata:', err.message);
     }
   }
 
-  // Sunucu başlangıcında hemen bir kez kontrol et (deploy sonrası kaçırılan saatleri yakala)
-  setTimeout(checkAndSend, 5000);
+  // Sunucu başlarken 10 saniye sonra ilk kontrol (deploy sonrası kaçırılan saati yakala)
+  setTimeout(checkAndSend, 10000);
 
-  // Sonra her dakika kontrol et
+  // Her dakika kontrol
   setInterval(checkAndSend, 60 * 1000);
 
   console.log('✓ Günlük rapor zamanlayıcı başlatıldı');
