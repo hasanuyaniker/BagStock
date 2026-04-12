@@ -100,10 +100,17 @@ function emailFooter() {
 }
 
 // ── Ürün görseli HTML (email için) ───────────────────────────────────────
-function productImg(url) {
-  const fullUrl = url ? (url.startsWith('http') ? url : getBaseUrl() + url) : null;
-  return fullUrl
-    ? `<img src="${fullUrl}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;">`
+// productId verilirse /api/products/:id/image HTTP endpoint'i kullanır (email istemcileri data: URI desteklemez)
+function productImg(url, productId) {
+  let imgUrl = null;
+  if (productId && url) {
+    // DB'de base64 varsa HTTP endpoint üzerinden servis et (Gmail data: URI'yi engeller)
+    imgUrl = `${getBaseUrl()}/api/products/${productId}/image`;
+  } else if (url && url.startsWith('http')) {
+    imgUrl = url;
+  }
+  return imgUrl
+    ? `<img src="${imgUrl}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;">`
     : `<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;">📦</div>`;
 }
 
@@ -125,7 +132,7 @@ async function buildStockAlertHtml(outOfStock, critical) {
       </tr></thead><tbody>`;
     outOfStock.forEach(p => {
       html += `<tr>
-        <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${productImg(p.image_url)}</td>
+        <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${productImg(p.image_url, p.id)}</td>
         <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-weight:600;">${p.name}</td>
         <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${p.color || '-'}</td>
         <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:12px;">${p.barcode || '-'}</td>
@@ -149,7 +156,7 @@ async function buildStockAlertHtml(outOfStock, critical) {
       </tr></thead><tbody>`;
     critical.forEach(p => {
       html += `<tr>
-        <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${productImg(p.image_url)}</td>
+        <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${productImg(p.image_url, p.id)}</td>
         <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-weight:600;">${p.name}</td>
         <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${p.color || '-'}</td>
         <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:12px;">${p.barcode || '-'}</td>
@@ -191,7 +198,7 @@ async function buildDailySalesHtml(sales, date) {
 
   sales.forEach(s => {
     html += `<tr>
-      <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${productImg(s.product_image_url)}</td>
+      <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${productImg(s.product_image_url, s.id)}</td>
       <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-weight:600;">${s.name}</td>
       <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${s.color || '-'}</td>
       <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:12px;">${s.barcode || '-'}</td>
@@ -254,7 +261,7 @@ async function sendDailySalesReport() {
 
   try {
     const result = await pool.query(`
-      SELECT p.name, p.color, p.barcode, p.product_image_url,
+      SELECT p.id, p.name, p.color, p.barcode, p.product_image_url,
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS sold,
              SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END) AS received
       FROM sales s

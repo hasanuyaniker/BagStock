@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
 
     // Mevcut stoğu al (ürün bilgileriyle birlikte)
     const product = await client.query(
-      'SELECT stock_quantity, name, barcode, color, critical_stock, product_image_url FROM products WHERE id = $1 FOR UPDATE',
+      'SELECT id, stock_quantity, name, barcode, color, critical_stock, product_image_url FROM products WHERE id = $1 FOR UPDATE',
       [product_id]
     );
     if (product.rows.length === 0) {
@@ -57,6 +57,7 @@ router.post('/', async (req, res) => {
     // Stok uyarısı — commit sonrası async (response'u bloklamaz)
     setImmediate(() => {
       sendStockAlert([{
+        id: p.id,
         name: p.name,
         barcode: p.barcode,
         color: p.color,

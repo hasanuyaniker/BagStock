@@ -209,6 +209,7 @@ router.post('/sessions/:id/apply', async (req, res) => {
     // Stok uyarısı — commit sonrası async
     setImmediate(() => {
       sendStockAlert(beforeItems.rows.map(item => ({
+        id: item.product_id,
         name: item.name,
         barcode: item.barcode,
         color: item.color,

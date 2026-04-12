@@ -8,6 +8,27 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
 });
 
+// GET /api/products/:id/image — auth gerektirmez (email istemcileri için)
+router.get('/:id/image', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT product_image_url FROM products WHERE id = $1', [req.params.id]);
+    const row = result.rows[0];
+    if (!row?.product_image_url || !row.product_image_url.startsWith('data:')) {
+      return res.status(404).send('No image');
+    }
+    const [header, data] = row.product_image_url.split(',');
+    const mimeMatch = header.match(/data:([^;]+)/);
+    if (!mimeMatch) return res.status(400).send('Invalid image');
+    const buffer = Buffer.from(data, 'base64');
+    res.setHeader('Content-Type', mimeMatch[1]);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(buffer);
+  } catch (err) {
+    console.error('Ürün görseli hatası:', err);
+    res.status(500).send('Error');
+  }
+});
+
 router.use(authMiddleware);
 
 // GET /api/products/stats
