@@ -158,10 +158,8 @@ function startDailyReportScheduler(appPool) {
     }
   }
 
-  // Sunucu başlarken 10 saniye sonra ilk kontrol (deploy sonrası kaçırılan saati yakala)
-  setTimeout(checkAndSend, 10000);
-
-  // Her dakika kontrol
+  // Her dakika kontrol — deploy sırasında hemen gönderimi önlemek için startup check YOK
+  // (setInterval zaten 60s içinde ilk kontrolü yapar, bu yeterli)
   setInterval(checkAndSend, 60 * 1000);
 
   console.log('✓ Günlük rapor zamanlayıcı başlatıldı');

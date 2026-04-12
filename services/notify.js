@@ -57,7 +57,7 @@ async function getRecipients() {
   }
   try {
     const result = await pool.query(
-      `SELECT username, email FROM users WHERE email IS NOT NULL AND email <> ''`
+      `SELECT DISTINCT ON (email) username, email FROM users WHERE email IS NOT NULL AND email <> '' ORDER BY email, id`
     );
     return result.rows;
   } catch (err) {
