@@ -1,1 +1,9 @@
-node_modules/ 
+node_modules/
+.env
+.env.local
+*.log
+npm-debug.log*
+uploads/logo/
+uploads/products/
+.DS_Store
+Thumbs.db
