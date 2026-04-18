@@ -1802,3 +1802,5 @@ function closeLightbox() {
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+document.getElementById("salesDate").addEventListener("change", loadSalesView);
