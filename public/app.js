@@ -1805,3 +1805,5 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbo
 
 document.getElementById("salesDate").addEventListener("change", loadSalesView);
 // fix-patch
+
+setTimeout(function(){var d=document.getElementById("salesDate");if(d&&!document.getElementById("sorgulaBtn")){var b=document.createElement("button");b.id="sorgulaBtn";b.className="btn btn-primary btn-sm";b.textContent="Sorgula";b.style.marginLeft="8px";b.onclick=loadSalesView;d.insertAdjacentElement("afterend",b);}var oc=window.renderStockChart;if(oc){window.renderStockChart=function(data){if(data)data=data.slice().sort(function(a,b){return parseInt(b.stock_quantity||0)-parseInt(a.stock_quantity||0);});oc(data);};}},600);
