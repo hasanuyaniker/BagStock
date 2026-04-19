@@ -210,40 +210,42 @@ async function loadStats() {
 }
 
 function renderStockChart(data) {
-  const canvasEl = document.getElementById('chartStock');
-  const wrapper  = document.getElementById('stockChartWrapper');
+  const ctx     = document.getElementById('chartStock');
+  const wrapper = document.getElementById('stockChartWrapper');
   if (stockChart) { stockChart.destroy(); stockChart = null; }
   if (!data || data.length === 0) return;
 
-  // TÜM ürünleri göster — limit yok
+  // TÜM ürünleri göster — limit yok, stoka göre büyükten küçüğe
   const sorted = [...data].sort((a, b) => parseInt(b.stock_quantity) - parseInt(a.stock_quantity));
   const labels = sorted.map(d => d.name.length > 26 ? d.name.substring(0, 26) + '…' : d.name);
   const values = sorted.map(d => parseInt(d.stock_quantity) || 0);
 
-  // Renk: tükenen → kırmızı, kritik → turuncu, normal → gradient mor-pembe
   const colors = sorted.map(d => {
-    const qty = parseInt(d.stock_quantity) || 0;
+    const qty  = parseInt(d.stock_quantity)  || 0;
     const crit = parseInt(d.critical_stock) || 0;
-    if (qty === 0)       return 'rgba(244,63,94,0.85)';
-    if (qty <= crit)     return 'rgba(245,158,11,0.85)';
+    if (qty === 0)   return 'rgba(244,63,94,0.85)';
+    if (qty <= crit) return 'rgba(245,158,11,0.85)';
     return 'rgba(91,61,232,0.82)';
   });
 
   const hoverColors = sorted.map(d => {
-    const qty = parseInt(d.stock_quantity) || 0;
+    const qty  = parseInt(d.stock_quantity)  || 0;
     const crit = parseInt(d.critical_stock) || 0;
     if (qty === 0)   return '#f43f5e';
     if (qty <= crit) return '#f59e0b';
     return '#c026a8';
   });
 
-  // Yüksekliği dinamik ayarla — her ürün için 28px
-  const barH = 26;
-  const chartH = Math.max(240, sorted.length * barH + 40);
-  canvasEl.style.height = chartH + 'px';
-  if (wrapper) wrapper.style.height = Math.min(chartH, 380) + 'px';
+  // Wrapper yüksekliğini ürün sayısına göre ayarla (canvas değil, wrapper)
+  const perBar = 28;
+  const wantH  = Math.max(260, sorted.length * perBar + 40);
+  const capH   = 380;
+  if (wrapper) {
+    wrapper.style.height    = Math.min(wantH, capH) + 'px';
+    wrapper.style.overflowY = wantH > capH ? 'auto' : 'hidden';
+  }
 
-  stockChart = new Chart(canvasEl, {
+  stockChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
@@ -253,12 +255,12 @@ function renderStockChart(data) {
         hoverBackgroundColor: hoverColors,
         borderRadius: 6,
         borderSkipped: false,
-        barThickness: 18
+        barThickness: 20
       }]
     },
     options: {
       indexAxis: 'y',
-      responsive: false,
+      responsive: true,
       maintainAspectRatio: false,
       animation: { duration: 500, easing: 'easeOutQuart' },
       plugins: {
@@ -270,12 +272,12 @@ function renderStockChart(data) {
           padding: 10,
           cornerRadius: 8,
           callbacks: {
-            label: (ctx) => {
-              const d = sorted[ctx.dataIndex];
-              const qty = parseInt(d.stock_quantity) || 0;
+            label: (context) => {
+              const d    = sorted[context.dataIndex];
+              const qty  = parseInt(d.stock_quantity)  || 0;
               const crit = parseInt(d.critical_stock) || 0;
-              const durum = qty === 0 ? '🔴 Tükendi' : qty <= crit ? '🟡 Kritik' : '🟢 Normal';
-              return ` ${qty} adet  |  ${durum}`;
+              const s    = qty === 0 ? '🔴 Tükendi' : qty <= crit ? '🟡 Kritik' : '🟢 Normal';
+              return ` ${qty} adet  |  ${s}`;
             }
           }
         }
@@ -283,8 +285,8 @@ function renderStockChart(data) {
       scales: {
         x: {
           beginAtZero: true,
-          grid: { color: 'rgba(124,58,237,0.08)', drawBorder: false },
-          ticks: { font: { size: 11, weight: '500' }, color: '#6b7280' }
+          grid: { color: 'rgba(124,58,237,0.07)' },
+          ticks: { font: { size: 11 }, color: '#6b7280' }
         },
         y: {
           grid: { display: false },

@@ -363,10 +363,11 @@ body {
 
 /* Stok grafiği — tüm ürünler için kaydırmalı */
 .chart-wrapper-scroll {
-  height: auto !important;
-  max-height: 380px !important;
-  overflow-y: auto !important;
+  height: 340px;        /* JS tarafından override edilir */
+  max-height: 380px;
+  overflow-y: auto;
   overflow-x: hidden;
+  position: relative;
 }
 
 .chart-wrapper-scroll canvas {
