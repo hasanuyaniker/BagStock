@@ -210,36 +210,86 @@ async function loadStats() {
 }
 
 function renderStockChart(data) {
-  const ctx = document.getElementById('chartStock');
+  const canvasEl = document.getElementById('chartStock');
+  const wrapper  = document.getElementById('stockChartWrapper');
   if (stockChart) { stockChart.destroy(); stockChart = null; }
   if (!data || data.length === 0) return;
 
-  // Maksimum 15 ürün göster
-  const sliced = data.slice(0, 15);
-  const labels = sliced.map(d => d.name.length > 22 ? d.name.substring(0, 22) + '…' : d.name);
-  const values = sliced.map(d => parseInt(d.stock_quantity) || 0);
-  const colors = sliced.map(d => {
-    if (d.stock_quantity === 0) return '#ef4444';
-    if (d.stock_quantity <= d.critical_stock) return '#f59e0b';
-    return '#16a34a';
+  // TÜM ürünleri göster — limit yok
+  const sorted = [...data].sort((a, b) => parseInt(b.stock_quantity) - parseInt(a.stock_quantity));
+  const labels = sorted.map(d => d.name.length > 26 ? d.name.substring(0, 26) + '…' : d.name);
+  const values = sorted.map(d => parseInt(d.stock_quantity) || 0);
+
+  // Renk: tükenen → kırmızı, kritik → turuncu, normal → gradient mor-pembe
+  const colors = sorted.map(d => {
+    const qty = parseInt(d.stock_quantity) || 0;
+    const crit = parseInt(d.critical_stock) || 0;
+    if (qty === 0)       return 'rgba(244,63,94,0.85)';
+    if (qty <= crit)     return 'rgba(245,158,11,0.85)';
+    return 'rgba(91,61,232,0.82)';
   });
 
-  stockChart = new Chart(ctx, {
+  const hoverColors = sorted.map(d => {
+    const qty = parseInt(d.stock_quantity) || 0;
+    const crit = parseInt(d.critical_stock) || 0;
+    if (qty === 0)   return '#f43f5e';
+    if (qty <= crit) return '#f59e0b';
+    return '#c026a8';
+  });
+
+  // Yüksekliği dinamik ayarla — her ürün için 28px
+  const barH = 26;
+  const chartH = Math.max(240, sorted.length * barH + 40);
+  canvasEl.style.height = chartH + 'px';
+  if (wrapper) wrapper.style.height = Math.min(chartH, 380) + 'px';
+
+  stockChart = new Chart(canvasEl, {
     type: 'bar',
     data: {
       labels,
-      datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, barThickness: 14 }]
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        hoverBackgroundColor: hoverColors,
+        borderRadius: 6,
+        borderSkipped: false,
+        barThickness: 18
+      }]
     },
     options: {
       indexAxis: 'y',
-      responsive: true,
+      responsive: false,
       maintainAspectRatio: false,
-      animation: false,
-      resizeDelay: 200,
-      plugins: { legend: { display: false } },
+      animation: { duration: 500, easing: 'easeOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(13,16,53,0.92)',
+          titleColor: '#e8eaf6',
+          bodyColor: '#c5c8e8',
+          padding: 10,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => {
+              const d = sorted[ctx.dataIndex];
+              const qty = parseInt(d.stock_quantity) || 0;
+              const crit = parseInt(d.critical_stock) || 0;
+              const durum = qty === 0 ? '🔴 Tükendi' : qty <= crit ? '🟡 Kritik' : '🟢 Normal';
+              return ` ${qty} adet  |  ${durum}`;
+            }
+          }
+        }
+      },
       scales: {
-        x: { beginAtZero: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } },
-        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        x: {
+          beginAtZero: true,
+          grid: { color: 'rgba(124,58,237,0.08)', drawBorder: false },
+          ticks: { font: { size: 11, weight: '500' }, color: '#6b7280' }
+        },
+        y: {
+          grid: { display: false },
+          ticks: { font: { size: 11 }, color: '#374151', padding: 4 }
+        }
       }
     }
   });
@@ -250,7 +300,11 @@ function renderTypeChart(data) {
   if (typeChart) { typeChart.destroy(); typeChart = null; }
   if (!data || data.length === 0) return;
 
-  const colors = ['#2d5ab8', '#5a84d4', '#b8ccf7', '#3b9e5a', '#e6a800', '#e24b4a'];
+  // Gradient palette — resimden ilham
+  const colors = [
+    '#5b3de8', '#8b45f0', '#c026a8', '#e91e8c',
+    '#f43f5e', '#10b981', '#f59e0b', '#3b82f6'
+  ];
   const total = data.reduce((s, d) => s + parseInt(d.total_stock || 0), 0);
 
   typeChart = new Chart(ctx, {
@@ -260,30 +314,49 @@ function renderTypeChart(data) {
       datasets: [{
         data: data.map(d => parseInt(d.total_stock || 0)),
         backgroundColor: colors.slice(0, data.length),
-        borderWidth: 2,
-        borderColor: '#fff'
+        hoverBackgroundColor: colors.slice(0, data.length).map(c => c + 'dd'),
+        borderWidth: 3,
+        borderColor: '#ffffff',
+        hoverOffset: 6
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 700, easing: 'easeOutQuart' },
       resizeDelay: 200,
-      cutout: '58%',
+      cutout: '62%',
       plugins: {
         legend: {
           position: 'right',
           labels: {
-            font: { size: 11 },
+            font: { size: 11, weight: '600' },
+            color: '#374151',
             boxWidth: 12,
-            padding: 8,
+            borderRadius: 4,
+            padding: 10,
             generateLabels: (chart) => {
               const ds = chart.data.datasets[0];
               return chart.data.labels.map((label, i) => ({
-                text: `${label}: ${ds.data[i]} (%${total > 0 ? Math.round(ds.data[i]/total*100) : 0})`,
+                text: `${label}  ${ds.data[i]}  (%${total > 0 ? Math.round(ds.data[i]/total*100) : 0})`,
                 fillStyle: ds.backgroundColor[i],
+                strokeStyle: ds.backgroundColor[i],
+                lineWidth: 0,
                 index: i
               }));
+            }
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(13,16,53,0.92)',
+          titleColor: '#e8eaf6',
+          bodyColor: '#c5c8e8',
+          padding: 10,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => {
+              const pct = total > 0 ? Math.round(ctx.parsed / total * 100) : 0;
+              return `  ${ctx.parsed} adet  (% ${pct})`;
             }
           }
         }
@@ -293,19 +366,24 @@ function renderTypeChart(data) {
       id: 'centerText',
       beforeDraw(chart) {
         if (!chart.chartArea) return;
-        const { ctx } = chart;
-        ctx.save();
+        const { ctx: c } = chart;
+        c.save();
         const x = (chart.chartArea.left + chart.chartArea.right) / 2;
         const y = (chart.chartArea.top + chart.chartArea.bottom) / 2;
-        ctx.font = 'bold 22px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#1e3f8a';
-        ctx.fillText(total.toString(), x, y - 8);
-        ctx.font = '10px -apple-system, sans-serif';
-        ctx.fillStyle = '#6b7280';
-        ctx.fillText('Toplam Stok', x, y + 10);
-        ctx.restore();
+        // Büyük sayı
+        c.font = 'bold 26px -apple-system, sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        const grad = c.createLinearGradient(x-30, y-20, x+30, y+20);
+        grad.addColorStop(0, '#5b3de8');
+        grad.addColorStop(1, '#c026a8');
+        c.fillStyle = grad;
+        c.fillText(total.toString(), x, y - 10);
+        // Alt yazı
+        c.font = '600 11px -apple-system, sans-serif';
+        c.fillStyle = '#9498bb';
+        c.fillText('Toplam Stok', x, y + 12);
+        c.restore();
       }
     }]
   });
@@ -1744,66 +1822,4 @@ function renderSalesReport(data) {
         <td>${row.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(row.color)}</span>` : '-'}</td>
         <td>${escHtml(row.barcode)}</td>
         <td>${formatCurrency(row.cost_price)}</td>
-        <td><strong style="color:${isOut ? 'var(--red)' : 'var(--green)'};">${isOut ? '' : '+'}${row.quantity_change}</strong></td>
-      </tr>`;
-    });
-
-    html += '</tbody></table></div>';
-  }
-
-  document.getElementById('srResults').innerHTML = html;
-}
-
-function exportSalesReport() {
-  const from = document.getElementById('srFrom').value;
-  const to = document.getElementById('srTo').value;
-
-  if (!from || !to) {
-    showToast('Tarih aralığı seçiniz', 'error');
-    return;
-  }
-
-  apiFetch(`/api/export/sales-report?from=${from}&to=${to}`)
-    .then(res => {
-      if (!res.ok) throw new Error();
-      return res.blob();
-    })
-    .then(blob => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `satis_raporu_${from}_${to}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      showToast('Rapor indirildi');
-    })
-    .catch(() => showToast('İndirme hatası', 'error'));
-}
-
-// ==================== UTILS ====================
-function escHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-// ── Lightbox ──────────────────────────────────────────────────────────────
-function openLightbox(src) {
-  const lb = document.getElementById('imageLightbox');
-  const img = document.getElementById('lightboxImg');
-  img.src = src;
-  lb.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-}
-
-function closeLightbox() {
-  document.getElementById('imageLightbox').style.display = 'none';
-  document.body.style.overflow = '';
-}
-
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
-
-document.getElementById("salesDate").addEventListener("change", loadSalesView);
-// fix-patch
-
-setTimeout(function(){var d=document.getElementById("salesDate");if(d&&!document.getElementById("sorgulaBtn")){var b=document.createElement("button");b.id="sorgulaBtn";b.className="btn btn-primary btn-sm";b.textContent="Sorgula";b.style.marginLeft="8px";b.onclick=loadSalesView;d.insertAdjacentElement("afterend",b);}var oc=window.renderStockChart;if(oc){window.renderStockChart=function(data){if(data)data=data.slice().sort(function(a,b){return parseInt(b.stock_quantity||0)-parseInt(a.stock_quantity||0);});oc(data);};}},600);
+        <td><strong style="color:${isOut ? 'var(--red)' : 'var(--

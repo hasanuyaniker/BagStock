@@ -24,10 +24,10 @@
   --gold-bg:   #ffd43b;
   --gold-text: #7a4c00;
 
-  /* ── Backgrounds ── */
-  --bg-page:   #f4f5fb;
-  --bg-card:   #ffffff;
-  --bg-subtle: #f8f7ff;   /* mor-beyaz tonu */
+  /* ── Backgrounds (koyu gradient üstünde cam efekti) ── */
+  --bg-page:   transparent;
+  --bg-card:   rgba(255,255,255,0.93);
+  --bg-subtle: rgba(248,247,255,0.85);
 
   /* ── Text ── */
   --text-primary:   #1a1f3e;
@@ -48,7 +48,13 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg-page);
+  /* Resimden birebir: koyu siyah üstte, altta sol-mavi / orta-mor / sağ-kırmızı */
+  background:
+    radial-gradient(ellipse 70% 55% at 0%   100%, rgba(22, 52, 180, 0.80) 0%, transparent 100%),
+    radial-gradient(ellipse 70% 55% at 50%  100%, rgba(110, 20, 160, 0.75) 0%, transparent 100%),
+    radial-gradient(ellipse 70% 55% at 100% 100%, rgba(155, 15,  40, 0.80) 0%, transparent 100%),
+    linear-gradient(170deg, #07070e 0%, #0d0d18 55%, #11101c 100%);
+  background-attachment: fixed;
   color: var(--text-primary);
   min-height: 100vh;
 }
@@ -248,6 +254,7 @@ body {
   flex: 1;
   padding: 22px 24px;
   overflow-x: auto;
+  background: transparent;
 }
 
 .section { display: none; }
@@ -352,6 +359,27 @@ body {
   display: block;
   max-width: 100% !important;
   max-height: 280px !important;
+}
+
+/* Stok grafiği — tüm ürünler için kaydırmalı */
+.chart-wrapper-scroll {
+  height: auto !important;
+  max-height: 380px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+}
+
+.chart-wrapper-scroll canvas {
+  max-height: none !important;
+  width: 100% !important;
+}
+
+/* Scrollbar — stok grafiği */
+.chart-wrapper-scroll::-webkit-scrollbar { width: 5px; }
+.chart-wrapper-scroll::-webkit-scrollbar-track { background: rgba(124,58,237,0.05); border-radius: 3px; }
+.chart-wrapper-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #5b3de8, #c026a8);
+  border-radius: 3px;
 }
 
 /* ========== TOOLBAR ========== */
@@ -1134,43 +1162,4 @@ input[type="date"]:focus {
 .access-denied h2 { color: var(--red); margin-bottom: 12px; font-size: 22px; }
 .access-denied p { color: var(--text-muted); }
 
-/* ========== SECTION TITLES (Bitrix24 style) ========== */
-.section-title {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--text-primary);
-  margin-bottom: 18px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.section-title::before {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 22px;
-  background: var(--gradient);
-  border-radius: 3px;
-}
-
-/* ========== RESPONSIVE ========== */
-@media (max-width: 1024px) {
-  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .charts-row { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 768px) {
-  .sidebar { width: 56px; min-width: 56px; }
-  .sidebar-item span { display: none; }
-  .sidebar-item { justify-content: center; padding: 14px 8px; }
-  .kpi-grid { grid-template-columns: 1fr; }
-  .content { padding: 16px; }
-  .toolbar { flex-direction: column; align-items: stretch; }
-  .search-input { width: 100%; }
-  .form-row { grid-template-columns: 1fr; }
-  .chart-wrapper { height: 220px; max-height: 220px; }
-  .chart-wrapper canvas { max-height: 220px !important; }
-  .sales-report-filters { flex-direction: column; }
-  .sales-report-filters .form-group { width: 100%; }
-}
+/* ========== SECTION
