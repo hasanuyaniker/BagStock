@@ -1824,4 +1824,63 @@ function renderSalesReport(data) {
         <td>${row.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(row.color)}</span>` : '-'}</td>
         <td>${escHtml(row.barcode)}</td>
         <td>${formatCurrency(row.cost_price)}</td>
-        <td><strong style="color:${isOut ? 'var(--red)' : 'var(--
+        <td><strong style="color:${isOut ? 'var(--red)' : 'var(--green)'};">${isOut ? '' : '+'}${row.quantity_change}</strong></td>
+      </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+  }
+
+  document.getElementById('srResults').innerHTML = html;
+}
+
+function exportSalesReport() {
+  const from = document.getElementById('srFrom').value;
+  const to   = document.getElementById('srTo').value;
+
+  if (!from || !to) {
+    showToast('Tarih aralığı seçiniz', 'error');
+    return;
+  }
+
+  apiFetch(`/api/export/sales-report?from=${from}&to=${to}`)
+    .then(res => {
+      if (!res.ok) throw new Error();
+      return res.blob();
+    })
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `satis_raporu_${from}_${to}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast('Rapor indirildi');
+    })
+    .catch(() => showToast('İndirme hatası', 'error'));
+}
+
+// ==================== UTILS ====================
+function escHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────────
+function openLightbox(src) {
+  const lb  = document.getElementById('imageLightbox');
+  const img = document.getElementById('lightboxImg');
+  img.src = src;
+  lb.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  document.getElementById('imageLightbox').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+document.getElementById('salesDate').addEventListener('change', loadSalesView);
