@@ -34,26 +34,29 @@ router.use(authMiddleware);
 // GET /api/products/stats
 router.get('/stats', async (req, res) => {
   try {
+    // Sadece satışa açık (is_active=true) ürünler istatistiklere dahil edilir
+    const activeFilter = 'is_active = TRUE';
     const totalValue = await pool.query(
-      'SELECT COALESCE(SUM(cost_price * stock_quantity), 0) AS total FROM products'
+      `SELECT COALESCE(SUM(cost_price * stock_quantity), 0) AS total FROM products WHERE ${activeFilter}`
     );
-    const totalSkus = await pool.query('SELECT COUNT(*) AS count FROM products');
-    const outOfStock = await pool.query('SELECT COUNT(*) AS count FROM products WHERE stock_quantity = 0');
+    const totalSkus = await pool.query(`SELECT COUNT(*) AS count FROM products WHERE ${activeFilter}`);
+    const outOfStock = await pool.query(`SELECT COUNT(*) AS count FROM products WHERE ${activeFilter} AND stock_quantity = 0`);
     const criticalStock = await pool.query(
-      'SELECT COUNT(*) AS count FROM products WHERE stock_quantity > 0 AND stock_quantity <= critical_stock'
+      `SELECT COUNT(*) AS count FROM products WHERE ${activeFilter} AND stock_quantity > 0 AND stock_quantity <= critical_stock`
     );
     const criticalProducts = await pool.query(
-      'SELECT id, name, stock_quantity FROM products WHERE stock_quantity > 0 AND stock_quantity <= critical_stock ORDER BY stock_quantity ASC'
+      `SELECT id, name, stock_quantity FROM products WHERE ${activeFilter} AND stock_quantity > 0 AND stock_quantity <= critical_stock ORDER BY stock_quantity ASC`
     );
     const outOfStockProducts = await pool.query(
-      'SELECT id, name FROM products WHERE stock_quantity = 0 ORDER BY name'
+      `SELECT id, name FROM products WHERE ${activeFilter} AND stock_quantity = 0 ORDER BY name`
     );
     const stockByProduct = await pool.query(
-      'SELECT name, stock_quantity, critical_stock FROM products ORDER BY stock_quantity ASC'
+      `SELECT name, stock_quantity, critical_stock FROM products WHERE ${activeFilter} ORDER BY stock_quantity ASC`
     );
     const stockByType = await pool.query(
       `SELECT COALESCE(pt.name, 'Belirtilmemiş') AS type_name, SUM(p.stock_quantity) AS total_stock
        FROM products p LEFT JOIN product_types pt ON p.product_type_id = pt.id
+       WHERE p.is_active = TRUE
        GROUP BY pt.name ORDER BY total_stock DESC`
     );
 
@@ -81,7 +84,7 @@ router.get('/', async (req, res) => {
        FROM products p
        LEFT JOIN product_types pt ON p.product_type_id = pt.id
        LEFT JOIN materials m ON p.material_id = m.id
-       ORDER BY p.created_at DESC`
+       ORDER BY p.is_active DESC, p.created_at DESC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -96,22 +99,27 @@ router.post('/', async (req, res) => {
     const {
       name, barcode, product_type_id, material_id, supplier_name, stock_quantity,
       product_image_url, cost_price, critical_stock, color,
-      trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission
+      trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission,
+      is_active
     } = req.body;
 
     if (!name || !barcode) {
       return res.status(400).json({ error: 'Ürün adı ve barkod zorunludur' });
     }
 
+    // critical_stock 0 olabilir — || operatörü yerine null/undefined kontrolü
+    const critVal = (critical_stock !== undefined && critical_stock !== null && critical_stock !== '') ? Number(critical_stock) : 5;
+
     const result = await pool.query(
       `INSERT INTO products (name, barcode, product_type_id, material_id, supplier_name, stock_quantity,
         product_image_url, cost_price, critical_stock, color,
-        trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+        trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [name, barcode, product_type_id || null, material_id || null, supplier_name || null, stock_quantity || 0,
-       product_image_url || null, cost_price || null, critical_stock || 5, color || null,
+       product_image_url || null, cost_price || null, critVal, color || null,
        trendyol_price || null, trendyol_commission || null,
-       hepsiburada_price || null, hepsiburada_commission || null]
+       hepsiburada_price || null, hepsiburada_commission || null,
+       is_active !== false && is_active !== 'false']
     );
 
     res.status(201).json(result.rows[0]);
@@ -131,8 +139,11 @@ router.put('/:id', async (req, res) => {
     const {
       name, barcode, product_type_id, material_id, supplier_name, stock_quantity,
       product_image_url, cost_price, critical_stock, color,
-      trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission
+      trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission,
+      is_active
     } = req.body;
+
+    const critVal = (critical_stock !== undefined && critical_stock !== null && critical_stock !== '') ? Number(critical_stock) : 5;
 
     const result = await pool.query(
       `UPDATE products SET
@@ -140,12 +151,14 @@ router.put('/:id', async (req, res) => {
         product_image_url=$7, cost_price=$8, critical_stock=$9, color=$10,
         trendyol_price=$11, trendyol_commission=$12,
         hepsiburada_price=$13, hepsiburada_commission=$14,
-        updated_at=NOW()
-       WHERE id=$15 RETURNING *`,
+        is_active=$15, updated_at=NOW()
+       WHERE id=$16 RETURNING *`,
       [name, barcode, product_type_id || null, material_id || null, supplier_name || null, stock_quantity || 0,
-       product_image_url || null, cost_price || null, critical_stock || 5, color || null,
+       product_image_url || null, cost_price || null, critVal, color || null,
        trendyol_price || null, trendyol_commission || null,
-       hepsiburada_price || null, hepsiburada_commission || null, id]
+       hepsiburada_price || null, hepsiburada_commission || null,
+       is_active !== false && is_active !== 'false',
+       id]
     );
 
     if (result.rows.length === 0) {

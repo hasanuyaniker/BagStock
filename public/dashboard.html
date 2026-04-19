@@ -131,7 +131,7 @@
         <div class="section" id="section-sales">
           <div class="toolbar">
             <div class="toolbar-left">
-              <label style="font-size:13px;font-weight:600;">Tarih:</label>
+              <label style="font-size:13px;font-weight:600;color:var(--text-secondary);">Tarih:</label>
               <input type="date" id="salesDate">
               <button class="btn btn-primary btn-sm" onclick="loadSalesView()">Sorgula</button>
               <input type="text" class="search-input" id="salesSearch" placeholder="Ürün ara..." oninput="filterSalesProducts()" style="width:200px;">
@@ -139,7 +139,7 @@
           </div>
           <div id="salesProductList"></div>
           <div id="salesHistory" style="margin-top:24px;">
-            <h3 style="font-size:15px;color:var(--navy-700);margin-bottom:12px;">Günün Kayıtları</h3>
+            <h3 style="font-size:15px;color:var(--text-secondary);margin-bottom:12px;">Günün Kayıtları</h3>
             <div class="table-container">
               <table>
                 <thead>
@@ -175,7 +175,7 @@
         <!-- SALES REPORT -->
         <div class="section" id="section-salesreport">
           <div class="sales-report-container">
-            <h3 style="font-size:16px;color:var(--navy-700);margin-bottom:16px;">Satış Raporları</h3>
+            <h3 style="font-size:16px;color:var(--text-secondary);margin-bottom:16px;">Satış Raporları</h3>
             <div class="sales-report-filters">
               <div class="form-group" style="margin-bottom:0;">
                 <label>Başlangıç Tarihi</label>
@@ -209,7 +209,7 @@
         <!-- REPORTS -->
         <div class="section" id="section-reports">
           <div class="report-form">
-            <h3 style="font-size:16px;color:var(--navy-700);margin-bottom:16px;">Rapor İndir</h3>
+            <h3 style="font-size:16px;color:var(--text-secondary);margin-bottom:16px;">Rapor İndir</h3>
             <div class="form-group">
               <label>Rapor Türü</label>
               <select id="reportType" onchange="onReportTypeChange()">
@@ -415,6 +415,13 @@
         <div class="form-group">
           <label>Kritik Stok</label>
           <input type="number" id="pCritical" value="5" min="0">
+        </div>
+        <div class="form-group">
+          <label>Satış Durumu</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;margin-top:6px;">
+            <input type="checkbox" id="pIsActive" checked style="width:18px;height:18px;accent-color:#7c3aed;cursor:pointer;">
+            Satışa Açık
+          </label>
         </div>
         <div class="form-group">
           <label>Trendyol Fiyatı (₺)</label>

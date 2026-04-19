@@ -28,6 +28,15 @@ async function runMigrations() {
     await pool.query(`INSERT INTO materials (name) VALUES ('Deri'),('Suni Deri'),('Kumaş'),('Hasır'),('Naylon'),('Süet'),('Diğer') ON CONFLICT (name) DO NOTHING`);
     // Eski ISO timestamp anahtarını temizle (artık kullanılmıyor)
     await pool.query(`DELETE FROM app_settings WHERE key = 'daily_report_sent_at'`);
+    // is_active: satışa açık/kapalı alanı
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`);
+    // 18.04.2026 öncesi satış verilerini tek seferlik temizle
+    const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
+    if (cleanedFlag.rows.length === 0) {
+      await pool.query(`DELETE FROM sales WHERE sale_date < '2026-04-18'`);
+      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('sales_cleaned_before_20260418', 'true') ON CONFLICT (key) DO NOTHING`);
+      console.log('✓ 2026-04-18 öncesi satış verileri silindi');
+    }
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);

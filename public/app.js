@@ -236,9 +236,9 @@ function renderStockChart(data) {
   const colors = sorted.map(d => {
     const qty  = parseInt(d.stock_quantity)  || 0;
     const crit = parseInt(d.critical_stock) || 0;
-    if (qty === 0)   return 'rgba(244,63,94,0.85)';
-    if (qty <= crit) return 'rgba(245,158,11,0.85)';
-    return 'rgba(91,61,232,0.82)';
+    if (qty === 0)   return 'rgba(244,63,94,0.85)';   // kırmızı — tükendi
+    if (qty <= crit) return 'rgba(245,158,11,0.85)';  // turuncu — kritik
+    return 'rgba(22,163,74,0.85)';                    // koyu yeşil — normal
   });
 
   const hoverColors = sorted.map(d => {
@@ -246,7 +246,7 @@ function renderStockChart(data) {
     const crit = parseInt(d.critical_stock) || 0;
     if (qty === 0)   return '#f43f5e';
     if (qty <= crit) return '#f59e0b';
-    return '#c026a8';
+    return '#15803d';  // koyu yeşil hover
   });
 
   // Her bar için yeterli yükseklik — çakışmayı önler
@@ -513,9 +513,15 @@ function renderInventoryTable() {
         case 'hepsiburada_price': rows += formatCurrency(p.hepsiburada_price); break;
         case 'hepsiburada_commission': rows += p.hepsiburada_commission != null ? '%' + p.hepsiburada_commission : '-'; break;
         case 'status':
-          if (p.stock_quantity === 0) rows += '<span class="status-badge outofstock">Tükendi</span>';
-          else if (p.stock_quantity <= p.critical_stock) rows += '<span class="status-badge critical">Kritik</span>';
-          else rows += '<span class="status-badge normal">Normal</span>';
+          if (p.is_active === false) {
+            rows += '<span class="status-badge" style="background:rgba(148,152,187,0.15);color:#6b7280;">Pasif</span>';
+          } else if (p.stock_quantity === 0) {
+            rows += '<span class="status-badge outofstock">Tükendi</span>';
+          } else if (p.stock_quantity <= p.critical_stock) {
+            rows += '<span class="status-badge critical">Kritik</span>';
+          } else {
+            rows += '<span class="status-badge normal">Normal</span>';
+          }
           break;
         case 'actions':
           rows += `<button class="btn btn-secondary btn-sm" onclick="editProduct(${p.id})" style="margin-right:4px;">Düzenle</button>`;
@@ -655,7 +661,8 @@ function openProductModal(product = null) {
     document.getElementById('pSupplier').value = product.supplier_name || '';
     document.getElementById('pStock').value = product.stock_quantity || 0;
     document.getElementById('pCost').value = product.cost_price || '';
-    document.getElementById('pCritical').value = product.critical_stock || 5;
+    document.getElementById('pCritical').value = (product.critical_stock !== undefined && product.critical_stock !== null) ? product.critical_stock : 5;
+    document.getElementById('pIsActive').checked = product.is_active !== false;
     document.getElementById('pTYPrice').value = product.trendyol_price || '';
     document.getElementById('pTYComm').value = product.trendyol_commission || '';
     document.getElementById('pHBPrice').value = product.hepsiburada_price || '';
@@ -674,6 +681,7 @@ function openProductModal(product = null) {
     ['pName','pBarcode','pColor','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('pStock').value = 0;
     document.getElementById('pCritical').value = 5;
+    document.getElementById('pIsActive').checked = true;
     document.getElementById('pType').value = '';
     document.getElementById('pMaterial').value = '';
     document.getElementById('productCurrentImageUrl').value = '';
@@ -706,7 +714,8 @@ async function saveProduct() {
     supplier_name: document.getElementById('pSupplier').value.trim() || null,
     stock_quantity: parseInt(document.getElementById('pStock').value) || 0,
     cost_price: parseFloat(document.getElementById('pCost').value) || null,
-    critical_stock: parseInt(document.getElementById('pCritical').value) || 5,
+    critical_stock: (() => { const v = document.getElementById('pCritical').value; return v !== '' ? parseInt(v) : 5; })(),
+    is_active: document.getElementById('pIsActive').checked,
     trendyol_price: parseFloat(document.getElementById('pTYPrice').value) || null,
     trendyol_commission: parseFloat(document.getElementById('pTYComm').value) || null,
     hepsiburada_price: parseFloat(document.getElementById('pHBPrice').value) || null,
@@ -963,16 +972,32 @@ async function loadNewCount() {
 }
 
 async function startNewCount() {
+  // Butonı devre dışı bırak, yükleniyor göster
+  const btn = document.querySelector('[onclick="startNewCount()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Başlatılıyor...'; }
+
   const res = await apiFetch('/api/stockcount/sessions', {
     method: 'POST',
     body: { count_date: new Date().toISOString().split('T')[0], note: '' }
   });
+
   if (res?.ok) {
     showToast('Yeni sayım başlatıldı');
-    loadNewCount();
+    // Doğrudan oluşturulan session ID'yi al, extra /sessions çağrısından kaçın
+    const newSession = await res.json();
+    if (newSession?.id) {
+      const detRes = await apiFetch(`/api/stockcount/sessions/${newSession.id}`);
+      if (detRes) {
+        activeCountSession = await detRes.json();
+        renderCountSession();
+      }
+    } else {
+      loadNewCount();
+    }
   } else {
     const err = await res?.json();
     showToast(err?.error || 'Hata oluştu', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Yeni Sayım Başlat'; }
   }
 }
 
