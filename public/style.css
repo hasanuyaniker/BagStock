@@ -1163,4 +1163,29 @@ input[type="date"]:focus {
 .access-denied h2 { color: var(--red); margin-bottom: 12px; font-size: 22px; }
 .access-denied p { color: var(--text-muted); }
 
+/* ========== DARK BG TEXT — gradient arka plan üstündeki yazılar ========== */
+/* Toolbar'daki label'lar card dışında (dark bg) olduğundan açık renk */
+.toolbar label {
+  color: #ffffff !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+/* Section içindeki doğrudan h3 başlıklar (card dışında) */
+.section > div > h3,
+.section > h3 {
+  color: #ffffff !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+/* count-progress ve stok sayım dışı metin */
+.count-progress {
+  color: #e8eaff !important;
+}
+
+/* Sayım boş mesaj */
+#countNewView p[style*="color:#6b7280"],
+#countHistoryView p[style*="color:#6b7280"] {
+  color: #c5c8e8 !important;
+}
+
 /* ========== SECTION
