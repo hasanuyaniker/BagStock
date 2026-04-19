@@ -132,7 +132,8 @@
           <div class="toolbar">
             <div class="toolbar-left">
               <label style="font-size:13px;font-weight:600;">Tarih:</label>
-              <input type="date" id="salesDate" onchange="loadSalesView()">
+              <input type="date" id="salesDate">
+              <button class="btn btn-primary btn-sm" onclick="loadSalesView()">Sorgula</button>
               <input type="text" class="search-input" id="salesSearch" placeholder="Ürün ara..." oninput="filterSalesProducts()" style="width:200px;">
             </div>
           </div>

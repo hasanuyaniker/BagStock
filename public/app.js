@@ -57,6 +57,9 @@ function logout() {
 }
 
 // ==================== INIT ====================
+// Veri yüklenme bayrağı — tekrar çağrılarda gereksiz API isteği önler
+let _dataLoaded = false;
+
 (async function init() {
   try {
     const res = await apiFetch('/api/auth/me');
@@ -74,19 +77,22 @@ function logout() {
     if (currentUser.role === 'admin') {
       document.getElementById('stockcountNav').style.display = '';
     } else {
-      document.getElementById('settingsTabUsers').style.display = 'none';
-      document.getElementById('addUserBtn') && (document.getElementById('addUserBtn').style.display = 'none');
+      document.getElementById('settingsTabUsers') && (document.getElementById('settingsTabUsers').style.display = 'none');
+      document.getElementById('addUserBtn')      && (document.getElementById('addUserBtn').style.display = 'none');
     }
-
-    // Load saved section
-    const saved = localStorage.getItem('activeSection');
-    if (saved && saved !== 'stockcount') switchSection(saved);
-    else if (saved === 'stockcount' && currentUser.role === 'admin') switchSection(saved);
-
-    await Promise.all([loadProductTypes(), loadMaterials(), loadProducts(), loadStats(), loadLogoFromDB()]);
 
     // Set today on sales date
     document.getElementById('salesDate').value = new Date().toISOString().split('T')[0];
+
+    // Tüm verileri paralel yükle (bir kez)
+    await Promise.all([loadProductTypes(), loadMaterials(), loadProducts(), loadStats(), loadLogoFromDB()]);
+    _dataLoaded = true;
+
+    // Load saved section (veriler hazır olduktan sonra)
+    const saved = localStorage.getItem('activeSection');
+    if (saved && saved !== 'stockcount') switchSection(saved);
+    else if (saved === 'stockcount' && currentUser.role === 'admin') switchSection(saved);
+    else switchSection('dashboard');
 
   } catch (err) {
     console.error('Init error:', err);
@@ -112,8 +118,15 @@ function switchSection(name) {
   localStorage.setItem('activeSection', name);
 
   // Load section data
-  if (name === 'dashboard') loadStats();
-  if (name === 'inventory') { loadProducts(); loadColumnSettings(); }
+  // Envanter ve dashboard: init'te zaten yüklendiği için cache kullan, sadece render et
+  if (name === 'dashboard') {
+    if (_dataLoaded) loadStats();
+    else loadStats();
+  }
+  if (name === 'inventory') {
+    if (_dataLoaded && products.length > 0) { loadColumnSettings(); renderInventoryTable(); }
+    else { loadProducts(); loadColumnSettings(); }
+  }
   if (name === 'sales') loadSalesView();
   if (name === 'salesreport') initSalesReport();
   if (name === 'stockcount') loadStockCount();
@@ -210,12 +223,12 @@ async function loadStats() {
 }
 
 function renderStockChart(data) {
-  const ctx     = document.getElementById('chartStock');
-  const wrapper = document.getElementById('stockChartWrapper');
+  const canvasEl = document.getElementById('chartStock');
+  const wrapper  = document.getElementById('stockChartWrapper');
   if (stockChart) { stockChart.destroy(); stockChart = null; }
   if (!data || data.length === 0) return;
 
-  // TÜM ürünleri göster — limit yok, stoka göre büyükten küçüğe
+  // TÜM ürünleri göster — stoka göre büyükten küçüğe
   const sorted = [...data].sort((a, b) => parseInt(b.stock_quantity) - parseInt(a.stock_quantity));
   const labels = sorted.map(d => d.name.length > 26 ? d.name.substring(0, 26) + '…' : d.name);
   const values = sorted.map(d => parseInt(d.stock_quantity) || 0);
@@ -236,16 +249,28 @@ function renderStockChart(data) {
     return '#c026a8';
   });
 
-  // Wrapper yüksekliğini ürün sayısına göre ayarla (canvas değil, wrapper)
-  const perBar = 28;
-  const wantH  = Math.max(260, sorted.length * perBar + 40);
-  const capH   = 380;
+  // Her bar için yeterli yükseklik — çakışmayı önler
+  const perBar = 32;
+  const wantH  = Math.max(200, sorted.length * perBar + 50);
+  const capH   = 400;
+
+  // Wrapper: kaydırmalı kap
   if (wrapper) {
     wrapper.style.height    = Math.min(wantH, capH) + 'px';
+    wrapper.style.maxHeight = capH + 'px';
     wrapper.style.overflowY = wantH > capH ? 'auto' : 'hidden';
+    wrapper.style.overflowX = 'hidden';
+    wrapper.style.position  = 'relative';
   }
 
-  stockChart = new Chart(ctx, {
+  // Canvas: TÜM içeriği barındıracak yükseklik (wrapper scroll eder)
+  const containerW = wrapper ? wrapper.clientWidth || 500 : 500;
+  canvasEl.style.width  = containerW + 'px';
+  canvasEl.style.height = wantH + 'px';
+  canvasEl.width  = containerW;
+  canvasEl.height = wantH;
+
+  stockChart = new Chart(canvasEl, {
     type: 'bar',
     data: {
       labels,
@@ -253,16 +278,16 @@ function renderStockChart(data) {
         data: values,
         backgroundColor: colors,
         hoverBackgroundColor: hoverColors,
-        borderRadius: 6,
+        borderRadius: 5,
         borderSkipped: false,
-        barThickness: 20
+        barThickness: 22
       }]
     },
     options: {
       indexAxis: 'y',
-      responsive: true,
+      responsive: false,          // explicit canvas boyutu kullan
       maintainAspectRatio: false,
-      animation: { duration: 500, easing: 'easeOutQuart' },
+      animation: { duration: 400, easing: 'easeOutQuart' },
       plugins: {
         legend: { display: false },
         tooltip: {
