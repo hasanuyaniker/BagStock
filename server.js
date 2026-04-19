@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 async function runMigrations() {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
   });
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS app_settings (
@@ -79,7 +79,7 @@ app.use('/api/settings', require('./routes/settings'));
 app.get('/api/backup', require('./middleware/auth'), async (req, res) => {
   try {
     const { Pool } = require('pg');
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false });
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
 
     const products = (await pool.query('SELECT * FROM products ORDER BY id')).rows;
     const sales = (await pool.query('SELECT * FROM sales ORDER BY id')).rows;
@@ -192,7 +192,7 @@ runMigrations().then(() => {
 
   const appPool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
   });
 
   startDailyReportScheduler(appPool);
