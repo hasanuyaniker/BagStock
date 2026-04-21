@@ -1721,3 +1721,73 @@ tr.row-passive .type-badge {
     padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px) + 8px) !important;
   }
 }
+
+/* ========== DÖNDÜRME ZOOM ENGELİ ========== */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* ========== ALT NAV — TEMİZ FINAL KURALLAR (tüm !important'ları geçersiz kılar) ========== */
+
+/* Dikey mobil (portrait): büyük ikonlar */
+@media screen and (max-width: 768px) and (orientation: portrait) {
+  nav.bottom-nav {
+    display: flex !important;
+    height: 72px !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  }
+  nav.bottom-nav .bottom-nav-item {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    padding: 6px 2px !important;
+    opacity: 1 !important;
+    color: var(--b-color, rgba(197,200,232,0.65)) !important;
+  }
+  nav.bottom-nav .bottom-nav-item.active {
+    opacity: 1 !important;
+    color: var(--b-color, #fff) !important;
+  }
+  nav.bottom-nav .bottom-nav-item svg {
+    display: block !important;
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
+    flex-shrink: 0 !important;
+    opacity: 1 !important;
+  }
+  nav.bottom-nav .bottom-nav-item span {
+    display: block !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    opacity: 1 !important;
+  }
+  .content {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Yatay mobil (landscape): kompakt */
+@media screen and (max-width: 900px) and (orientation: landscape) {
+  nav.bottom-nav {
+    display: flex !important;
+    height: 54px !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  }
+  nav.bottom-nav .bottom-nav-item svg {
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+  }
+  nav.bottom-nav .bottom-nav-item span {
+    font-size: 9px !important;
+  }
+  .content {
+    padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
