@@ -899,6 +899,9 @@ function renderSalesProducts(list) {
           <option value="normal">Normal</option>
           <option value="trendyol">🟠 Trendyol</option>
           <option value="hepsiburada">🔴 Hepsiburada</option>
+          <option value="dolap">👗 Dolap</option>
+          <option value="amazon">📦 Amazon</option>
+          <option value="pttavm">📮 PTT AVM</option>
         </select>
         <button class="btn btn-success btn-sm" onclick="confirmSale(${p.id}, 1)">+ Giriş</button>
         <button class="btn btn-danger btn-sm" onclick="confirmSale(${p.id}, -1)">- Çıkış</button>
@@ -953,7 +956,7 @@ function renderSalesHistory() {
     if (isIn) totalIn += s.quantity_change;
     else totalOut += Math.abs(s.quantity_change);
 
-    const mpLabel = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada' };
+    const mpLabel = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada', dolap: '👗 Dolap', amazon: '📦 Amazon', pttavm: '📮 PTT AVM' };
     const mp = s.marketplace || 'normal';
     html += `<tr>
       <td>${escHtml(s.product_name)}</td>
@@ -1874,42 +1877,44 @@ function renderSalesReport(data) {
   document.getElementById('srTotalCost').textContent = formatCurrency(totalCost);
   document.getElementById('srUniqueProducts').textContent = uniqueProducts;
 
-  const mpLabel = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada' };
+  const mpLabel = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada', dolap: '👗 Dolap', amazon: '📦 Amazon', pttavm: '📮 PTT AVM' };
 
   // Platform kırılım kartları
   let mpHtml = '';
   if (marketplaceSummary && marketplaceSummary.length > 0) {
     const mpMap = {};
     marketplaceSummary.forEach(m => { mpMap[m.marketplace] = parseInt(m.total_sold || 0); });
-    const trendyolQty = mpMap['trendyol'] || 0;
-    const hepsiQty = mpMap['hepsiburada'] || 0;
-    const normalQty = mpMap['normal'] || 0;
 
-    mpHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-      <div style="background:rgba(148,163,184,0.1);border:1px solid rgba(148,163,184,0.2);border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
-        <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px;">NORMAL</div>
-        <div style="font-size:22px;font-weight:800;color:#334155;">${normalQty}</div>
-      </div>
-      <div style="background:rgba(242,122,26,0.08);border:1px solid rgba(242,122,26,0.25);border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
-        <div style="font-size:11px;color:#c45d09;font-weight:700;margin-bottom:4px;">🟠 TRENDYOL</div>
-        <div style="font-size:22px;font-weight:800;color:#c45d09;">${trendyolQty}</div>
-      </div>
-      <div style="background:rgba(255,97,0,0.08);border:1px solid rgba(255,97,0,0.25);border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
-        <div style="font-size:11px;color:#b34500;font-weight:700;margin-bottom:4px;">🔴 HEPSİBURADA</div>
-        <div style="font-size:22px;font-weight:800;color:#b34500;">${hepsiQty}</div>
-      </div>
-    </div>`;
+    const mpCards = [
+      { key: 'normal',      label: 'NORMAL',       emoji: '',   bg: 'rgba(148,163,184,0.1)',  border: 'rgba(148,163,184,0.2)', color: '#334155' },
+      { key: 'trendyol',    label: 'TRENDYOL',     emoji: '🟠', bg: 'rgba(242,122,26,0.08)',  border: 'rgba(242,122,26,0.25)', color: '#c45d09' },
+      { key: 'hepsiburada', label: 'HEPSİBURADA',  emoji: '🔴', bg: 'rgba(255,97,0,0.08)',    border: 'rgba(255,97,0,0.25)',   color: '#b34500' },
+      { key: 'dolap',       label: 'DOLAP',         emoji: '👗', bg: 'rgba(168,85,247,0.08)',  border: 'rgba(168,85,247,0.25)', color: '#7c3aed' },
+      { key: 'amazon',      label: 'AMAZON',        emoji: '📦', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.25)', color: '#b45309' },
+      { key: 'pttavm',      label: 'PTT AVM',       emoji: '📮', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)',  color: '#dc2626' },
+    ];
+
+    mpHtml = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">';
+    mpCards.forEach(c => {
+      const qty = mpMap[c.key] || 0;
+      if (qty === 0) return;
+      mpHtml += `<div style="background:${c.bg};border:1px solid ${c.border};border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
+        <div style="font-size:11px;color:${c.color};font-weight:700;margin-bottom:4px;">${c.emoji} ${c.label}</div>
+        <div style="font-size:22px;font-weight:800;color:${c.color};">${qty}</div>
+      </div>`;
+    });
+    mpHtml += '</div>';
   }
 
   // Ürün bazlı özet tablo
   let html = mpHtml;
   html += '<h4 style="font-size:14px;font-weight:700;margin:16px 0 8px;">Ürün Bazlı Satış Özeti</h4>';
   html += '<div class="table-container"><table><thead><tr>';
-  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyet</th><th>Toplam</th><th>Normal</th><th>🟠 Trendyol</th><th>🔴 Hepsiburada</th><th>Toplam Maliyet</th>';
+  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyet</th><th>Toplam</th><th>Normal</th><th>🟠 TY</th><th>🔴 HB</th><th>👗 Dolap</th><th>📦 Amazon</th><th>📮 PTT</th><th>Toplam Maliyet</th>';
   html += '</tr></thead><tbody>';
 
   if (summary.length === 0) {
-    html += '<tr><td colspan="9" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
+    html += '<tr><td colspan="12" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
   } else {
     summary.forEach(row => {
       html += `<tr>
@@ -1921,6 +1926,9 @@ function renderSalesReport(data) {
         <td>${row.normal_sold || 0}</td>
         <td style="color:#c45d09;font-weight:700;">${row.trendyol_sold || 0}</td>
         <td style="color:#b34500;font-weight:700;">${row.hepsiburada_sold || 0}</td>
+        <td style="color:#7c3aed;font-weight:700;">${row.dolap_sold || 0}</td>
+        <td style="color:#b45309;font-weight:700;">${row.amazon_sold || 0}</td>
+        <td style="color:#dc2626;font-weight:700;">${row.pttavm_sold || 0}</td>
         <td>${formatCurrency(row.total_cost)}</td>
       </tr>`;
     });
@@ -1928,7 +1936,7 @@ function renderSalesReport(data) {
     html += `<tr style="background:#f9fafb;font-weight:700;">
       <td colspan="4" style="text-align:right;">TOPLAM</td>
       <td style="color:var(--red);">${totalSold}</td>
-      <td></td><td></td><td></td>
+      <td></td><td></td><td></td><td></td><td></td><td></td>
       <td>${formatCurrency(totalCost)}</td>
     </tr>`;
   }
@@ -1945,13 +1953,14 @@ function renderSalesReport(data) {
       const isOut = row.quantity_change < 0;
       const dateStr = row.sale_date ? new Date(row.sale_date).toLocaleDateString('tr-TR') : '-';
       const mp = row.marketplace || 'normal';
+      const mpLabelFull = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada', dolap: '👗 Dolap', amazon: '📦 Amazon', pttavm: '📮 PTT AVM' };
 
       html += `<tr>
         <td>${dateStr}</td>
         <td>${escHtml(row.product_name)}</td>
         <td>${row.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(row.color)}</span>` : '-'}</td>
         <td>${escHtml(row.barcode)}</td>
-        <td><span class="mp-badge ${mp}">${mpLabel[mp] || mp}</span></td>
+        <td><span class="mp-badge ${mp}">${mpLabelFull[mp] || mp}</span></td>
         <td><strong style="color:${isOut ? 'var(--red)' : 'var(--green)'};">${isOut ? '' : '+'}${row.quantity_change}</strong></td>
       </tr>`;
     });

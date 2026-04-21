@@ -21,7 +21,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Ürün ve miktar bilgisi zorunludur' });
     }
 
-    const validMarketplaces = ['normal', 'trendyol', 'hepsiburada'];
+    const validMarketplaces = ['normal', 'trendyol', 'hepsiburada', 'dolap', 'amazon', 'pttavm'];
     const mp = validMarketplaces.includes(marketplace) ? marketplace : 'normal';
 
     await client.query('BEGIN');
@@ -142,6 +142,9 @@ router.get('/report', async (req, res) => {
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS total_sold,
              ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'trendyol'    THEN s.quantity_change ELSE 0 END)) AS trendyol_sold,
              ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'hepsiburada' THEN s.quantity_change ELSE 0 END)) AS hepsiburada_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'dolap'       THEN s.quantity_change ELSE 0 END)) AS dolap_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'amazon'      THEN s.quantity_change ELSE 0 END)) AS amazon_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'pttavm'      THEN s.quantity_change ELSE 0 END)) AS pttavm_sold,
              ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'normal'      THEN s.quantity_change ELSE 0 END)) AS normal_sold,
              SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END) AS total_in,
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) * COALESCE(p.cost_price, 0) AS total_cost

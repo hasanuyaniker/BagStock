@@ -1503,6 +1503,9 @@ input[type="date"]:focus {
 .mp-badge.normal      { background: rgba(148,163,184,0.15); color: #64748b; }
 .mp-badge.trendyol    { background: rgba(242,122,26,0.15);  color: #c45d09; }
 .mp-badge.hepsiburada { background: rgba(255,97,0,0.15);    color: #b34500; }
+.mp-badge.dolap       { background: rgba(168,85,247,0.12);  color: #7c3aed; }
+.mp-badge.amazon      { background: rgba(245,158,11,0.12);  color: #b45309; }
+.mp-badge.pttavm      { background: rgba(239,68,68,0.12);   color: #dc2626; }
 
 /* Marketplace select — satış kartında */
 .marketplace-select {
