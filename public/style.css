@@ -1566,8 +1566,8 @@ input[type="date"]:focus {
   }
 
   .sales-stock-badge {
-    font-size: 11px;
-    padding: 4px 8px;
+    font-size: 13px;
+    padding: 5px 10px;
     flex-shrink: 0;
   }
 
@@ -1702,8 +1702,8 @@ tr.row-passive .type-badge {
     font-size: 10px;
   }
   #salesProductList .sales-stock-badge {
-    font-size: 11px;
-    padding: 4px 8px;
+    font-size: 13px;
+    padding: 5px 10px;
     flex-shrink: 0;
   }
   /* Yatay modda topbar gizle, daha fazla alan */
