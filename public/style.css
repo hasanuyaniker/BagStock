@@ -1413,3 +1413,172 @@ input[type="date"]:focus {
     line-height: 1;
   }
 }
+
+/* ========== SIDEBAR & BOTTOM-NAV: PER-SECTION RENK PALETİ ========== */
+
+/* Sidebar default — CSS var ile */
+.sidebar-item {
+  color: var(--s-color, rgba(197,200,232,0.6));
+}
+.sidebar-item svg {
+  color: var(--s-color, rgba(197,200,232,0.6));
+}
+
+/* Her bölüm için renk ataması */
+.sidebar-item[data-section="dashboard"]   { --s-color: #7dd3fc; }  /* sky blue */
+.sidebar-item[data-section="inventory"]   { --s-color: #6ee7b7; }  /* emerald */
+.sidebar-item[data-section="sales"]       { --s-color: #fdba74; }  /* orange */
+.sidebar-item[data-section="stockcount"]  { --s-color: #c4b5fd; }  /* violet */
+.sidebar-item[data-section="salesreport"] { --s-color: #f9a8d4; }  /* pink */
+.sidebar-item[data-section="reports"]     { --s-color: #a5b4fc; }  /* indigo */
+.sidebar-item[data-section="settings"]    { --s-color: #94a3b8; }  /* slate */
+
+/* Aktif: gradient arka plan + beyaz yazı/ikon */
+.sidebar-item.active {
+  color: #ffffff !important;
+}
+.sidebar-item.active svg {
+  color: #ffffff !important;
+  filter: drop-shadow(0 0 5px rgba(255,255,255,0.35));
+}
+
+/* Hover: biraz parlat */
+.sidebar-item:hover {
+  color: #ffffff !important;
+  opacity: 0.9;
+}
+.sidebar-item:hover svg {
+  color: #ffffff !important;
+}
+
+/* Bottom nav per-section renk */
+.bottom-nav-item[data-section="dashboard"]   { --b-color: #7dd3fc; }
+.bottom-nav-item[data-section="inventory"]   { --b-color: #6ee7b7; }
+.bottom-nav-item[data-section="sales"]       { --b-color: #fdba74; }
+.bottom-nav-item[data-section="salesreport"] { --b-color: #f9a8d4; }
+.bottom-nav-item[data-section="settings"]    { --b-color: #94a3b8; }
+
+.bottom-nav-item {
+  color: var(--b-color, rgba(197,200,232,0.5));
+  opacity: 0.6;
+}
+.bottom-nav-item.active {
+  color: var(--b-color, #fff) !important;
+  opacity: 1;
+  border-top-color: var(--b-color, var(--pink)) !important;
+}
+.bottom-nav-item.active svg {
+  filter: drop-shadow(0 0 5px var(--b-color, rgba(233,30,140,0.5)));
+}
+.bottom-nav-item:active { opacity: 1; }
+
+/* ========== MARKETPLACE BADGE ========== */
+.mp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mp-badge.normal      { background: rgba(148,163,184,0.15); color: #64748b; }
+.mp-badge.trendyol    { background: rgba(242,122,26,0.15);  color: #c45d09; }
+.mp-badge.hepsiburada { background: rgba(255,97,0,0.15);    color: #b34500; }
+
+/* Marketplace select — satış kartında */
+.marketplace-select {
+  padding: 6px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  transition: border-color .2s;
+}
+.marketplace-select:focus { border-color: var(--violet); }
+
+/* ========== MOBİL SATIŞ KARTI DÜZELTMESİ ========== */
+@media (max-width: 768px) {
+  /* Satış kartı: dikey düzen */
+  .sales-product-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  /* Üst satır: resim + bilgi + stok badge yan yana */
+  .sales-product-card > div:first-child {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex-direction: row;
+    /* undo the column */
+  }
+
+  .sales-product-info {
+    flex: 1;
+  }
+
+  .sales-product-name {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sales-product-meta {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  /* Stok badge: kendi satırında */
+  .sales-stock-badge {
+    align-self: flex-start;
+    font-size: 11px;
+  }
+
+  /* Eylem butonları: tam genişlik satır */
+  .sales-actions {
+    width: 100%;
+    justify-content: stretch;
+    flex-wrap: nowrap;
+  }
+
+  .sales-qty-input {
+    width: 56px;
+    flex-shrink: 0;
+    font-size: 14px;
+    padding: 7px 6px;
+  }
+
+  .marketplace-select {
+    flex: 1;
+    font-size: 11px;
+    padding: 6px 4px;
+  }
+
+  .sales-actions .btn {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* Satış özeti */
+  .sales-summary {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  /* Günün kayıtları tablosu: yatay kaydır */
+  #salesHistory .table-container {
+    overflow-x: auto;
+  }
+}

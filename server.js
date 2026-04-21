@@ -30,6 +30,8 @@ async function runMigrations() {
     await pool.query(`DELETE FROM app_settings WHERE key = 'daily_report_sent_at'`);
     // is_active: satışa açık/kapalı alanı
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`);
+    // marketplace: hangi platformdan satıldığı
+    await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS marketplace VARCHAR(20) NOT NULL DEFAULT 'normal'`);
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {

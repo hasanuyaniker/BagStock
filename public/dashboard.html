@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="BagStock">
-  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/api/settings/logo-img">
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
@@ -51,7 +51,13 @@
           <span>Ana Ekran</span>
         </div>
         <div class="sidebar-item" data-section="inventory" onclick="switchSection('inventory')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+          <!-- Kol çantası / el çantası ikonu -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9h12l-1.2 11H7.2L6 9z"/>
+            <path d="M9 9V6.5A3 3 0 0115 6.5V9"/>
+            <line x1="6" y1="13" x2="18" y2="13"/>
+            <circle cx="12" cy="17" r="1"/>
+          </svg>
           <span>Envanter</span>
         </div>
         <div class="sidebar-item" data-section="sales" onclick="switchSection('sales')">
@@ -155,6 +161,7 @@
                     <th>Ürün</th>
                     <th>Renk</th>
                     <th>Tip</th>
+                    <th>Platform</th>
                     <th>Miktar</th>
                     <th>Not</th>
                     <th>Kullanıcı</th>
@@ -538,7 +545,12 @@
       <span>Ana Ekran</span>
     </div>
     <div class="bottom-nav-item" data-section="inventory" onclick="switchSection('inventory')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 9h12l-1.2 11H7.2L6 9z"/>
+        <path d="M9 9V6.5A3 3 0 0115 6.5V9"/>
+        <line x1="6" y1="13" x2="18" y2="13"/>
+        <circle cx="12" cy="17" r="1"/>
+      </svg>
       <span>Envanter</span>
     </div>
     <div class="bottom-nav-item" data-section="sales" onclick="switchSection('sales')">

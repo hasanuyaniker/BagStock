@@ -15,11 +15,14 @@ router.use(authMiddleware);
 router.post('/', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { product_id, quantity_change, sale_date, note } = req.body;
+    const { product_id, quantity_change, sale_date, note, marketplace } = req.body;
 
     if (!product_id || quantity_change === undefined || quantity_change === null) {
       return res.status(400).json({ error: 'Ürün ve miktar bilgisi zorunludur' });
     }
+
+    const validMarketplaces = ['normal', 'trendyol', 'hepsiburada'];
+    const mp = validMarketplaces.includes(marketplace) ? marketplace : 'normal';
 
     await client.query('BEGIN');
 
@@ -42,9 +45,9 @@ router.post('/', async (req, res) => {
 
     // Satış kaydı ekle
     const saleResult = await client.query(
-      `INSERT INTO sales (product_id, quantity_change, sale_date, note, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [product_id, quantity_change, sale_date || new Date().toISOString().split('T')[0], note || null, req.user.id]
+      `INSERT INTO sales (product_id, quantity_change, sale_date, note, created_by, marketplace)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [product_id, quantity_change, sale_date || new Date().toISOString().split('T')[0], note || null, req.user.id, mp]
     );
 
     await client.query('COMMIT');
@@ -84,7 +87,8 @@ router.get('/', async (req, res) => {
       SELECT s.*, p.name AS product_name, p.barcode AS product_barcode,
              p.color AS product_color, p.cost_price AS product_cost_price,
              pt.name AS product_type_name, p.product_image_url,
-             u.username AS created_by_username
+             u.username AS created_by_username,
+             COALESCE(s.marketplace, 'normal') AS marketplace
       FROM sales s
       JOIN products p ON s.product_id = p.id
       LEFT JOIN product_types pt ON p.product_type_id = pt.id
@@ -118,11 +122,12 @@ router.get('/report', async (req, res) => {
       return res.status(400).json({ error: 'Başlangıç ve bitiş tarihi gereklidir' });
     }
 
-    // Detaylı satış kayıtları
+    // Detaylı satış kayıtları (marketplace dahil)
     const detailResult = await pool.query(`
       SELECT s.sale_date, p.name AS product_name, p.color, p.barcode, p.cost_price,
              s.quantity_change, pt.name AS product_type_name,
-             u.username AS created_by_username
+             u.username AS created_by_username,
+             COALESCE(s.marketplace, 'normal') AS marketplace
       FROM sales s
       JOIN products p ON s.product_id = p.id
       LEFT JOIN product_types pt ON p.product_type_id = pt.id
@@ -131,24 +136,36 @@ router.get('/report', async (req, res) => {
       ORDER BY s.sale_date DESC, p.name
     `, [from, to]);
 
-    // Ürün bazlı özet (sadece çıkışlar = satışlar)
+    // Ürün bazlı özet — marketplace kırılımı ile
     const summaryResult = await pool.query(`
       SELECT p.name AS product_name, p.color, p.barcode, p.cost_price,
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS total_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'trendyol'    THEN s.quantity_change ELSE 0 END)) AS trendyol_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'hepsiburada' THEN s.quantity_change ELSE 0 END)) AS hepsiburada_sold,
+             ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'normal'      THEN s.quantity_change ELSE 0 END)) AS normal_sold,
              SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END) AS total_in,
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) * COALESCE(p.cost_price, 0) AS total_cost
       FROM sales s
       JOIN products p ON s.product_id = p.id
-      LEFT JOIN product_types pt ON p.product_type_id = pt.id
       WHERE s.sale_date >= $1 AND s.sale_date <= $2
       GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
       HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
       ORDER BY total_sold DESC
     `, [from, to]);
 
+    // Platform bazlı genel özet
+    const marketplaceResult = await pool.query(`
+      SELECT COALESCE(marketplace, 'normal') AS marketplace,
+             ABS(SUM(CASE WHEN quantity_change < 0 THEN quantity_change ELSE 0 END)) AS total_sold
+      FROM sales
+      WHERE sale_date >= $1 AND sale_date <= $2 AND quantity_change < 0
+      GROUP BY marketplace
+    `, [from, to]);
+
     res.json({
       details: detailResult.rows,
       summary: summaryResult.rows,
+      marketplaceSummary: marketplaceResult.rows,
       period: { from, to }
     });
   } catch (err) {

@@ -861,6 +861,11 @@ function renderSalesProducts(list) {
       <span class="sales-stock-badge" style="${stockColor}">Stok: ${p.stock_quantity}</span>
       <div class="sales-actions">
         <input type="number" class="sales-qty-input" id="saleQty_${p.id}" value="1" min="1">
+        <select class="marketplace-select" id="saleMp_${p.id}">
+          <option value="normal">Normal</option>
+          <option value="trendyol">🟠 Trendyol</option>
+          <option value="hepsiburada">🔴 Hepsiburada</option>
+        </select>
         <button class="btn btn-success btn-sm" onclick="confirmSale(${p.id}, 1)">+ Giriş</button>
         <button class="btn btn-danger btn-sm" onclick="confirmSale(${p.id}, -1)">- Çıkış</button>
       </div>
@@ -887,9 +892,11 @@ async function recordSale(productId, direction) {
   const qty = parseInt(qtyInput?.value) || 1;
   const date = document.getElementById('salesDate').value;
 
+  const marketplace = document.getElementById(`saleMp_${productId}`)?.value || 'normal';
+
   const res = await apiFetch('/api/sales', {
     method: 'POST',
-    body: { product_id: productId, quantity_change: qty * direction, sale_date: date, note: '' }
+    body: { product_id: productId, quantity_change: qty * direction, sale_date: date, note: '', marketplace }
   });
 
   if (res?.ok) {
@@ -912,17 +919,20 @@ function renderSalesHistory() {
     if (isIn) totalIn += s.quantity_change;
     else totalOut += Math.abs(s.quantity_change);
 
+    const mpLabel = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada' };
+    const mp = s.marketplace || 'normal';
     html += `<tr>
       <td>${escHtml(s.product_name)}</td>
       <td>${s.product_color ? `<span class="type-badge" style="background:#ede9fe;color:#6d28d9;">${escHtml(s.product_color)}</span>` : '-'}</td>
       <td>${s.product_type_name ? `<span class="type-badge">${escHtml(s.product_type_name)}</span>` : '-'}</td>
+      <td><span class="mp-badge ${mp}">${mpLabel[mp] || mp}</span></td>
       <td><strong style="color:${isIn ? 'var(--green)' : 'var(--red)'};">${isIn ? '+' : ''}${s.quantity_change}</strong></td>
       <td>${escHtml(s.note || '-')}</td>
       <td>${escHtml(s.created_by_username || '-')}</td>
     </tr>`;
   });
 
-  tbody.innerHTML = html || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#6b7280;">Kayıt yok</td></tr>';
+  tbody.innerHTML = html || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#6b7280;">Kayıt yok</td></tr>';
 
   document.getElementById('salesSummary').innerHTML = `
     <span class="sales-summary-item" style="color:var(--green);">Toplam Giriş: +${totalIn}</span>
@@ -1818,7 +1828,7 @@ async function loadSalesReport() {
 }
 
 function renderSalesReport(data) {
-  const { details, summary } = data;
+  const { details, summary, marketplaceSummary } = data;
 
   // Özet kartları
   const totalSold = summary.reduce((s, r) => s + parseInt(r.total_sold || 0), 0);
@@ -1830,14 +1840,42 @@ function renderSalesReport(data) {
   document.getElementById('srTotalCost').textContent = formatCurrency(totalCost);
   document.getElementById('srUniqueProducts').textContent = uniqueProducts;
 
+  const mpLabel = { normal: 'Normal', trendyol: '🟠 Trendyol', hepsiburada: '🔴 Hepsiburada' };
+
+  // Platform kırılım kartları
+  let mpHtml = '';
+  if (marketplaceSummary && marketplaceSummary.length > 0) {
+    const mpMap = {};
+    marketplaceSummary.forEach(m => { mpMap[m.marketplace] = parseInt(m.total_sold || 0); });
+    const trendyolQty = mpMap['trendyol'] || 0;
+    const hepsiQty = mpMap['hepsiburada'] || 0;
+    const normalQty = mpMap['normal'] || 0;
+
+    mpHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+      <div style="background:rgba(148,163,184,0.1);border:1px solid rgba(148,163,184,0.2);border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
+        <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px;">NORMAL</div>
+        <div style="font-size:22px;font-weight:800;color:#334155;">${normalQty}</div>
+      </div>
+      <div style="background:rgba(242,122,26,0.08);border:1px solid rgba(242,122,26,0.25);border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
+        <div style="font-size:11px;color:#c45d09;font-weight:700;margin-bottom:4px;">🟠 TRENDYOL</div>
+        <div style="font-size:22px;font-weight:800;color:#c45d09;">${trendyolQty}</div>
+      </div>
+      <div style="background:rgba(255,97,0,0.08);border:1px solid rgba(255,97,0,0.25);border-radius:10px;padding:12px 18px;flex:1;min-width:100px;">
+        <div style="font-size:11px;color:#b34500;font-weight:700;margin-bottom:4px;">🔴 HEPSİBURADA</div>
+        <div style="font-size:22px;font-weight:800;color:#b34500;">${hepsiQty}</div>
+      </div>
+    </div>`;
+  }
+
   // Ürün bazlı özet tablo
-  let html = '<h4 style="font-size:14px;color:var(--navy-700);margin:16px 0 8px;">Ürün Bazlı Satış Özeti</h4>';
+  let html = mpHtml;
+  html += '<h4 style="font-size:14px;font-weight:700;margin:16px 0 8px;">Ürün Bazlı Satış Özeti</h4>';
   html += '<div class="table-container"><table><thead><tr>';
-  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyeti</th><th>Satılan Adet</th><th>Toplam Maliyet</th>';
+  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyet</th><th>Toplam</th><th>Normal</th><th>🟠 Trendyol</th><th>🔴 Hepsiburada</th><th>Toplam Maliyet</th>';
   html += '</tr></thead><tbody>';
 
   if (summary.length === 0) {
-    html += '<tr><td colspan="6" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
+    html += '<tr><td colspan="9" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
   } else {
     summary.forEach(row => {
       html += `<tr>
@@ -1846,14 +1884,17 @@ function renderSalesReport(data) {
         <td>${escHtml(row.barcode)}</td>
         <td>${formatCurrency(row.cost_price)}</td>
         <td><strong style="color:var(--red);">${row.total_sold}</strong></td>
+        <td>${row.normal_sold || 0}</td>
+        <td style="color:#c45d09;font-weight:700;">${row.trendyol_sold || 0}</td>
+        <td style="color:#b34500;font-weight:700;">${row.hepsiburada_sold || 0}</td>
         <td>${formatCurrency(row.total_cost)}</td>
       </tr>`;
     });
 
-    // Toplam satırı
     html += `<tr style="background:#f9fafb;font-weight:700;">
       <td colspan="4" style="text-align:right;">TOPLAM</td>
       <td style="color:var(--red);">${totalSold}</td>
+      <td></td><td></td><td></td>
       <td>${formatCurrency(totalCost)}</td>
     </tr>`;
   }
@@ -1861,21 +1902,22 @@ function renderSalesReport(data) {
 
   // Detaylı satış kayıtları
   if (details.length > 0) {
-    html += '<h4 style="font-size:14px;color:var(--navy-700);margin:24px 0 8px;">Detaylı Satış Kayıtları</h4>';
+    html += '<h4 style="font-size:14px;font-weight:700;margin:24px 0 8px;">Detaylı Satış Kayıtları</h4>';
     html += '<div class="table-container"><table><thead><tr>';
-    html += '<th>Satış Tarihi</th><th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyeti</th><th>Miktar</th>';
+    html += '<th>Tarih</th><th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Platform</th><th>Miktar</th>';
     html += '</tr></thead><tbody>';
 
     details.forEach(row => {
       const isOut = row.quantity_change < 0;
       const dateStr = row.sale_date ? new Date(row.sale_date).toLocaleDateString('tr-TR') : '-';
+      const mp = row.marketplace || 'normal';
 
       html += `<tr>
         <td>${dateStr}</td>
         <td>${escHtml(row.product_name)}</td>
         <td>${row.color ? `<span class="type-badge" style="background:#f3f4f6;color:#374151;">${escHtml(row.color)}</span>` : '-'}</td>
         <td>${escHtml(row.barcode)}</td>
-        <td>${formatCurrency(row.cost_price)}</td>
+        <td><span class="mp-badge ${mp}">${mpLabel[mp] || mp}</span></td>
         <td><strong style="color:${isOut ? 'var(--red)' : 'var(--green)'};">${isOut ? '' : '+'}${row.quantity_change}</strong></td>
       </tr>`;
     });
