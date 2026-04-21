@@ -17,11 +17,34 @@ function getBaseUrl() {
   return '';
 }
 
-// ── İstanbul saati ────────────────────────────────────────────────────────
+// ── İstanbul saati (Intl.DateTimeFormat — Railway/Docker ortamında güvenilir) ──
 function getIstanbulDateTime() {
-  const str = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' });
-  const [date, time] = str.split(' ');
-  return { date, hhmm: time.substring(0, 5) };
+  const now = new Date();
+  try {
+    // Intl.DateTimeFormat formatToParts: tüm Node.js sürümlerinde çalışır
+    const fmt = new Intl.DateTimeFormat('tr-TR', {
+      timeZone: 'Europe/Istanbul',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+    const parts = fmt.formatToParts(now);
+    const get = (t) => parts.find(p => p.type === t)?.value || '00';
+    const day   = get('day').padStart(2, '0');
+    const month = get('month').padStart(2, '0');
+    const year  = get('year');
+    let   hour  = get('hour').padStart(2, '0');
+    const min   = get('minute').padStart(2, '0');
+    if (hour === '24') hour = '00'; // bazı sistemlerde gece yarısı 24:00 döner
+    return { date: `${year}-${month}-${day}`, hhmm: `${hour}:${min}` };
+  } catch (e) {
+    // Fallback: UTC+3 manuel hesap
+    const istanbul = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const iso = istanbul.toISOString();
+    return {
+      date: iso.substring(0, 10),
+      hhmm: iso.substring(11, 16)
+    };
+  }
 }
 
 // ── Resend HTTP API ile email gönder ──────────────────────────────────────

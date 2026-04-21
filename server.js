@@ -134,44 +134,45 @@ app.use((err, req, res, next) => {
 // ── Günlük rapor zamanlayıcı ──────────────────────────────────────────────
 function startDailyReportScheduler(appPool) {
   const { sendDailySalesReport, getIstanbulDateTime } = require('./services/notify');
-  let isSending = false; // eşzamanlı çift gönderim önleme
+  let isSending = false;
 
   async function checkAndSend() {
-    if (isSending) return; // zaten gönderim yapılıyor
+    if (isSending) return;
 
     try {
       const { date, hhmm } = getIstanbulDateTime();
 
       // Ayarlanan saati DB'den al
       const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
-      const reportTime = timeRow.rows[0]?.value || null;
-      if (!reportTime) return; // saat ayarlanmamış
+      const reportTime = (timeRow.rows[0]?.value || '').trim();
+      if (!reportTime || !/^\d{2}:\d{2}$/.test(reportTime)) return;
 
-      // Ayarlanan saat henüz gelmemiş
+      // Ayarlanan saat henüz gelmemiş — sadece 0-59 dk gecikmeli pencerede gönder
+      // (örn. 20:00 ayarlıysa 20:00–20:59 arası gönderir, 21:00'den sonra artık bu gün için yok sayar)
       if (hhmm < reportTime) return;
+      const [rH, rM] = reportTime.split(':').map(Number);
+      const [cH, cM] = hhmm.split(':').map(Number);
+      const diffMin = (cH * 60 + cM) - (rH * 60 + rM);
+      if (diffMin > 59) return; // 1 saati geçmişse bugün için gönderme fırsatı kaçtı
 
-      // Bu tarih+saat kombinasyonu için daha önce gönderilmiş mi?
-      // Anahtar: "2026-04-12|20:00" — saat değişirse veya yeni gün gelirse tekrar gönderilir
+      // Bu tarih+saat için daha önce gönderilmiş mi?
       const sentKey = `${date}|${reportTime}`;
       const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_key'");
       const lastSentKey = sentRow.rows[0]?.value || null;
-      if (lastSentKey === sentKey) return; // bu zamanlama için zaten gönderildi
+      if (lastSentKey === sentKey) return;
 
       console.log(`[Günlük Rapor] ${date} ${hhmm} — gönderim başlıyor (ayarlı: ${reportTime})`);
       isSending = true;
 
       try {
         await sendDailySalesReport();
-
-        // Yalnızca BAŞARILI gönderimden sonra anahtarı kaydet
         await appPool.query(
           `INSERT INTO app_settings (key, value) VALUES ('daily_report_sent_key', $1)
            ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
           [sentKey]
         );
-        console.log(`[Günlük Rapor] ✓ ${sentKey} raporu başarıyla gönderildi`);
+        console.log(`[Günlük Rapor] ✓ ${sentKey} başarıyla gönderildi`);
       } catch (sendErr) {
-        // Gönderim hata verdi — tarih kaydedilmez, bir sonraki dakika tekrar denenecek
         console.error(`[Günlük Rapor] ✗ Gönderim hatası (tekrar denenecek): ${sendErr.message}`);
       } finally {
         isSending = false;
@@ -179,15 +180,18 @@ function startDailyReportScheduler(appPool) {
 
     } catch (err) {
       isSending = false;
-      console.error('[Günlük Rapor Zamanlayıcı] Hata:', err.message);
+      console.error('[Günlük Rapor Zamanlayıcı] DB hatası:', err.message);
     }
   }
 
-  // Her dakika kontrol — deploy sırasında hemen gönderimi önlemek için startup check YOK
-  // (setInterval zaten 60s içinde ilk kontrolü yapar, bu yeterli)
-  setInterval(checkAndSend, 60 * 1000);
+  // Her 30 saniyede bir kontrol (60s yerine — daha güvenilir)
+  setInterval(checkAndSend, 30 * 1000);
 
-  console.log('✓ Günlük rapor zamanlayıcı başlatıldı');
+  // Uygulama (yeniden) başladığında 10 saniye sonra hemen kontrol et
+  // → Railway yeniden deploy etse bile zamanlı saat kaçmaz
+  setTimeout(checkAndSend, 10 * 1000);
+
+  console.log('✓ Günlük rapor zamanlayıcı başlatıldı (30s aralık + startup check)');
 }
 
 // Migration çalıştır, sonra sunucuyu başlat
