@@ -39,6 +39,13 @@ async function runMigrations() {
       await pool.query(`INSERT INTO app_settings (key, value) VALUES ('sales_cleaned_before_20260418', 'true') ON CONFLICT (key) DO NOTHING`);
       console.log('✓ 2026-04-18 öncesi satış verileri silindi');
     }
+    // 21.04.2026 satış verilerini tek seferlik sil
+    const cleaned0421 = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_20260421'`);
+    if (cleaned0421.rows.length === 0) {
+      await pool.query(`DELETE FROM sales WHERE sale_date = '2026-04-21'`);
+      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('sales_cleaned_20260421', 'true') ON CONFLICT (key) DO NOTHING`);
+      console.log('✓ 21.04.2026 satış verileri silindi');
+    }
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);
