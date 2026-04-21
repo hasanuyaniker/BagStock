@@ -26,8 +26,8 @@
 
   /* ── Backgrounds (koyu gradient üstünde cam efekti) ── */
   --bg-page:   transparent;
-  --bg-card:   rgba(255,255,255,0.93);
-  --bg-subtle: rgba(248,247,255,0.85);
+  --bg-card:   rgba(236, 232, 255, 0.94);   /* açık lavanta — temaya uyumlu */
+  --bg-subtle: rgba(225, 220, 250, 0.88);
 
   /* ── Text ── */
   --text-primary:   #1a1f3e;
@@ -1789,5 +1789,39 @@ html {
   }
   .content {
     padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* ========== ALT NAV OVERFLOW DÜZELTMESİ — dikey portrait ========== */
+/* İkonlar 30px çok büyük geliyordu, 24px ile sığdır */
+@media screen and (max-width: 768px) and (orientation: portrait) {
+  nav.bottom-nav {
+    height: 64px !important;
+    overflow: hidden !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+  }
+  nav.bottom-nav .bottom-nav-item {
+    height: 64px !important;
+    gap: 3px !important;
+    padding: 6px 2px !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+  }
+  nav.bottom-nav .bottom-nav-item svg {
+    width: 24px !important;
+    height: 24px !important;
+    min-width: 24px !important;
+    min-height: 24px !important;
+    flex-shrink: 0 !important;
+  }
+  nav.bottom-nav .bottom-nav-item span {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+  .content {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }

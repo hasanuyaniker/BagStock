@@ -4,9 +4,9 @@
   "description": "Çanta stok yönetim ve satış takip sistemi",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#07070e",
-  "theme_color": "#5b3de8",
+  "theme_color": "#07070e",
   "orientation": "portrait-primary",
   "icons": [
     {
