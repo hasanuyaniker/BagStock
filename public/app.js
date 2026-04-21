@@ -29,7 +29,7 @@ const DEFAULT_COLUMNS = [
   { key: 'actions', label: 'İşlem', visible: true, width: 100 }
 ];
 
-let inventorySort = { key: null, dir: 'asc' };
+let inventorySort = { key: 'name', dir: 'asc' }; // varsayılan: A-Z
 
 // ==================== AUTH ====================
 const token = localStorage.getItem('token');
@@ -842,9 +842,12 @@ async function loadSalesView() {
 
 function renderSalesProducts(list) {
   const q = (document.getElementById('salesSearch')?.value || '').toLowerCase();
-  const filtered = q ? list.filter(p =>
+  let filtered = q ? list.filter(p =>
     p.name.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q)
-  ) : list;
+  ) : [...list];
+
+  // Alfabetik sıralama (A-Z)
+  filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
 
   const container = document.getElementById('salesProductList');
   let html = '';

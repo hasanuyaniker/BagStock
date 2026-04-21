@@ -1679,3 +1679,45 @@ tr.row-passive .type-badge {
     height: 19px !important;
   }
 }
+
+/* ========== iOS ZOOM ENGELİ: input font >= 16px ========== */
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  input[type="date"],
+  input[type="time"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px !important;
+    /* 16px altı = iOS zoom yapar; bu kuralı override etme */
+  }
+  /* Görsel küçültme: font 16px ama alan compact görünsün */
+  .search-input {
+    font-size: 16px !important;
+  }
+}
+
+/* ========== MOBİL DİKEY: ALT NAV İKONLAR DAHA BÜYÜK ========== */
+@media (max-width: 768px) and (orientation: portrait) {
+  .bottom-nav {
+    height: 70px !important;
+  }
+  .bottom-nav-item {
+    gap: 5px !important;
+    padding: 8px 4px !important;
+  }
+  .bottom-nav-item svg {
+    width: 28px !important;
+    height: 28px !important;
+  }
+  .bottom-nav-item span {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+  }
+  .content {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px) + 8px) !important;
+  }
+}
