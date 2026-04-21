@@ -47,7 +47,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   /* Resimden birebir: koyu siyah üstte, altta sol-mavi / orta-mor / sağ-kırmızı */
   background:
     radial-gradient(ellipse 70% 55% at 0%   100%, rgba(22, 52, 180, 0.80) 0%, transparent 100%),
@@ -1919,4 +1919,221 @@ html {
   .content {
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
   }
+}
+
+/* ========== TRENDYOL SATIŞ PANELİ — TİPOGRAFİ & UI ========== */
+
+/* ── Genel tipografi: Inter, temiz ve okunabilir ── */
+*, *::before, *::after {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+body {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+/* ── Kart/panel border-radius: Trendyol 8–10px ── */
+.card, .chart-card, .kpi-card, .table-container,
+.settings-card, .sales-report-container, .sales-summary {
+  border-radius: 10px !important;
+}
+
+.modal { border-radius: 12px !important; }
+
+/* ── Tablo başlıkları: Inter 600, küçük harf, temiz ── */
+th {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  color: #6b7280 !important;
+  padding: 10px 8px !important;
+}
+
+th:hover { color: var(--violet) !important; }
+
+/* ── Tablo satırları: Inter 400-500, 14px ── */
+td {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  line-height: 1.4 !important;
+  padding: 9px 8px !important;
+  color: #111827 !important;
+}
+
+tr:hover td {
+  background: rgba(91, 61, 232, 0.03) !important;
+}
+
+/* ── Butonlar: Inter 600, 8px radius ── */
+.btn {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  letter-spacing: 0 !important;
+  padding: 8px 16px !important;
+}
+
+.btn-sm {
+  font-size: 12px !important;
+  padding: 5px 10px !important;
+  border-radius: 6px !important;
+}
+
+/* ── Input / Select: Inter, 8px radius ── */
+.form-group input,
+.form-group select,
+.form-group textarea,
+.search-input,
+.sales-qty-input,
+.marketplace-select {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  border-radius: 8px !important;
+  letter-spacing: 0 !important;
+}
+
+/* ── Form etiketleri: Inter 500, küçük harf ── */
+.form-group label {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  color: #374151 !important;
+}
+
+/* ── KPI kartlar: Inter, okunabilir hiyerarşi ── */
+.kpi-label {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: #6b7280 !important;
+}
+
+.kpi-value {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1.1 !important;
+}
+
+/* ── Sayfa bölüm başlıkları: Inter 700 ── */
+.section-title, .chart-card h3 {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+}
+
+/* ── Modal başlık: Inter 700 ── */
+.modal h2 {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+}
+
+/* ── Badge'ler: Inter 600, Trendyol gibi hafif köşeli ── */
+.status-badge, .type-badge, .mp-badge, .sales-stock-badge {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  border-radius: 6px !important;
+}
+
+/* ── Sidebar menü: Inter 500 ── */
+.sidebar-label {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+}
+
+.nav-section-title {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 9.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+}
+
+/* ── Topbar: Inter 600-700 ── */
+.topbar-title {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.user-name {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+}
+
+/* ── Satış ürün kartı ── */
+.sales-product-name {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.sales-product-meta {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 12px !important;
+}
+
+/* ── Alt nav etiket: Inter 500 ── */
+.bottom-nav-item span {
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 500 !important;
+}
+
+/* ── Genel h4, h5 kullanımları ── */
+h4, h5 {
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+}
+
+/* ── Toolbar arama kutusu ── */
+.search-input {
+  border-radius: 8px !important;
+  font-size: 13px !important;
+}
+
+/* ── Toggle butonlar ── */
+.toggle-btn {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border-radius: 8px !important;
+}
+
+.toggle-btn.active {
+  font-weight: 600 !important;
+}
+
+/* ── Bildirim / toast ── */
+.toast {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border-radius: 10px !important;
 }
