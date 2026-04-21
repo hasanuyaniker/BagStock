@@ -11,6 +11,7 @@ let currentCountSession = null;
 
 const DEFAULT_COLUMNS = [
   { key: 'image', label: 'Görsel', visible: true, width: 60 },
+  { key: 'active_indicator', label: '●', visible: true, width: 32 },
   { key: 'name', label: 'Ürün Adı', visible: true, width: 180 },
   { key: 'color', label: 'Renk', visible: true, width: 90 },
   { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 100 },
@@ -486,7 +487,8 @@ function renderInventoryTable() {
 
   let rows = '';
   filtered.forEach(p => {
-    rows += '<tr>';
+    const isPassive = p.is_active === false;
+    rows += isPassive ? '<tr class="row-passive">' : '<tr>';
     cols.forEach(col => {
       rows += '<td>';
       switch (col.key) {
@@ -495,6 +497,13 @@ function renderInventoryTable() {
             rows += `<img src="${p.product_image_url}" class="product-thumb" style="cursor:zoom-in;" onclick="openLightbox('${p.product_image_url.startsWith('data:') ? `/api/products/${p.id}/image` : p.product_image_url}')" onerror="this.style.display='none'">`;
           } else {
             rows += '<div class="product-thumb-placeholder">📦</div>';
+          }
+          break;
+        case 'active_indicator':
+          if (p.is_active === false) {
+            rows += '<span title="Pasif" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(148,163,184,0.2);"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#94a3b8" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
+          } else {
+            rows += '<span title="Aktif" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(16,185,129,0.12);"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#059669" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>';
           }
           break;
         case 'name': rows += escHtml(p.name); break;
@@ -852,8 +861,6 @@ function renderSalesProducts(list) {
       <div class="sales-product-info">
         <div class="sales-product-name">${escHtml(p.name)}</div>
         <div class="sales-product-meta">
-          ${p.product_type_name ? `<span class="type-badge">${escHtml(p.product_type_name)}</span>` : ''}
-          ${p.material_name ? `<span class="type-badge" style="background:#e0f2fe;color:#0369a1;">${escHtml(p.material_name)}</span>` : ''}
           ${p.color ? `<span class="type-badge" style="background:#ede9fe;color:#6d28d9;">${escHtml(p.color)}</span>` : ''}
           <span>${escHtml(p.barcode)}</span>
         </div>

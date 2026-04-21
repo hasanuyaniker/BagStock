@@ -1582,3 +1582,100 @@ input[type="date"]:focus {
     overflow-x: auto;
   }
 }
+
+/* ========== GENEL: TABLO SÜTUN ARALIKLARI (daha kompakt) ========== */
+th {
+  padding: 8px 9px !important;
+  font-size: 11px !important;
+}
+td {
+  padding: 6px 9px !important;
+  font-size: 12px !important;
+}
+
+/* Aktif/gösterge sütunu: ortalanmış, dar */
+th:has(+ th), td:has(+ td) { }
+.active-indicator-cell {
+  text-align: center !important;
+  padding: 4px 2px !important;
+}
+
+/* ========== PASİF ÜRÜN SATIRI ========== */
+tr.row-passive td {
+  background: rgba(100, 116, 139, 0.07) !important;
+  color: #94a3b8 !important;
+}
+tr.row-passive:hover td {
+  background: rgba(100, 116, 139, 0.12) !important;
+}
+tr.row-passive .status-badge,
+tr.row-passive .type-badge {
+  opacity: 0.65;
+}
+
+/* ========== WEB: SOL SIDEBAR KÜÇÜLTME ========== */
+.sidebar {
+  width: 68px !important;
+  min-width: 68px !important;
+}
+.sidebar-item {
+  padding: 10px 4px !important;
+  font-size: 9px !important;
+  gap: 4px !important;
+}
+.sidebar-item svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* ========== MOBİL: ALT NAV YAZILARI BÜYÜT + İKON BÜYÜT ========== */
+@media (max-width: 768px) {
+  .bottom-nav-item span {
+    font-size: 11px !important;
+  }
+  .bottom-nav-item svg {
+    width: 23px !important;
+    height: 23px !important;
+  }
+  .bottom-nav {
+    height: 66px !important;
+  }
+  .content {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px) + 8px) !important;
+  }
+}
+
+/* ========== YATAY MOBİL: SATIŞ KARTLARI 2 SÜTUN ========== */
+@media (orientation: landscape) and (max-height: 600px) {
+  /* Landscape mobil: 2 kolon satış grid */
+  #salesProductList {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  #salesProductList .sales-product-card {
+    margin-bottom: 0;
+    flex-direction: column;
+    padding: 10px;
+    gap: 6px;
+  }
+  /* Yatay modda topbar gizle, daha fazla alan */
+  .topbar {
+    height: 44px !important;
+  }
+  .sidebar {
+    top: 44px !important;
+    height: calc(100vh - 44px) !important;
+  }
+  /* Bottom nav yatayda küçüt */
+  .bottom-nav {
+    height: 52px !important;
+  }
+  .bottom-nav-item span {
+    font-size: 9px !important;
+  }
+  .bottom-nav-item svg {
+    width: 19px !important;
+    height: 19px !important;
+  }
+}
