@@ -889,10 +889,10 @@ function renderSalesProducts(list) {
         <div class="sales-product-name">${escHtml(p.name)}</div>
         <div class="sales-product-meta">
           ${p.color ? `<span class="type-badge" style="background:#ede9fe;color:#6d28d9;">${escHtml(p.color)}</span>` : ''}
-          <span>${escHtml(p.barcode)}</span>
+          <span class="sales-barcode">${escHtml(p.barcode)}</span>
+          <span class="sales-stock-badge" style="${stockColor}">Stok: ${p.stock_quantity}</span>
         </div>
       </div>
-      <span class="sales-stock-badge" style="${stockColor}">Stok: ${p.stock_quantity}</span>
       <div class="sales-actions">
         <input type="number" class="sales-qty-input" id="saleQty_${p.id}" value="1" min="1">
         <select class="marketplace-select" id="saleMp_${p.id}">
