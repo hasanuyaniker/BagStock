@@ -10,23 +10,23 @@ let typeChart = null;
 let currentCountSession = null;
 
 const DEFAULT_COLUMNS = [
-  { key: 'image', label: 'Görsel', visible: true, width: 60 },
-  { key: 'active_indicator', label: '●', visible: true, width: 32 },
-  { key: 'name', label: 'Ürün Adı', visible: true, width: 180 },
-  { key: 'color', label: 'Renk', visible: true, width: 90 },
-  { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 100 },
-  { key: 'material_name', label: 'Materyal', visible: true, width: 100 },
-  { key: 'barcode', label: 'Barkod', visible: true, width: 120 },
-  { key: 'supplier_name', label: 'Tedarikçi', visible: true, width: 120 },
-  { key: 'stock_quantity', label: 'Stok', visible: true, width: 70 },
-  { key: 'cost_price', label: 'Alış (₺)', visible: true, width: 90 },
-  { key: 'critical_stock', label: 'Krit.', visible: true, width: 60 },
-  { key: 'trendyol_price', label: 'TY Fiyat', visible: true, width: 90 },
-  { key: 'trendyol_commission', label: 'TY Kom.', visible: true, width: 80 },
-  { key: 'hepsiburada_price', label: 'HB Fiyat', visible: true, width: 90 },
-  { key: 'hepsiburada_commission', label: 'HB Kom.', visible: true, width: 80 },
-  { key: 'status', label: 'Durum', visible: true, width: 80 },
-  { key: 'actions', label: 'İşlem', visible: true, width: 100 }
+  { key: 'image', label: 'Görsel', visible: true, width: 52 },
+  { key: 'active_indicator', label: '●', visible: true, width: 28 },
+  { key: 'name', label: 'Ürün Adı', visible: true, width: 160 },
+  { key: 'color', label: 'Renk', visible: true, width: 80 },
+  { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 90 },
+  { key: 'material_name', label: 'Materyal', visible: true, width: 90 },
+  { key: 'barcode', label: 'Barkod', visible: true, width: 105 },
+  { key: 'supplier_name', label: 'Tedarikçi', visible: true, width: 100 },
+  { key: 'stock_quantity', label: 'Stok', visible: true, width: 55 },
+  { key: 'cost_price', label: 'Alış (₺)', visible: true, width: 75 },
+  { key: 'critical_stock', label: 'Krit.', visible: true, width: 50 },
+  { key: 'trendyol_price', label: 'TY Fiyat', visible: true, width: 75 },
+  { key: 'trendyol_commission', label: 'TY Kom.', visible: true, width: 65 },
+  { key: 'hepsiburada_price', label: 'HB Fiyat', visible: true, width: 75 },
+  { key: 'hepsiburada_commission', label: 'HB Kom.', visible: true, width: 65 },
+  { key: 'status', label: 'Durum', visible: true, width: 70 },
+  { key: 'actions', label: 'İşlem', visible: true, width: 90 }
 ];
 
 let inventorySort = { key: 'name', dir: 'asc' }; // varsayılan: A-Z
@@ -610,7 +610,7 @@ function toggleColumnPanel() {
   const panel = document.getElementById('columnPanel');
   if (panel.classList.contains('active')) { panel.classList.remove('active'); return; }
 
-  let html = '';
+  let html = '<button onclick="resetColumnSettings()" style="width:100%;margin-bottom:8px;padding:6px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;cursor:pointer;color:#374151;">↺ Sütunları Sıfırla</button>';
   DEFAULT_COLUMNS.forEach((col, i) => {
     const checked = col.visible !== false ? 'checked' : '';
     html += `<div class="column-panel-item" draggable="true" data-key="${col.key}">
@@ -647,6 +647,29 @@ async function saveColumnSettings() {
     column_width: col.width
   }));
   await apiFetch('/api/columns/inventory', { method: 'PUT', body: data });
+}
+
+async function resetColumnSettings() {
+  await apiFetch('/api/columns/inventory', { method: 'DELETE' });
+  // Varsayılan genişliklere dön
+  DEFAULT_COLUMNS.forEach(col => {
+    const def = [
+      { key: 'image', width: 52 }, { key: 'active_indicator', width: 28 },
+      { key: 'name', width: 160 }, { key: 'color', width: 80 },
+      { key: 'product_type_name', width: 90 }, { key: 'material_name', width: 90 },
+      { key: 'barcode', width: 105 }, { key: 'supplier_name', width: 100 },
+      { key: 'stock_quantity', width: 55 }, { key: 'cost_price', width: 75 },
+      { key: 'critical_stock', width: 50 }, { key: 'trendyol_price', width: 75 },
+      { key: 'trendyol_commission', width: 65 }, { key: 'hepsiburada_price', width: 75 },
+      { key: 'hepsiburada_commission', width: 65 }, { key: 'status', width: 70 },
+      { key: 'actions', width: 90 }
+    ].find(d => d.key === col.key);
+    if (def) col.width = def.width;
+    col.visible = true;
+  });
+  columnSettings = [];
+  renderInventoryTable();
+  document.getElementById('columnPanel').classList.remove('active');
 }
 
 // Product Modal

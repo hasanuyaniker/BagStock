@@ -515,7 +515,7 @@ table {
 
 th {
   background: var(--bg-subtle);
-  padding: 11px 13px;
+  padding: 9px 8px;
   text-align: left;
   font-weight: 700;
   color: var(--text-secondary);
@@ -524,9 +524,9 @@ th {
   cursor: pointer;
   user-select: none;
   position: relative;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
 }
 
 th:first-child { border-radius: 14px 0 0 0; }
@@ -548,10 +548,14 @@ th .resize-handle {
 th .resize-handle:hover { background: var(--violet); opacity: 0.3; }
 
 td {
-  padding: 10px 13px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--border-light);
   vertical-align: middle;
   color: var(--text-primary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 tr:last-child td { border-bottom: none; }
@@ -561,7 +565,7 @@ tr:hover td {
 }
 
 .product-thumb {
-  width: 40px; height: 40px;
+  width: 34px; height: 34px;
   border-radius: 8px;
   object-fit: cover;
   border: 2px solid var(--border-light);
@@ -572,7 +576,7 @@ tr:hover td {
 .product-thumb:hover { transform: scale(1.05); }
 
 .product-thumb-placeholder {
-  width: 40px; height: 40px;
+  width: 34px; height: 34px;
   border-radius: 8px;
   background: var(--gradient-soft);
   display: flex; align-items: center; justify-content: center;
@@ -1270,8 +1274,8 @@ input[type="date"]:focus {
     min-width: 600px;
   }
   th, td {
-    padding: 8px 10px;
-    font-size: 12px;
+    padding: 6px 6px;
+    font-size: 11px;
     white-space: nowrap;
   }
 

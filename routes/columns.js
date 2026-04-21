@@ -56,4 +56,18 @@ router.put('/:tableName', async (req, res) => {
   }
 });
 
+// DELETE /api/columns/:tableName — sütun genişliklerini sıfırla
+router.delete('/:tableName', async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM column_settings WHERE user_id = $1 AND table_name = $2',
+      [req.user.id, req.params.tableName]
+    );
+    res.json({ message: 'Sütun ayarları sıfırlandı' });
+  } catch (err) {
+    console.error('Sütun sıfırlama hatası:', err);
+    res.status(500).json({ error: 'Sütun ayarları sıfırlanamadı' });
+  }
+});
+
 module.exports = router;
