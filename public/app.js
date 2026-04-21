@@ -196,6 +196,7 @@ async function loadStats() {
     document.getElementById('kpiTotalSku').textContent = stats.totalSkus;
     document.getElementById('kpiOutOfStock').textContent = stats.outOfStock;
     document.getElementById('kpiCritical').textContent = stats.criticalStock;
+    document.getElementById('kpiPassive').textContent = stats.passiveCount || 0;
 
     // Alert bar
     const alertBar = document.getElementById('alertBar');
@@ -253,7 +254,7 @@ function renderStockChart(data) {
   });
 
   // Her bar için yeterli yükseklik — çakışmayı önler
-  const perBar = 32;
+  const perBar = 36;
   const wantH  = Math.max(200, sorted.length * perBar + 50);
   const capH   = 400;
 
@@ -314,11 +315,11 @@ function renderStockChart(data) {
         x: {
           beginAtZero: true,
           grid: { color: 'rgba(124,58,237,0.07)' },
-          ticks: { font: { size: 11 }, color: '#6b7280' }
+          ticks: { font: { size: 12 }, color: '#6b7280' }
         },
         y: {
           grid: { display: false },
-          ticks: { font: { size: 11 }, color: '#374151', padding: 4 }
+          ticks: { font: { size: 13, weight: '600' }, color: '#1a1f3e', padding: 6 }
         }
       }
     }

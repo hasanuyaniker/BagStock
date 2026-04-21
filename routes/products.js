@@ -59,12 +59,14 @@ router.get('/stats', async (req, res) => {
        WHERE p.is_active = TRUE
        GROUP BY pt.name ORDER BY total_stock DESC`
     );
+    const passiveCount = await pool.query(`SELECT COUNT(*) AS count FROM products WHERE is_active = FALSE`);
 
     res.json({
       totalValue: parseFloat(totalValue.rows[0].total),
       totalSkus: parseInt(totalSkus.rows[0].count),
       outOfStock: parseInt(outOfStock.rows[0].count),
       criticalStock: parseInt(criticalStock.rows[0].count),
+      passiveCount: parseInt(passiveCount.rows[0].count),
       criticalProducts: criticalProducts.rows,
       outOfStockProducts: outOfStockProducts.rows,
       stockByProduct: stockByProduct.rows,

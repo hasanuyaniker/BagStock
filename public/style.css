@@ -26,8 +26,8 @@
 
   /* ── Backgrounds (koyu gradient üstünde cam efekti) ── */
   --bg-page:   transparent;
-  --bg-card:   rgba(236, 232, 255, 0.94);   /* açık lavanta — temaya uyumlu */
-  --bg-subtle: rgba(225, 220, 250, 0.88);
+  --bg-card:   rgba(252, 251, 255, 0.96);   /* çok açık lavanta — saf beyaza yakın */
+  --bg-subtle: rgba(245, 243, 255, 0.92);
 
   /* ── Text ── */
   --text-primary:   #1a1f3e;
@@ -273,8 +273,8 @@ body {
 /* ========== KPI CARDS ========== */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
   margin-bottom: 22px;
 }
 
@@ -1602,11 +1602,11 @@ th:has(+ th), td:has(+ td) { }
 
 /* ========== PASİF ÜRÜN SATIRI ========== */
 tr.row-passive td {
-  background: rgba(100, 116, 139, 0.07) !important;
-  color: #94a3b8 !important;
+  background: rgba(91, 61, 232, 0.05) !important;
+  color: #8b8fbb !important;
 }
 tr.row-passive:hover td {
-  background: rgba(100, 116, 139, 0.12) !important;
+  background: rgba(91, 61, 232, 0.09) !important;
 }
 tr.row-passive .status-badge,
 tr.row-passive .type-badge {
@@ -1823,5 +1823,50 @@ html {
   }
   .content {
     padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* ========== KESİN OVERFLOW DÜZELTMESİ — dikey portrait — safe-area dahil ========== */
+@media screen and (max-width: 768px) and (orientation: portrait) {
+  nav.bottom-nav {
+    height: calc(52px + env(safe-area-inset-bottom, 0px)) !important;
+    min-height: calc(52px + env(safe-area-inset-bottom, 0px)) !important;
+    max-height: calc(52px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    padding-top: 0 !important;
+    overflow: hidden !important;
+    align-items: flex-start !important;
+    box-sizing: border-box !important;
+  }
+  nav.bottom-nav .bottom-nav-item {
+    height: 52px !important;
+    max-height: 52px !important;
+    gap: 2px !important;
+    padding: 6px 2px 4px !important;
+    justify-content: center !important;
+    align-items: center !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    flex-shrink: 1 !important;
+  }
+  nav.bottom-nav .bottom-nav-item svg {
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+    max-width: 20px !important;
+    max-height: 20px !important;
+    flex-shrink: 0 !important;
+  }
+  nav.bottom-nav .bottom-nav-item span {
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .content {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
