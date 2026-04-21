@@ -1,0 +1,25 @@
+{
+  "name": "BagStock Stok Takip",
+  "short_name": "BagStock",
+  "description": "Çanta stok yönetim ve satış takip sistemi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07070e",
+  "theme_color": "#5b3de8",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

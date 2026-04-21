@@ -112,9 +112,11 @@ function switchSection(name) {
 
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.bottom-nav-item').forEach(s => s.classList.remove('active'));
 
   document.getElementById('section-' + name)?.classList.add('active');
   document.querySelector(`.sidebar-item[data-section="${name}"]`)?.classList.add('active');
+  document.querySelector(`.bottom-nav-item[data-section="${name}"]`)?.classList.add('active');
   localStorage.setItem('activeSection', name);
 
   // Load section data
