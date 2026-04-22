@@ -17,32 +17,27 @@ function getBaseUrl() {
   return '';
 }
 
-// ── İstanbul saati (Intl.DateTimeFormat — Railway/Docker ortamında güvenilir) ──
+// ── İstanbul saati — Railway/Docker için güvenilir yöntem ──────────────────
 function getIstanbulDateTime() {
   const now = new Date();
   try {
-    // Intl.DateTimeFormat formatToParts: tüm Node.js sürümlerinde çalışır
-    const fmt = new Intl.DateTimeFormat('tr-TR', {
-      timeZone: 'Europe/Istanbul',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false
-    });
-    const parts = fmt.formatToParts(now);
-    const get = (t) => parts.find(p => p.type === t)?.value || '00';
-    const day   = get('day').padStart(2, '0');
-    const month = get('month').padStart(2, '0');
-    const year  = get('year');
-    let   hour  = get('hour').padStart(2, '0');
-    const min   = get('minute').padStart(2, '0');
-    if (hour === '24') hour = '00'; // bazı sistemlerde gece yarısı 24:00 döner
-    return { date: `${year}-${month}-${day}`, hhmm: `${hour}:${min}` };
+    // sv-SE locale "YYYY-MM-DD HH:MM:SS" formatı verir — en tutarlı locale
+    const str = now.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' });
+    // str → "2026-04-22 20:00:00"
+    const [date, time] = str.split(' ');
+    const hhmm = (time || '').substring(0, 5);
+    // Format doğrulama
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && /^\d{2}:\d{2}$/.test(hhmm)) {
+      return { date, hhmm };
+    }
+    throw new Error('Beklenmeyen format: ' + str);
   } catch (e) {
-    // Fallback: UTC+3 manuel hesap
-    const istanbul = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-    const iso = istanbul.toISOString();
+    // Fallback: UTC+3 saf hesap (yaz saati — Nisan-Ekim arası geçerli)
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date(now.getTime() + 3 * 60 * 60 * 1000);
     return {
-      date: iso.substring(0, 10),
-      hhmm: iso.substring(11, 16)
+      date: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+      hhmm: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
     };
   }
 }
@@ -204,7 +199,12 @@ async function buildDailySalesHtml(sales, date) {
   let html = emailHeader(logoUrl, '📊 Günlük Satış Raporu', dateStr);
 
   if (sales.length === 0) {
-    html += `<p style="color:#6b7280;text-align:center;padding:20px;">Bugün kayıt yok.</p>`;
+    html += `
+    <div style="text-align:center;padding:32px 20px;">
+      <div style="font-size:36px;margin-bottom:12px;">📭</div>
+      <p style="color:#6b7280;font-size:15px;font-weight:600;margin:0;">Bugün satış kaydı bulunmuyor.</p>
+      <p style="color:#9ca3af;font-size:13px;margin-top:6px;">Stok girişi veya çıkışı yapılmadı.</p>
+    </div>`;
     return html + emailFooter();
   }
 
@@ -295,10 +295,7 @@ async function sendDailySalesReport() {
     `, [date]);
 
     const sales = result.rows;
-    if (sales.length === 0) {
-      console.log('[Günlük Rapor] Bugün satış kaydı yok, rapor gönderilmedi');
-      return;
-    }
+    // Satış olmasa da rapor gönderilir (boş rapor)
 
     const html = await buildDailySalesHtml(sales, date);
     const subject = `HUFlex Günlük Satış Bilgilendirme — ${new Date(date + 'T00:00:00').toLocaleDateString('tr-TR')}`;
