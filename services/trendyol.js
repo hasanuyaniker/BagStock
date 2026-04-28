@@ -8,11 +8,8 @@ const axios = require('axios');
 
 const TY_BASE = 'https://apigw.trendyol.com/integration/order/sellers';
 
-// Tüm statüler — tek requestte gönderilir
-const ALL_STATUSES = [
-  'Created', 'Picking', 'Invoiced', 'Shipped', 'Delivered',
-  'UnDelivered', 'Returned', 'Cancelled', 'UnPacked', 'UnSupplied'
-].join(',');
+// Not: status parametresi gönderilmez → API tüm statüleri döner
+// (virgüllü liste yeni apigw endpoint'inde kabul edilmiyor; Shipped/Taşıma Durumunda siparişleri atlıyor)
 
 // Trendyol raw durum → BagStock dahili durum (stok mantığı için)
 const TY_STATUS_MAP = {
@@ -156,7 +153,11 @@ function mapOrder(order) {
       should_deduct:     lineStatus.deduct || statusInfo.deduct,
       commission_amount: parseFloat(line.commissionAmount || line.commissionFee || 0) || null,
       commission_rate:   parseFloat(line.commissionRate || 0) || null,
-      cargo_desi:        parseFloat(line.volumetricWeight || line.desi || 0) || null
+      // desi: Trendyol satır seviyesinde volumetricWeight veya desi alanında gelir
+      cargo_desi: parseFloat(
+        line.volumetricWeight || line.desi || line.packageDesi ||
+        line.quantity * (order.volumetricWeight || 0) || 0
+      ) || null
     };
   });
 
@@ -168,7 +169,15 @@ function mapOrder(order) {
   const avgCommissionRate = items.length > 0
     ? items.reduce((s, i) => s + (i.commission_rate || 0), 0) / items.length
     : null;
-  const totalDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
+
+  // Desi: önce paket (order) seviyesinde bak, yoksa satır toplamı
+  // Trendyol portal "Desi: 3" → order.volumetricWeight veya order.desi
+  const orderLevelDesi = parseFloat(
+    order.volumetricWeight || order.desi || order.packageDesi ||
+    order.shipmentPackageDesi || 0
+  ) || 0;
+  const lineLevelDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
+  const totalDesi = orderLevelDesi > 0 ? orderLevelDesi : lineLevelDesi;
 
   return {
     platform:              'trendyol',
@@ -231,10 +240,10 @@ async function fetchTrendyolOrders(creds, days = 30) {
     let totalPages = 1;
 
     while (page < totalPages) {
+      // status parametresi yok → API tüm statüleri döner (Created, Shipped, Delivered, vs.)
       const url = `${TY_BASE}/${supplierId}/orders?` +
         `startDate=${startDate}&endDate=${endDate}` +
         `&orderByField=PackageLastModifiedDate&orderByDirection=DESC` +
-        `&status=${encodeURIComponent(ALL_STATUSES)}` +
         `&size=${size}&page=${page}`;
 
       let data;

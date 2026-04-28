@@ -2190,9 +2190,10 @@ function renderOrders(orders, total) {
       ? `${formatCurrency(comm)}${order.commission_rate ? `<br><span style="color:#9ca3af;font-size:10px;">%${parseFloat(order.commission_rate).toFixed(1)}</span>` : ''}`
       : '<span style="color:#d1d5db;">—</span>';
 
+    // Desi API'den gelir — read-only göster
     const desiHtml  = desi > 0
-      ? `<span title="Düzenlemek için tıkla" style="cursor:pointer;text-decoration:underline dotted;" onclick="editDesi(${order.id},${desi})">${desi.toFixed(1)}</span>`
-      : `<button onclick="editDesi(${order.id},0)" style="background:none;border:1px dashed #d1d5db;border-radius:4px;padding:1px 5px;font-size:10px;cursor:pointer;color:#9ca3af;" title="Desi gir">+ desi</button>`;
+      ? `<span style="font-weight:600;color:#374151;">${desi % 1 === 0 ? desi : desi.toFixed(1)}</span>`
+      : `<span style="color:#d1d5db;">—</span>`;
 
     const cargoHtml = order.cargo_company
       ? `<span style="font-size:11px;">${escHtml(order.cargo_company)}${order.cargo_tracking_number ? `<br><span style="color:#9ca3af;font-size:10px;">${escHtml(order.cargo_tracking_number)}</span>` : ''}</span>`
