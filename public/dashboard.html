@@ -114,6 +114,37 @@
               <div class="kpi-value" style="color:#64748b;" id="kpiPassive">0</div>
             </div>
           </div>
+          <!-- Platform Performans Grafikleri -->
+          <div id="platformPerfSection" style="display:none;">
+            <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:0;">📊 Son 30 Gün — Platform Performansı</h3>
+            <div class="platform-charts-row">
+              <!-- Adet grafiği -->
+              <div class="platform-chart-card">
+                <h4>Satış Adedi Dağılımı</h4>
+                <div class="platform-chart-wrapper">
+                  <canvas id="chartPlatformQty"></canvas>
+                  <div class="platform-chart-center">
+                    <div class="center-value" id="platformQtyCenter">0</div>
+                    <div class="center-label">Sipariş</div>
+                  </div>
+                </div>
+                <table class="platform-legend" id="platformQtyLegend"></table>
+              </div>
+              <!-- Ciro grafiği -->
+              <div class="platform-chart-card">
+                <h4>Ciro Dağılımı (₺)</h4>
+                <div class="platform-chart-wrapper">
+                  <canvas id="chartPlatformRev"></canvas>
+                  <div class="platform-chart-center">
+                    <div class="center-value" id="platformRevCenter">₺0</div>
+                    <div class="center-label">Ciro</div>
+                  </div>
+                </div>
+                <table class="platform-legend" id="platformRevLegend"></table>
+              </div>
+            </div>
+          </div>
+
           <div class="charts-row">
             <div class="chart-card" id="stockChartCard">
               <h3>Ürün Stok Miktarları</h3>
@@ -211,20 +242,25 @@
             </div>
           </div>
           <div id="ordersSummaryCards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
-          <div class="table-container">
+          <div id="ordersTableSummary" style="font-size:12px;color:rgba(255,255,255,0.75);margin-bottom:6px;"></div>
+          <div class="orders-table-wrapper">
             <table id="ordersTable">
               <thead>
                 <tr>
-                  <th>Platform</th>
-                  <th>Sipariş No</th>
-                  <th>Tarih</th>
-                  <th>Durum</th>
-                  <th>Ürünler</th>
-                  <th>Tutar</th>
-                  <th>Stok</th>
+                  <th class="col-platform">Platform</th>
+                  <th class="col-order-no">Sipariş No</th>
+                  <th class="col-date">Tarih</th>
+                  <th class="col-status">Durum</th>
+                  <th class="col-product">Ürünler</th>
+                  <th class="col-price">Tutar</th>
+                  <th class="col-comm">Komisyon</th>
+                  <th class="col-desi">Desi</th>
+                  <th class="col-cargo">Kargo</th>
+                  <th class="col-stock">Stok</th>
                 </tr>
               </thead>
               <tbody id="ordersTableBody"></tbody>
+              <tfoot id="ordersTableFoot"></tfoot>
             </table>
           </div>
           <div id="ordersPagination" style="display:flex;justify-content:center;gap:8px;margin-top:16px;"></div>

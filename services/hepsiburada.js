@@ -5,11 +5,12 @@
 
 const HB_BASE = 'https://listing-external.hepsiburada.com';
 
-// Hepsiburada sipariş durumu → BagStock dahili durum
+// Hepsiburada raw durum → BagStock dahili durum
 const HB_STATUS_MAP = {
   'WAITING_IN_MERCHANT':    'bekliyor',
   'WAITING_IN_PACK_STAGE':  'bekliyor',
   'CONFIRMED':              'bekliyor',
+  'PREPARING_FOR_SHIPMENT': 'bekliyor',
   'IN_CARGO':               'kargoda',
   'AT_CARGO':               'kargoda',
   'IN_TRANSIT':             'kargoda',
@@ -18,11 +19,33 @@ const HB_STATUS_MAP = {
   'CANCELLED':              'iptal',
   'CANCELLED_BEFORE_CARGO': 'iptal',
   'RETURNED':               'iade',
-  'RETURN_ACCEPTED':        'iade'
+  'RETURN_ACCEPTED':        'iade',
+  'RETURN_IN_CARGO':        'iade'
+};
+
+// Türkçe görüntüleme etiketleri
+const HB_STATUS_TR = {
+  'WAITING_IN_MERCHANT':    'Satıcıda Bekliyor',
+  'WAITING_IN_PACK_STAGE':  'Paketleme Bekliyor',
+  'CONFIRMED':              'Onaylandı',
+  'PREPARING_FOR_SHIPMENT': 'Kargoya Hazırlanıyor',
+  'IN_CARGO':               'Kargoya Verildi',
+  'AT_CARGO':               'Kargo Şubesinde',
+  'IN_TRANSIT':             'Yolda',
+  'DELIVERED':              'Teslim Edildi',
+  'UNDELIVERED':            'Teslim Edilemedi',
+  'CANCELLED':              'İptal Edildi',
+  'CANCELLED_BEFORE_CARGO': 'Kargo Öncesi İptal',
+  'RETURNED':               'İade Edildi',
+  'RETURN_ACCEPTED':        'İade Kabul Edildi',
+  'RETURN_IN_CARGO':        'İade Kargoda'
 };
 
 // Stok düşürme tetikleyici durumlar
 const HB_DEDUCT_STATUSES = new Set(['IN_CARGO', 'AT_CARGO', 'IN_TRANSIT', 'DELIVERED']);
+
+// İade statüleri
+const HB_RETURN_STATUSES = new Set(['RETURNED', 'RETURN_ACCEPTED', 'RETURN_IN_CARGO']);
 
 function makeHBHeaders(merchantId, apiKey) {
   const credentials = Buffer.from(`${merchantId}:${apiKey}`).toString('base64');
@@ -34,7 +57,7 @@ function makeHBHeaders(merchantId, apiKey) {
 }
 
 /**
- * Son N günün siparişlerini çeker
+ * Son N günün siparişlerini çeker — tüm sayfalar, tüm statüler
  * @param {object} creds - { merchantId, apiKey }
  * @param {number} days  - Kaç gün geriye git (varsayılan: 30)
  * @returns {Array}      - Normalleştirilmiş sipariş listesi
@@ -46,18 +69,30 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   }
 
   const headers = makeHBHeaders(merchantId, apiKey);
-  const endDate = new Date();
-  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  // Tüm durumları ayrı ayrı çek (HB API bazı durumlarda tek status kabul eder)
-  const statuses = ['WAITING_IN_MERCHANT', 'IN_CARGO', 'DELIVERED', 'CANCELLED'];
+  // Günün başı/sonu ile tarih aralığı
+  const endDate = new Date();
+  endDate.setHours(23, 59, 59, 999);
+  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  startDate.setHours(0, 0, 0, 0);
+
+  // Tüm durumları ayrı ayrı çek
+  const statuses = [
+    'WAITING_IN_MERCHANT',
+    'IN_CARGO',
+    'DELIVERED',
+    'CANCELLED',
+    'RETURNED'
+  ];
+
   const allOrders = [];
   const seenIds = new Set();
 
   for (const status of statuses) {
     let offset = 0;
-    const limit = 100;
+    const limit = 50;
     let hasMore = true;
+    let pageNum = 0;
 
     while (hasMore) {
       const params = new URLSearchParams({
@@ -75,21 +110,29 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
         const res = await fetch(url, { headers });
         if (!res.ok) {
           const errText = await res.text();
-          // 404 = o status için sipariş yok, normal
-          if (res.status === 404) { hasMore = false; break; }
-          throw new Error(`Hepsiburada API HTTP ${res.status}: ${errText.substring(0, 200)}`);
+          if (res.status === 404 || res.status === 204) { hasMore = false; break; }
+          // İlk sayfa + ilk status'ta hata → throw
+          if (offset === 0 && status === statuses[0]) {
+            throw new Error(`Hepsiburada API HTTP ${res.status}: ${errText.substring(0, 300)}`);
+          }
+          // Diğer sayfa/statüslerde hata → atla
+          console.warn(`[HepsiB] Status=${status} offset=${offset} HTTP ${res.status} — atlanıyor`);
+          hasMore = false;
+          break;
         }
         data = await res.json();
       } catch (err) {
         if (offset === 0 && status === statuses[0]) throw err;
-        console.error(`[HepsiB] Status=${status} offset=${offset} alınamadı:`, err.message);
+        console.error(`[HepsiB] Status=${status} offset=${offset} hata:`, err.message);
         hasMore = false;
         break;
       }
 
-      // HB API'si farklı response yapıları döndürebilir
       const orders = extractHBOrders(data);
       if (!orders || orders.length === 0) { hasMore = false; break; }
+
+      pageNum++;
+      console.log(`[HepsiB] Status=${status} sayfa ${pageNum} — ${orders.length} sipariş`);
 
       for (const order of orders) {
         const norm = normalizeHBOrder(order);
@@ -99,54 +142,98 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
         }
       }
 
+      // Bir sonraki sayfa var mı?
       if (orders.length < limit) { hasMore = false; }
       else { offset += limit; }
     }
   }
 
+  console.log(`[HepsiB] Toplam ${allOrders.length} sipariş çekildi`);
   return allOrders;
 }
 
 function extractHBOrders(data) {
-  // HB çeşitli response yapıları kullanabilir
   if (Array.isArray(data)) return data;
   if (data?.data?.orders) return data.data.orders;
   if (data?.data?.orderList) return data.data.orderList;
+  if (data?.data?.items) return data.data.items;
   if (data?.orders) return data.orders;
   if (data?.orderList) return data.orderList;
+  if (data?.items) return data.items;
   return [];
 }
 
 function formatHBDate(date) {
-  return date.toISOString().split('T')[0]; // YYYY-MM-DD
+  // YYYY-MM-DD formatı
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function normalizeHBOrder(order) {
   const rawStatus = order.status || '';
-  const items = (order.orderLines || order.lines || order.items || []).map(line => ({
-    item_id: String(line.id || line.lineId || ''),
-    barcode: (line.barcode || line.productBarcode || '').trim(),
-    sku: line.merchantSku || line.sku || '',
-    product_name: line.name || line.productName || '',
-    quantity: line.quantity || 1,
-    price: line.price || line.salePrice || 0,
-    raw_status: line.status || rawStatus,
-    status: HB_STATUS_MAP[line.status || rawStatus] || 'bekliyor',
-    should_deduct: HB_DEDUCT_STATUSES.has(line.status || rawStatus)
-  }));
+  const isReturned = HB_RETURN_STATUSES.has(rawStatus);
+
+  const items = (order.orderLines || order.lines || order.items || order.orderItems || []).map(line => {
+    const lineStatus = line.status || rawStatus;
+    return {
+      item_id: String(line.id || line.lineId || line.orderLineId || ''),
+      barcode: (line.barcode || line.productBarcode || line.merchantBarcode || '').trim(),
+      sku: line.merchantSku || line.sku || '',
+      product_name: line.name || line.productName || line.productHbSku || '',
+      quantity: parseInt(line.quantity || line.requestedQuantity || 1),
+      price: parseFloat(line.price || line.salePrice || line.unitPrice || 0),
+      raw_status: lineStatus,
+      status: HB_STATUS_MAP[lineStatus] || HB_STATUS_MAP[rawStatus] || 'bekliyor',
+      status_tr: HB_STATUS_TR[lineStatus] || HB_STATUS_TR[rawStatus] || lineStatus,
+      should_deduct: HB_DEDUCT_STATUSES.has(lineStatus) || HB_DEDUCT_STATUSES.has(rawStatus),
+      // Komisyon
+      commission_amount: parseFloat(line.merchantCommissionAmount || line.commissionAmount || 0) || null,
+      commission_rate:   parseFloat(line.merchantCommissionRate   || line.commissionRate   || 0) || null,
+      // Desi
+      cargo_desi: parseFloat(line.cargoDeciWeight || line.desi || 0) || null
+    };
+  });
+
+  // Kargo
+  const cargoCompany  = order.cargoCompany || order.shippingCompany || '';
+  const cargoTracking = order.trackingNumber || order.cargoTrackingNumber || '';
+  const cargoStatus   = order.cargoStatus || rawStatus;
+
+  // Toplamlar
+  const totalCommission   = items.reduce((s, i) => s + (i.commission_amount || 0), 0);
+  const avgCommissionRate = items.length > 0
+    ? items.reduce((s, i) => s + (i.commission_rate || 0), 0) / items.length
+    : null;
+  const totalDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
 
   return {
     platform: 'hepsiburada',
-    order_id: String(order.id || order.orderId),
-    order_number: String(order.orderNumber || order.id || order.orderId),
+    order_id: String(order.id || order.orderId || order.packageId || ''),
+    order_number: String(order.orderNumber || order.id || order.packageId || ''),
     status: HB_STATUS_MAP[rawStatus] || 'bekliyor',
+    status_tr: HB_STATUS_TR[rawStatus] || rawStatus,
     raw_status: rawStatus,
-    customer_name: order.customerName || order.customer?.fullName || '',
+    customer_name: order.customerName || order.customer?.fullName || order.customer?.name || '',
     order_date: order.orderDate ? new Date(order.orderDate) : new Date(),
-    total_price: order.totalPrice || order.grossAmount || 0,
+    total_price: parseFloat(order.totalPrice || order.grossAmount || order.amount || 0),
     currency: 'TRY',
+    // Kargo
+    cargo_company:         cargoCompany,
+    cargo_tracking_number: cargoTracking,
+    cargo_status:          cargoStatus,
+    cargo_cost:            parseFloat(order.shippingCost || order.cargoCost || 0) || null,
+    // Komisyon & desi
+    commission_amount: totalCommission > 0 ? totalCommission : null,
+    commission_rate:   avgCommissionRate,
+    cargo_desi:        totalDesi > 0 ? totalDesi : null,
+    // İade
+    is_returned:   isReturned,
+    return_reason: isReturned ? (order.returnReason || order.cancelReason || '') : null,
+    return_date:   isReturned && order.returnDate ? new Date(order.returnDate) : null,
     items
   };
 }
 
-module.exports = { fetchHepsiburadaOrders, HB_STATUS_MAP, HB_DEDUCT_STATUSES };
+module.exports = { fetchHepsiburadaOrders, HB_STATUS_MAP, HB_STATUS_TR, HB_DEDUCT_STATUSES };

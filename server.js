@@ -65,10 +65,35 @@ async function runMigrations() {
       price NUMERIC(12,2) DEFAULT 0,
       status VARCHAR(30),
       raw_status VARCHAR(50),
+      status_tr VARCHAR(100),
+      commission_amount NUMERIC(10,2),
+      commission_rate NUMERIC(5,2),
+      cargo_desi NUMERIC(8,2),
       stock_deducted BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(marketplace_order_id, item_id)
     )`);
+    // Marketplace tablosuna yeni sütunlar ekle (var olanları atla)
+    const mpCols = [
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS status_tr VARCHAR(100)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_status VARCHAR(100)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_company VARCHAR(100)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_tracking_number VARCHAR(100)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_cost NUMERIC(10,2)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_desi NUMERIC(8,2)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS commission_amount NUMERIC(10,2)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS is_returned BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS return_reason VARCHAR(255)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS return_date TIMESTAMPTZ`,
+      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS status_tr VARCHAR(100)`,
+      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS commission_amount NUMERIC(10,2)`,
+      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2)`,
+      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS cargo_desi NUMERIC(8,2)`
+    ];
+    for (const sql of mpCols) {
+      await pool.query(sql);
+    }
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {

@@ -1936,8 +1936,150 @@ html {
 #ordersSummaryCards {
   padding: 0 2px;
 }
+
+/* Siparişler tablosu — sıkıştırılmış, yatay kaydırmalı */
+.orders-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+#ordersTable {
+  table-layout: auto;
+  width: 100%;
+  font-size: 12px;
+  min-width: 780px;
+}
+
+#ordersTable th {
+  padding: 6px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 #ordersTable td {
+  padding: 5px 7px;
   vertical-align: top;
+  white-space: nowrap;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#ordersTable .col-order-no { max-width: 120px; }
+#ordersTable .col-platform { max-width: 100px; }
+#ordersTable .col-date     { max-width: 115px; }
+#ordersTable .col-status   { max-width: 130px; }
+#ordersTable .col-product  { max-width: 180px; white-space: normal; }
+#ordersTable .col-price    { max-width: 80px; text-align: right; }
+#ordersTable .col-comm     { max-width: 90px; text-align: right; }
+#ordersTable .col-desi     { max-width: 70px; text-align: center; }
+#ordersTable .col-cargo    { max-width: 110px; }
+#ordersTable .col-stock    { max-width: 80px; text-align: center; }
+
+/* Sipariş toplamlar satırı */
+#ordersTotalsRow td {
+  font-weight: 700;
+  background: #f0f4ff;
+  font-size: 12px;
+}
+
+/* ── Platform Performans Grafikleri ───────────────────────────── */
+#platformPerfSection {
+  margin-top: 24px;
+}
+
+.platform-charts-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.platform-chart-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  padding: 20px;
+  flex: 1;
+  min-width: 280px;
+}
+
+.platform-chart-card h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+  margin: 0 0 16px;
+}
+
+.platform-chart-wrapper {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  margin: 0 auto 12px;
+}
+
+.platform-chart-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.platform-chart-center .center-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #1a1f3e;
+  line-height: 1.1;
+}
+
+.platform-chart-center .center-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.platform-legend {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.platform-legend th {
+  text-align: left;
+  color: #9ca3af;
+  font-weight: 600;
+  font-size: 10px;
+  padding: 3px 4px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.platform-legend td {
+  padding: 4px 4px;
+  color: #374151;
+}
+
+.platform-legend tr.total-row td {
+  font-weight: 700;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 6px;
+}
+
+.platform-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+@media (max-width: 600px) {
+  .platform-charts-row { flex-direction: column; }
+  .platform-chart-card { min-width: unset; }
 }
 
 /* ── API Settings Panel ───────────────────────────────────────── */

@@ -7,6 +7,8 @@ let allSales = [];
 let columnSettings = [];
 let stockChart = null;
 let typeChart = null;
+let platformQtyChart = null;
+let platformRevChart = null;
 let currentCountSession = null;
 
 const DEFAULT_COLUMNS = [
@@ -222,6 +224,9 @@ async function loadStats() {
     // Charts
     renderStockChart(stats.stockByProduct);
     renderTypeChart(stats.stockByType);
+
+    // Platform istatistiklerini asenkron yükle (hata olsa dashboard bozulmasın)
+    loadPlatformStats().catch(() => {});
   } catch (err) {
     console.error('Stats error:', err);
   }
@@ -2060,7 +2065,7 @@ async function loadOrders(page = 0) {
   if (to)       params.set('to', to);
 
   const tbody = document.getElementById('ordersTableBody');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#6b7280;">Yükleniyor...</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#6b7280;">Yükleniyor...</td></tr>';
 
   try {
     const res = await apiFetch(`/api/marketplace/orders?${params}`);
@@ -2070,7 +2075,7 @@ async function loadOrders(page = 0) {
     renderOrdersPagination(data.total || 0, page);
     renderOrdersSummaryCards(data.orders || []);
   } catch (err) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:30px;color:#dc2626;">Yükleme hatası: ${err.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:30px;color:#dc2626;">Yükleme hatası: ${err.message}</td></tr>`;
   }
 }
 
@@ -2101,59 +2106,123 @@ function renderOrdersSummaryCards(orders) {
 
 function renderOrders(orders, total) {
   const tbody = document.getElementById('ordersTableBody');
+  const tfoot = document.getElementById('ordersTableFoot');
+  const summaryEl = document.getElementById('ordersTableSummary');
   if (!tbody) return;
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:#6b7280;">
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:#6b7280;">
       <div style="font-size:32px;margin-bottom:8px;">📭</div>
       <div>Sipariş bulunamadı</div>
       <div style="font-size:12px;margin-top:4px;">API entegrasyonunu ayarlamak için Ayarlar → API Entegrasyonu bölümüne gidin</div>
     </td></tr>`;
+    if (tfoot) tfoot.innerHTML = '';
+    if (summaryEl) summaryEl.textContent = '';
     return;
   }
 
-  const statusBadge = {
-    bekliyor:      '<span style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ Bekliyor</span>',
-    kargoda:       '<span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🚚 Kargoda</span>',
-    teslim_edildi: '<span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ Teslim</span>',
-    iptal:         '<span style="background:#fff1f2;color:#dc2626;border:1px solid #fecaca;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">❌ İptal</span>',
-    iade:          '<span style="background:#faf5ff;color:#7c3aed;border:1px solid #ddd6fe;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">↩️ İade</span>',
+  const statusBadge = s => {
+    const map = {
+      bekliyor:      ['#fffbeb','#d97706','#fde68a','⏳'],
+      kargoda:       ['#eff6ff','#2563eb','#bfdbfe','🚚'],
+      teslim_edildi: ['#f0fdf4','#16a34a','#bbf7d0','✅'],
+      iptal:         ['#fff1f2','#dc2626','#fecaca','❌'],
+      iade:          ['#faf5ff','#7c3aed','#ddd6fe','↩️']
+    };
+    const [bg,color,border,icon] = map[s] || ['#f3f4f6','#374151','#e5e7eb','•'];
+    return `<span style="background:${bg};color:${color};border:1px solid ${border};padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">${icon} ${s === 'teslim_edildi' ? 'Teslim' : s.charAt(0).toUpperCase() + s.slice(1)}</span>`;
   };
 
   const platformBadge = {
-    trendyol:    '<span class="mp-badge trendyol">🟠 Trendyol</span>',
-    hepsiburada: '<span class="mp-badge hepsiburada">🔴 Hepsiburada</span>'
+    trendyol:    '<span class="mp-badge trendyol" style="white-space:nowrap;">🟠 TY</span>',
+    hepsiburada: '<span class="mp-badge hepsiburada" style="white-space:nowrap;">🔴 HB</span>'
   };
 
-  tbody.innerHTML = orders.map(order => {
+  // Toplamlar
+  let sumPrice = 0, sumComm = 0, sumDesi = 0, validDesiCount = 0;
+
+  const rows = orders.map(order => {
     const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
     const itemsHtml = items.length > 0
       ? items.map(item => {
-          const matched = item.p_name || item.product_name || '';
-          const bc = item.barcode || '';
-          const deductedIcon = item.stock_deducted ? ' <span title="Stok düşürüldü" style="color:#16a34a;">✓</span>' : '';
-          return `<div style="font-size:11px;line-height:1.4;">${escHtml(matched || bc)} <span style="color:#9ca3af;">${bc}</span> ×${item.quantity}${deductedIcon}</div>`;
+          const name = escHtml(item.p_name || item.product_name || item.barcode || '');
+          const bc   = item.barcode ? `<span style="color:#9ca3af;font-size:10px;">${item.barcode}</span>` : '';
+          const qty  = `×${item.quantity}`;
+          const ded  = item.stock_deducted ? '<span style="color:#16a34a;" title="Stok düşürüldü">✓</span>' : '';
+          return `<div style="line-height:1.5;">${name} ${bc} ${qty}${ded}</div>`;
         }).join('')
-      : '<span style="color:#9ca3af;font-size:11px;">—</span>';
+      : '<span style="color:#9ca3af;">—</span>';
 
     const anyDeducted  = items.some(i => i.stock_deducted);
     const shouldDeduct = ['kargoda', 'teslim_edildi'].includes(order.status);
     const stockCell = shouldDeduct
-      ? (anyDeducted ? '<span style="color:#16a34a;font-size:12px;font-weight:600;">✓ Düşürüldü</span>' : '<span style="color:#d97706;font-size:12px;">⏳ Bekliyor</span>')
+      ? (anyDeducted
+          ? '<span style="color:#16a34a;font-size:11px;font-weight:600;">✓ Düşürüldü</span>'
+          : '<span style="color:#d97706;font-size:11px;">⏳</span>')
+      : '<span style="color:#d1d5db;">—</span>';
+
+    const price = parseFloat(order.total_price) || 0;
+    const comm  = parseFloat(order.commission_amount) || 0;
+    const desi  = parseFloat(order.cargo_desi) || 0;
+    sumPrice += price;
+    sumComm  += comm;
+    if (desi > 0) { sumDesi += desi; validDesiCount++; }
+
+    const commHtml = comm > 0
+      ? `${formatCurrency(comm)}${order.commission_rate ? `<br><span style="color:#9ca3af;font-size:10px;">%${parseFloat(order.commission_rate).toFixed(1)}</span>` : ''}`
+      : '<span style="color:#d1d5db;">—</span>';
+
+    const desiHtml  = desi > 0 ? `${desi.toFixed(1)} desi` : '<span style="color:#d1d5db;">—</span>';
+
+    const cargoHtml = order.cargo_company
+      ? `<span style="font-size:11px;">${escHtml(order.cargo_company)}${order.cargo_tracking_number ? `<br><span style="color:#9ca3af;font-size:10px;">${escHtml(order.cargo_tracking_number)}</span>` : ''}</span>`
+      : '<span style="color:#d1d5db;">—</span>';
+
+    const dateStr = order.order_date
+      ? new Date(order.order_date).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })
       : '—';
 
-    const dateStr = order.order_date ? new Date(order.order_date).toLocaleDateString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+    // Türkçe durum — status_tr öncelikli
+    const statusLabel = order.status_tr || order.raw_status || order.status || '';
+    const statusHtml  = statusBadge(order.status);
 
-    return `<tr>
-      <td>${platformBadge[order.platform] || escHtml(order.platform)}</td>
-      <td style="font-family:monospace;font-size:12px;">${escHtml(order.order_number || order.order_id)}</td>
-      <td style="font-size:12px;">${dateStr}</td>
-      <td>${statusBadge[order.status] || escHtml(order.status)}</td>
-      <td>${itemsHtml}</td>
-      <td style="font-weight:600;">${formatCurrency(order.total_price)}</td>
-      <td>${stockCell}</td>
+    return `<tr title="${escHtml(statusLabel)}">
+      <td class="col-platform">${platformBadge[order.platform] || escHtml(order.platform)}</td>
+      <td class="col-order-no" style="font-family:monospace;font-size:11px;">${escHtml(order.order_number || order.order_id)}</td>
+      <td class="col-date" style="font-size:11px;">${dateStr}</td>
+      <td class="col-status">${statusHtml}</td>
+      <td class="col-product">${itemsHtml}</td>
+      <td class="col-price" style="font-weight:600;text-align:right;">${formatCurrency(price)}</td>
+      <td class="col-comm" style="text-align:right;font-size:11px;">${commHtml}</td>
+      <td class="col-desi" style="text-align:center;font-size:11px;">${desiHtml}</td>
+      <td class="col-cargo">${cargoHtml}</td>
+      <td class="col-stock">${stockCell}</td>
     </tr>`;
-  }).join('');
+  });
+
+  tbody.innerHTML = rows.join('');
+
+  // Toplam satırı
+  const avgDesi = validDesiCount > 0 ? (sumDesi / validDesiCount).toFixed(1) : '—';
+  if (tfoot) {
+    tfoot.innerHTML = `<tr id="ordersTotalsRow">
+      <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
+      <td class="col-product"></td>
+      <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
+      <td class="col-comm" style="text-align:right;font-weight:700;">${sumComm > 0 ? formatCurrency(sumComm) : '—'}</td>
+      <td class="col-desi" style="text-align:center;font-weight:700;">${validDesiCount > 0 ? 'Ort.' + avgDesi : '—'}</td>
+      <td class="col-cargo"></td>
+      <td class="col-stock"></td>
+    </tr>`;
+  }
+
+  // Özet metin
+  if (summaryEl) {
+    const parts = [`${total} sipariş`, `Ciro: ${formatCurrency(sumPrice)}`];
+    if (sumComm > 0) parts.push(`Komisyon: ${formatCurrency(sumComm)}`);
+    if (validDesiCount > 0) parts.push(`Ort. Desi: ${avgDesi}`);
+    summaryEl.textContent = parts.join(' | ');
+  }
 }
 
 function renderOrdersPagination(total, currentPage) {
@@ -2364,4 +2433,205 @@ async function clearHBCredentials() {
   } catch (err) {
     showToast('Silme hatası: ' + err.message, 'error');
   }
+}
+
+// ==================== PLATFORM PERFORMANS GRAFİKLERİ ====================
+
+const PLATFORM_COLORS = {
+  trendyol:    '#F27A1A',
+  hepsiburada: '#FF6B00',
+  dolap:       '#7c3aed',
+  amazon:      '#f59e0b',
+  pttavm:      '#dc2626'
+};
+
+const PLATFORM_LABELS = {
+  trendyol:    'Trendyol',
+  hepsiburada: 'Hepsiburada',
+  dolap:       'Dolap',
+  amazon:      'Amazon',
+  pttavm:      'PTT AVM'
+};
+
+async function loadPlatformStats() {
+  try {
+    const res = await apiFetch('/api/marketplace/platform-stats?days=30');
+    if (!res || !res.ok) return;
+    const data = await res.json();
+
+    if (!data.byQuantity || data.byQuantity.length === 0) {
+      // Sipariş yoksa bölümü gizle
+      const sec = document.getElementById('platformPerfSection');
+      if (sec) sec.style.display = 'none';
+      return;
+    }
+
+    const sec = document.getElementById('platformPerfSection');
+    if (sec) sec.style.display = '';
+
+    renderPlatformQtyChart(data);
+    renderPlatformRevChart(data);
+  } catch (err) {
+    console.warn('[Platform Stats] Grafik yüklenemedi:', err.message);
+  }
+}
+
+function renderPlatformQtyChart(data) {
+  const canvas = document.getElementById('chartPlatformQty');
+  if (!canvas) return;
+
+  const platforms = data.byQuantity;
+  const labels    = platforms.map(p => PLATFORM_LABELS[p.platform] || p.platform);
+  const values    = platforms.map(p => p.count);
+  const colors    = platforms.map(p => PLATFORM_COLORS[p.platform] || '#6b7280');
+
+  if (platformQtyChart) { platformQtyChart.destroy(); platformQtyChart = null; }
+
+  platformQtyChart = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        hoverBackgroundColor: colors.map(c => c + 'cc'),
+        borderWidth: 3,
+        borderColor: '#fff',
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      cutout: '72%',
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(13,16,53,0.92)',
+          titleColor: '#e8eaf6',
+          bodyColor:  '#c5c8e8',
+          padding: 10,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => ` ${ctx.label}: ${ctx.raw} adet (%${platforms[ctx.dataIndex].percentage})`
+          }
+        }
+      }
+    }
+  });
+
+  // Merkez metin
+  const centerEl = document.getElementById('platformQtyCenter');
+  if (centerEl) centerEl.textContent = data.totalCount;
+
+  // Legend tablosu
+  renderPlatformLegend('platformQtyLegend', platforms, data.totalCount, null, data.byRevenue, data);
+}
+
+function renderPlatformRevChart(data) {
+  const canvas = document.getElementById('chartPlatformRev');
+  if (!canvas) return;
+
+  const platforms = data.byRevenue;
+  const labels    = platforms.map(p => PLATFORM_LABELS[p.platform] || p.platform);
+  const values    = platforms.map(p => p.amount);
+  const colors    = platforms.map(p => PLATFORM_COLORS[p.platform] || '#6b7280');
+
+  if (platformRevChart) { platformRevChart.destroy(); platformRevChart = null; }
+
+  platformRevChart = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        hoverBackgroundColor: colors.map(c => c + 'cc'),
+        borderWidth: 3,
+        borderColor: '#fff',
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      cutout: '72%',
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(13,16,53,0.92)',
+          titleColor: '#e8eaf6',
+          bodyColor:  '#c5c8e8',
+          padding: 10,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => ` ${ctx.label}: ${formatCurrency(ctx.raw)} (%${platforms[ctx.dataIndex].percentage})`
+          }
+        }
+      }
+    }
+  });
+
+  // Merkez metin — ciro
+  const centerEl = document.getElementById('platformRevCenter');
+  if (centerEl) {
+    const rev = data.totalRevenue || 0;
+    // Kısa format: 12.450₺ yerine ₺12K gibi değil — Türkçe tam format
+    centerEl.textContent = rev >= 1000
+      ? (rev / 1000).toFixed(1).replace('.', ',') + 'B₺'
+      : formatCurrency(rev);
+  }
+
+  // Revenue legend (platform hem qty hem rev bilgisini gösterir)
+  renderPlatformLegend('platformRevLegend', data.byQuantity, data.totalCount, data.totalRevenue, data.byRevenue, data);
+}
+
+function renderPlatformLegend(tableId, qtyData, totalCount, totalRevenue, revData, data) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+
+  // Platformları birleştir
+  const platforms = qtyData.map((q, i) => {
+    const rev = revData ? revData.find(r => r.platform === q.platform) : null;
+    return {
+      platform:   q.platform,
+      count:      q.count,
+      qtyPct:     q.percentage,
+      amount:     rev?.amount || 0,
+      revPct:     rev?.percentage || 0,
+      color:      PLATFORM_COLORS[q.platform] || '#6b7280',
+      label:      PLATFORM_LABELS[q.platform] || q.platform
+    };
+  });
+
+  const rows = platforms.map(p => `
+    <tr>
+      <td><span class="platform-dot" style="background:${p.color};"></span>${p.label}</td>
+      <td style="text-align:right;">${p.count} adet</td>
+      <td style="text-align:right;color:#6b7280;">%${p.qtyPct.toFixed(1).replace('.',',')}</td>
+      <td style="text-align:right;font-weight:600;">${formatCurrency(p.amount)}</td>
+    </tr>
+  `).join('');
+
+  const totalRev = totalRevenue != null ? formatCurrency(totalRevenue) : '—';
+
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Platform</th>
+        <th style="text-align:right;">Adet</th>
+        <th style="text-align:right;">%</th>
+        <th style="text-align:right;">Ciro</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td><strong>TOPLAM</strong></td>
+        <td style="text-align:right;"><strong>${totalCount} adet</strong></td>
+        <td style="text-align:right;color:#6b7280;">%100</td>
+        <td style="text-align:right;font-weight:800;">${totalRev}</td>
+      </tr>
+    </tfoot>
+  `;
 }
