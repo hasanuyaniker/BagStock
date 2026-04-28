@@ -2177,7 +2177,6 @@ function renderOrders(orders, total) {
 
   // Toplamlar
   let sumPrice = 0, sumComm = 0, sumDesi = 0, validDesiCount = 0;
-  let sumCommRate = 0, commRateCount = 0;
 
   const rows = orders.map(order => {
     const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
@@ -2205,10 +2204,6 @@ function renderOrders(orders, total) {
     sumPrice += price;
     sumComm  += comm;
     if (desi > 0) { sumDesi += desi; validDesiCount++; }
-    // Komisyon oranı birikimi — oran bazlı ortalama için
-    const rate = parseFloat(order.commission_rate) || 0;
-    if (rate > 0) { sumCommRate += rate; commRateCount++; }
-    else if (comm > 0 && price > 0) { sumCommRate += (comm / price) * 100; commRateCount++; }
 
     const commHtml = comm > 0
       ? `${formatCurrency(comm)}${order.commission_rate ? `<br><span style="color:#9ca3af;font-size:10px;">%${parseFloat(order.commission_rate).toFixed(1)}</span>` : ''}`
@@ -2247,22 +2242,16 @@ function renderOrders(orders, total) {
 
   tbody.innerHTML = rows.join('');
 
-  // Ortalamalar — tfoot ve summaryEl her ikisi de kullanıyor, önce hesapla
-  const avgDesi    = validDesiCount > 0 ? (sumDesi / validDesiCount).toFixed(1) : '—';
-  const avgCommRate = commRateCount > 0
-    ? (sumCommRate / commRateCount)
-    : (sumComm > 0 && sumPrice > 0 ? (sumComm / sumPrice) * 100 : null);
+  // Ortalamalar
+  const avgDesi = validDesiCount > 0 ? (sumDesi / validDesiCount).toFixed(1) : '—';
 
   // Toplam satırı
   if (tfoot) {
-    const commCell = avgCommRate !== null
-      ? `%${avgCommRate.toFixed(1)}`
-      : '—';
     tfoot.innerHTML = `<tr id="ordersTotalsRow">
       <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
       <td class="col-product"></td>
       <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
-      <td class="col-comm" style="text-align:right;font-weight:700;">${commCell}</td>
+      <td class="col-comm" style="text-align:right;font-weight:700;">${sumComm > 0 ? formatCurrency(sumComm) : '—'}</td>
       <td class="col-desi" style="text-align:center;font-weight:700;">${validDesiCount > 0 ? 'Ort.' + avgDesi : '—'}</td>
       <td class="col-cargo"></td>
       <td class="col-stock"></td>
@@ -2272,7 +2261,7 @@ function renderOrders(orders, total) {
   // Özet metin
   if (summaryEl) {
     const parts = [`${total} sipariş`, `Ciro: ${formatCurrency(sumPrice)}`];
-    if (avgCommRate !== null) parts.push(`Ort. Komisyon: %${avgCommRate.toFixed(1)}`);
+    if (sumComm > 0) parts.push(`Komisyon: ${formatCurrency(sumComm)}`);
     if (validDesiCount > 0) parts.push(`Ort. Desi: ${avgDesi}`);
     summaryEl.textContent = parts.join(' | ');
   }

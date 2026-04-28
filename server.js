@@ -104,6 +104,17 @@ async function runMigrations() {
       await pool.query(sql);
     }
 
+    // UnDelivered siparişleri 'iade' yerine 'kargoda' olarak düzelt (tek seferlik)
+    const fixUndelivered = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_undelivered_to_kargoda'`);
+    if (fixUndelivered.rows.length === 0) {
+      const result = await pool.query(
+        `UPDATE marketplace_orders SET status = 'kargoda', status_tr = 'Teslim Edilemedi', updated_at = NOW()
+         WHERE raw_status = 'UnDelivered' AND status IN ('iade', 'iptal')`
+      );
+      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('fix_undelivered_to_kargoda', 'true') ON CONFLICT (key) DO NOTHING`);
+      if (result.rowCount > 0) console.log(`✓ ${result.rowCount} UnDelivered sipariş kargoda olarak düzeltildi`);
+    }
+
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {
