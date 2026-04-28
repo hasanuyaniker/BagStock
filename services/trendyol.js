@@ -135,15 +135,30 @@ function mapStatus(rawStatus) {
 // ── Sipariş normalize ──────────────────────────────────────────────────────────
 
 function mapOrder(order) {
-  // Trendyol yeni ve eski API'de farklı alan adları kullanabiliyor
+  // shipmentPackageStatus = paketin GERÇEk kargo durumu (Shipped, Delivered…)
+  // order.status          = sipariş seviyesi — bazen eski/farklı değer taşır
+  // Doğru öncelik: shipmentPackageStatus → packageStatus → status
   const rawStatus = (
-    order.status ||
     order.shipmentPackageStatus ||
     order.packageStatus ||
+    order.status ||
     ''
   ).trim();
 
-  const statusInfo = mapStatus(rawStatus);
+  // Ek olarak: birden fazla satır varsa satır durumlarına bak —
+  // en "ileri" satır durumu paketin gerçek durumunu yansıtır
+  const statusPriority = ['Delivered','Shipped','Invoiced','Picking','Returned',
+    'ReturnedAndDelivered','Cancelled','UnDelivered','Created'];
+  const lineStatuses = (order.lines || order.orderLineItems || [])
+    .map(l => (l.lineItemStatusName || l.status || '').trim())
+    .filter(Boolean);
+  const bestLineStatus = statusPriority.find(s => lineStatuses.includes(s));
+  // Paket düzeyinde status bilinmiyorsa veya Created ise satır durumu daha güvenilir
+  const effectiveRaw = rawStatus && rawStatus !== 'Created' && TY_STATUS_MAP[rawStatus]
+    ? rawStatus
+    : (bestLineStatus || rawStatus);
+
+  const statusInfo = mapStatus(effectiveRaw);
 
   // Paket seviyesinde desi (Trendyol portal'daki "Desi: 3" bu alandan gelir)
   const pkgDesi = parseFloat(
@@ -217,7 +232,7 @@ function mapOrder(order) {
     order_number:          String(order.orderNumber || order.id || order.orderId || ''),
     status:                statusInfo.internal,
     status_tr:             statusInfo.tr,
-    raw_status:            rawStatus,
+    raw_status:            effectiveRaw,   // debug için gerçek kullanılan raw değer
     customer_name:         order.customerName || order.shipmentAddress?.fullName || order.buyerName || '',
     order_date:            order.orderDate ? new Date(order.orderDate) : new Date(),
     total_price:           parseFloat(order.grossAmount || order.totalPrice || order.amount || 0),
@@ -301,10 +316,8 @@ async function fetchTrendyolOrders(creds, days = 30) {
         if (order.order_id && !seenIds.has(order.order_id)) {
           seenIds.add(order.order_id);
           allOrders.push(order);
-          // İlk birkaç siparişin raw/parsed durumunu logla (debug için)
-          if (allOrders.length <= 3) {
-            console.log(`[Trendyol] Örnek sipariş — rawStatus: "${order.raw_status}" → internal: "${order.status}", desi: ${order.cargo_desi}, comm: ${order.commission_amount}`);
-          }
+          // Her siparişin durum bilgisini logla — kargoda sorunu için kritik
+          console.log(`[TY#${order.order_number}] pkg:${(raw.shipmentPackageStatus||raw.packageStatus||'?')} / ord:${raw.status||'?'} → ${order.raw_status} → ${order.status} | desi:${order.cargo_desi??'—'}`);
         }
       }
 

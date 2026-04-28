@@ -173,6 +173,21 @@ router.get('/platform-stats', async (req, res) => {
   }
 });
 
+// ── GET /api/marketplace/status-counts — durum bazlı sayım (debug/UI) ────────
+router.get('/status-counts', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT status, raw_status, COUNT(*) AS cnt
+      FROM marketplace_orders
+      GROUP BY status, raw_status
+      ORDER BY cnt DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/marketplace/sync-status ─────────────────────────────────────────
 router.get('/sync-status', async (req, res) => {
   try {

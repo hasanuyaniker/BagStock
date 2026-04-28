@@ -2158,6 +2158,7 @@ function renderOrders(orders, total) {
 
   // Toplamlar
   let sumPrice = 0, sumComm = 0, sumDesi = 0, validDesiCount = 0;
+  let sumCommRate = 0, commRateCount = 0;
 
   const rows = orders.map(order => {
     const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
@@ -2185,6 +2186,10 @@ function renderOrders(orders, total) {
     sumPrice += price;
     sumComm  += comm;
     if (desi > 0) { sumDesi += desi; validDesiCount++; }
+    // Komisyon oranı birikimi — oran bazlı ortalama için
+    const rate = parseFloat(order.commission_rate) || 0;
+    if (rate > 0) { sumCommRate += rate; commRateCount++; }
+    else if (comm > 0 && price > 0) { sumCommRate += (comm / price) * 100; commRateCount++; }
 
     const commHtml = comm > 0
       ? `${formatCurrency(comm)}${order.commission_rate ? `<br><span style="color:#9ca3af;font-size:10px;">%${parseFloat(order.commission_rate).toFixed(1)}</span>` : ''}`
@@ -2230,17 +2235,23 @@ function renderOrders(orders, total) {
       <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
       <td class="col-product"></td>
       <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
-      <td class="col-comm" style="text-align:right;font-weight:700;">${sumComm > 0 ? formatCurrency(sumComm) : '—'}</td>
+      <td class="col-comm" style="text-align:right;font-weight:700;">${avgCommRate !== null ? `%${avgCommRate.toFixed(1)}` : (sumComm > 0 && sumPrice > 0 ? `%${((sumComm/sumPrice)*100).toFixed(1)}` : '—')}</td>
       <td class="col-desi" style="text-align:center;font-weight:700;">${validDesiCount > 0 ? 'Ort.' + avgDesi : '—'}</td>
       <td class="col-cargo"></td>
       <td class="col-stock"></td>
     </tr>`;
   }
 
-  // Özet metin
+  // Özet metin — komisyon oran (%) olarak gösterilir
+  const avgCommRate = commRateCount > 0 ? (sumCommRate / commRateCount) : null;
   if (summaryEl) {
     const parts = [`${total} sipariş`, `Ciro: ${formatCurrency(sumPrice)}`];
-    if (sumComm > 0) parts.push(`Komisyon: ${formatCurrency(sumComm)}`);
+    if (avgCommRate !== null) {
+      parts.push(`Ort. Komisyon: %${avgCommRate.toFixed(1)}`);
+    } else if (sumComm > 0 && sumPrice > 0) {
+      // Oranlar hiç gelmemişse ciro üzerinden hesapla
+      parts.push(`Ort. Komisyon: %${((sumComm / sumPrice) * 100).toFixed(1)}`);
+    }
     if (validDesiCount > 0) parts.push(`Ort. Desi: ${avgDesi}`);
     summaryEl.textContent = parts.join(' | ');
   }
