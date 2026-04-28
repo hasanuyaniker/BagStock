@@ -99,7 +99,8 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const {
-      name, barcode, product_type_id, material_id, supplier_name, stock_quantity,
+      name, barcode, barcode2, barcode3,
+      product_type_id, material_id, supplier_name, stock_quantity,
       product_image_url, cost_price, critical_stock, color,
       trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission,
       is_active
@@ -113,11 +114,12 @@ router.post('/', async (req, res) => {
     const critVal = (critical_stock !== undefined && critical_stock !== null && critical_stock !== '') ? Number(critical_stock) : 5;
 
     const result = await pool.query(
-      `INSERT INTO products (name, barcode, product_type_id, material_id, supplier_name, stock_quantity,
+      `INSERT INTO products (name, barcode, barcode2, barcode3, product_type_id, material_id, supplier_name, stock_quantity,
         product_image_url, cost_price, critical_stock, color,
         trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [name, barcode, product_type_id || null, material_id || null, supplier_name || null, stock_quantity || 0,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [name, barcode, barcode2 || null, barcode3 || null,
+       product_type_id || null, material_id || null, supplier_name || null, stock_quantity || 0,
        product_image_url || null, cost_price || null, critVal, color || null,
        trendyol_price || null, trendyol_commission || null,
        hepsiburada_price || null, hepsiburada_commission || null,
@@ -139,7 +141,8 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const {
-      name, barcode, product_type_id, material_id, supplier_name, stock_quantity,
+      name, barcode, barcode2, barcode3,
+      product_type_id, material_id, supplier_name, stock_quantity,
       product_image_url, cost_price, critical_stock, color,
       trendyol_price, trendyol_commission, hepsiburada_price, hepsiburada_commission,
       is_active
@@ -149,13 +152,15 @@ router.put('/:id', async (req, res) => {
 
     const result = await pool.query(
       `UPDATE products SET
-        name=$1, barcode=$2, product_type_id=$3, material_id=$4, supplier_name=$5, stock_quantity=$6,
-        product_image_url=$7, cost_price=$8, critical_stock=$9, color=$10,
-        trendyol_price=$11, trendyol_commission=$12,
-        hepsiburada_price=$13, hepsiburada_commission=$14,
-        is_active=$15, updated_at=NOW()
-       WHERE id=$16 RETURNING *`,
-      [name, barcode, product_type_id || null, material_id || null, supplier_name || null, stock_quantity || 0,
+        name=$1, barcode=$2, barcode2=$3, barcode3=$4,
+        product_type_id=$5, material_id=$6, supplier_name=$7, stock_quantity=$8,
+        product_image_url=$9, cost_price=$10, critical_stock=$11, color=$12,
+        trendyol_price=$13, trendyol_commission=$14,
+        hepsiburada_price=$15, hepsiburada_commission=$16,
+        is_active=$17, updated_at=NOW()
+       WHERE id=$18 RETURNING *`,
+      [name, barcode, barcode2 || null, barcode3 || null,
+       product_type_id || null, material_id || null, supplier_name || null, stock_quantity || 0,
        product_image_url || null, cost_price || null, critVal, color || null,
        trendyol_price || null, trendyol_commission || null,
        hepsiburada_price || null, hepsiburada_commission || null,

@@ -70,6 +70,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
           <span>Stok Sayım</span>
         </div>
+        <div class="sidebar-item" data-section="orders" onclick="switchSection('orders')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="4" rx="1"/><path d="M4 7v12a2 2 0 002 2h12a2 2 0 002-2V7"/><path d="M10 12h4"/><path d="M10 16h4"/></svg>
+          <span>Siparişler</span>
+        </div>
         <div class="sidebar-item" data-section="salesreport" onclick="switchSection('salesreport')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
           <span>Satış Raporu</span>
@@ -180,6 +184,52 @@
           </div>
         </div>
 
+        <!-- MARKETPLACE ORDERS -->
+        <div class="section" id="section-orders">
+          <div class="toolbar" style="flex-wrap:wrap;gap:8px;">
+            <div class="toolbar-left" style="flex-wrap:wrap;gap:8px;">
+              <select id="orderPlatformFilter" style="padding:7px 10px;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-size:13px;background:rgba(255,255,255,0.15);color:#fff;">
+                <option value="">Tüm Platformlar</option>
+                <option value="trendyol">🟠 Trendyol</option>
+                <option value="hepsiburada">🔴 Hepsiburada</option>
+              </select>
+              <select id="orderStatusFilter" style="padding:7px 10px;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-size:13px;background:rgba(255,255,255,0.15);color:#fff;">
+                <option value="">Tüm Durumlar</option>
+                <option value="bekliyor">⏳ Bekliyor</option>
+                <option value="kargoda">🚚 Kargoda</option>
+                <option value="teslim_edildi">✅ Teslim Edildi</option>
+                <option value="iptal">❌ İptal</option>
+                <option value="iade">↩️ İade</option>
+              </select>
+              <input type="date" id="orderFromDate" style="padding:7px 10px;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-size:13px;background:rgba(255,255,255,0.15);color:#fff;">
+              <input type="date" id="orderToDate" style="padding:7px 10px;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-size:13px;background:rgba(255,255,255,0.15);color:#fff;">
+              <button class="btn btn-primary btn-sm" onclick="loadOrders()">Filtrele</button>
+            </div>
+            <div class="toolbar-right">
+              <button class="btn btn-secondary btn-sm" onclick="syncMarketplace()" id="syncBtn">🔄 Şimdi Senkronize Et</button>
+              <div id="syncStatusText" style="font-size:12px;color:rgba(255,255,255,0.7);align-self:center;"></div>
+            </div>
+          </div>
+          <div id="ordersSummaryCards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
+          <div class="table-container">
+            <table id="ordersTable">
+              <thead>
+                <tr>
+                  <th>Platform</th>
+                  <th>Sipariş No</th>
+                  <th>Tarih</th>
+                  <th>Durum</th>
+                  <th>Ürünler</th>
+                  <th>Tutar</th>
+                  <th>Stok</th>
+                </tr>
+              </thead>
+              <tbody id="ordersTableBody"></tbody>
+            </table>
+          </div>
+          <div id="ordersPagination" style="display:flex;justify-content:center;gap:8px;margin-top:16px;"></div>
+        </div>
+
         <!-- STOCK COUNT -->
         <div class="section" id="section-stockcount">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
@@ -274,6 +324,7 @@
             <div class="settings-tab" data-tab="password" onclick="switchSettingsTab('password')">Şifre Değiştir</div>
             <div class="settings-tab" data-tab="backup" onclick="switchSettingsTab('backup')">Yedekleme</div>
             <div class="settings-tab" data-tab="email" onclick="switchSettingsTab('email')">⚙️ Bildirim Ayarları</div>
+            <div class="settings-tab" data-tab="apiintegration" onclick="switchSettingsTab('apiintegration')">🔌 API Entegrasyonu</div>
           </div>
 
           <!-- Users Panel -->
@@ -379,6 +430,81 @@
             </div>
           </div>
 
+          <!-- API Integration Panel -->
+          <div class="settings-panel" id="panel-apiintegration">
+            <!-- Trendyol -->
+            <div class="settings-card" style="max-width:520px;margin-bottom:16px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <span style="font-size:22px;">🟠</span>
+                <h3 style="font-size:15px;margin:0;">Trendyol Entegrasyonu</h3>
+                <span id="tyConfigBadge" style="display:none;background:#dcfce7;color:#16a34a;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">✓ Yapılandırıldı</span>
+              </div>
+              <p style="font-size:12px;color:#6b7280;margin-bottom:14px;">
+                Trendyol Satıcı Paneli → Entegrasyonlar → API Bilgileri bölümünden alabilirsiniz.
+              </p>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Satıcı ID (Supplier ID)</label>
+                  <input type="text" id="tySupplierId" placeholder="12345678">
+                </div>
+                <div class="form-group">
+                  <label>API Key</label>
+                  <input type="text" id="tyApiKey" placeholder="API Key">
+                </div>
+                <div class="form-group full">
+                  <label>API Secret</label>
+                  <input type="password" id="tyApiSecret" placeholder="API Secret">
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-primary btn-sm" onclick="saveTYCredentials()">Kaydet</button>
+                <button class="btn btn-secondary btn-sm" onclick="clearTYCredentials()" id="tyClearBtn" style="display:none;">Kimlik Bilgilerini Sil</button>
+                <div id="tyCredResult" style="font-size:13px;"></div>
+              </div>
+            </div>
+
+            <!-- Hepsiburada -->
+            <div class="settings-card" style="max-width:520px;margin-bottom:16px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <span style="font-size:22px;">🔴</span>
+                <h3 style="font-size:15px;margin:0;">Hepsiburada Entegrasyonu</h3>
+                <span id="hbConfigBadge" style="display:none;background:#dcfce7;color:#16a34a;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">✓ Yapılandırıldı</span>
+              </div>
+              <p style="font-size:12px;color:#6b7280;margin-bottom:14px;">
+                Hepsiburada Satıcı Paneli → Mağaza Ayarları → API Erişim Bilgileri bölümünden alabilirsiniz.
+              </p>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Merchant ID</label>
+                  <input type="text" id="hbMerchantId" placeholder="Merchant ID">
+                </div>
+                <div class="form-group full">
+                  <label>API Key (Şifre)</label>
+                  <input type="password" id="hbApiKey" placeholder="API Key / Şifre">
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-primary btn-sm" onclick="saveHBCredentials()">Kaydet</button>
+                <button class="btn btn-secondary btn-sm" onclick="clearHBCredentials()" id="hbClearBtn" style="display:none;">Kimlik Bilgilerini Sil</button>
+                <div id="hbCredResult" style="font-size:13px;"></div>
+              </div>
+            </div>
+
+            <!-- Sync Info -->
+            <div class="settings-card" style="max-width:520px;">
+              <h3 style="font-size:15px;margin-bottom:12px;">🔄 Senkronizasyon Bilgisi</h3>
+              <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">
+                Siparişler otomatik olarak her <strong>15 dakikada</strong> bir senkronize edilir.
+                Kargoya verilen siparişlerin stoğu <strong>barkod eşleşmesi</strong> ile otomatik düşürülür.
+              </p>
+              <div id="syncInfoPanel" style="background:#f8fafc;border-radius:8px;padding:12px;font-size:12px;color:#374151;"></div>
+              <div style="margin-top:12px;display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" onclick="syncMarketplace()">Şimdi Senkronize Et</button>
+                <button class="btn btn-secondary btn-sm" onclick="loadSyncStatus()">Durumu Yenile</button>
+              </div>
+            </div>
+          </div>
+
           <!-- Backup Panel -->
           <div class="settings-panel" id="panel-backup">
             <div class="settings-card" style="max-width:400px;">
@@ -406,8 +532,16 @@
           <input type="text" id="pName">
         </div>
         <div class="form-group">
-          <label>Barkod *</label>
+          <label>Barkod 1 (Ana) *</label>
           <input type="text" id="pBarcode">
+        </div>
+        <div class="form-group">
+          <label>Barkod 2</label>
+          <input type="text" id="pBarcode2" placeholder="Opsiyonel">
+        </div>
+        <div class="form-group">
+          <label>Barkod 3</label>
+          <input type="text" id="pBarcode3" placeholder="Opsiyonel">
         </div>
         <div class="form-group">
           <label>Ürün Tipi</label>
@@ -562,6 +696,10 @@
     <div class="bottom-nav-item" data-section="sales" onclick="switchSection('sales')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
       <span>Satış</span>
+    </div>
+    <div class="bottom-nav-item" data-section="orders" onclick="switchSection('orders')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="4" rx="1"/><path d="M4 7v12a2 2 0 002 2h12a2 2 0 002-2V7"/><path d="M10 12h4"/><path d="M10 16h4"/></svg>
+      <span>Sipariş</span>
     </div>
     <div class="bottom-nav-item" data-section="salesreport" onclick="switchSection('salesreport')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>

@@ -1921,3 +1921,31 @@ html {
   }
 }
 
+/* ── Marketplace Orders ───────────────────────────────────────── */
+#section-orders .toolbar {
+  align-items: flex-start;
+}
+#section-orders select,
+#section-orders input[type="date"] {
+  color: #fff;
+}
+#section-orders select option {
+  background: #1a1f3e;
+  color: #fff;
+}
+#ordersSummaryCards {
+  padding: 0 2px;
+}
+#ordersTable td {
+  vertical-align: top;
+}
+
+/* ── API Settings Panel ───────────────────────────────────────── */
+#panel-apiintegration .settings-card {
+  margin-bottom: 16px;
+}
+#panel-apiintegration .form-group label {
+  font-size: 12px;
+}
+
+

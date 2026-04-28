@@ -32,6 +32,43 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`);
     // marketplace: hangi platformdan satıldığı
     await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS marketplace VARCHAR(20) NOT NULL DEFAULT 'normal'`);
+    // Çoklu barkod desteği
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode3 VARCHAR(100)`);
+    // Marketplace sipariş tablosu
+    await pool.query(`CREATE TABLE IF NOT EXISTS marketplace_orders (
+      id SERIAL PRIMARY KEY,
+      platform VARCHAR(20) NOT NULL,
+      order_id VARCHAR(100) NOT NULL,
+      order_number VARCHAR(100),
+      status VARCHAR(30) NOT NULL DEFAULT 'bekliyor',
+      raw_status VARCHAR(50),
+      customer_name VARCHAR(200),
+      order_date TIMESTAMPTZ DEFAULT NOW(),
+      total_price NUMERIC(12,2) DEFAULT 0,
+      currency VARCHAR(10) DEFAULT 'TRY',
+      stock_deducted BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(platform, order_id)
+    )`);
+    // Marketplace sipariş kalemleri tablosu
+    await pool.query(`CREATE TABLE IF NOT EXISTS marketplace_order_items (
+      id SERIAL PRIMARY KEY,
+      marketplace_order_id INTEGER REFERENCES marketplace_orders(id) ON DELETE CASCADE,
+      item_id VARCHAR(100) NOT NULL,
+      barcode VARCHAR(100),
+      product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+      product_name VARCHAR(300),
+      sku VARCHAR(100),
+      quantity INTEGER NOT NULL DEFAULT 1,
+      price NUMERIC(12,2) DEFAULT 0,
+      status VARCHAR(30),
+      raw_status VARCHAR(50),
+      stock_deducted BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(marketplace_order_id, item_id)
+    )`);
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {
@@ -83,6 +120,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/stockcount', require('./routes/stockcount'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/marketplace', require('./routes/marketplace'));
 
 // Yedekleme endpoint
 app.get('/api/backup', require('./middleware/auth'), async (req, res) => {
@@ -135,33 +173,47 @@ app.use((err, req, res, next) => {
 function startDailyReportScheduler(appPool) {
   const { sendDailySalesReport, getIstanbulDateTime } = require('./services/notify');
   let isSending = false;
+  let checkCount = 0;
 
   async function checkAndSend() {
     if (isSending) return;
+    checkCount++;
+
+    let date, hhmm;
+    try {
+      ({ date, hhmm } = getIstanbulDateTime());
+    } catch (e) {
+      console.error('[Zamanlayıcı] Saat alınamadı:', e.message);
+      return;
+    }
+
+    // Her 10 kontrolde bir (≈5 dakikada) durum logu — Railway loglarında görülebilir
+    if (checkCount % 10 === 1) {
+      console.log(`[Zamanlayıcı] İstanbul: ${date} ${hhmm}`);
+    }
 
     try {
-      const { date, hhmm } = getIstanbulDateTime();
-
       // Ayarlanan saati DB'den al
       const timeRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_time'");
       const reportTime = (timeRow.rows[0]?.value || '').trim();
-      if (!reportTime || !/^\d{2}:\d{2}$/.test(reportTime)) return;
 
-      // Ayarlanan saat henüz gelmemiş — sadece 0-59 dk gecikmeli pencerede gönder
-      // (örn. 20:00 ayarlıysa 20:00–20:59 arası gönderir, 21:00'den sonra artık bu gün için yok sayar)
+      if (!reportTime) return; // saat ayarlanmamış
+      if (!/^\d{2}:\d{2}$/.test(reportTime)) {
+        console.warn(`[Zamanlayıcı] Geçersiz saat formatı DB'de: "${reportTime}"`);
+        return;
+      }
+
+      // Henüz gelmemiş
       if (hhmm < reportTime) return;
-      const [rH, rM] = reportTime.split(':').map(Number);
-      const [cH, cM] = hhmm.split(':').map(Number);
-      const diffMin = (cH * 60 + cM) - (rH * 60 + rM);
-      if (diffMin > 59) return; // 1 saati geçmişse bugün için gönderme fırsatı kaçtı
 
-      // Bu tarih+saat için daha önce gönderilmiş mi?
+      // sentKey: "YYYY-MM-DD|HH:MM" — saat veya gün değişirse yeni anahtar oluşur
       const sentKey = `${date}|${reportTime}`;
       const sentRow = await appPool.query("SELECT value FROM app_settings WHERE key = 'daily_report_sent_key'");
       const lastSentKey = sentRow.rows[0]?.value || null;
-      if (lastSentKey === sentKey) return;
 
-      console.log(`[Günlük Rapor] ${date} ${hhmm} — gönderim başlıyor (ayarlı: ${reportTime})`);
+      if (lastSentKey === sentKey) return; // bu gün için zaten gönderildi
+
+      console.log(`[Zamanlayıcı] GÖNDERIM BAŞLIYOR — ${date} ${hhmm} (ayarlı: ${reportTime})`);
       isSending = true;
 
       try {
@@ -171,27 +223,59 @@ function startDailyReportScheduler(appPool) {
            ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
           [sentKey]
         );
-        console.log(`[Günlük Rapor] ✓ ${sentKey} başarıyla gönderildi`);
+        console.log(`[Zamanlayıcı] ✓ Başarıyla gönderildi → ${sentKey}`);
       } catch (sendErr) {
-        console.error(`[Günlük Rapor] ✗ Gönderim hatası (tekrar denenecek): ${sendErr.message}`);
+        console.error(`[Zamanlayıcı] ✗ Gönderim hatası (tekrar denenecek): ${sendErr.message}`);
       } finally {
         isSending = false;
       }
 
     } catch (err) {
       isSending = false;
-      console.error('[Günlük Rapor Zamanlayıcı] DB hatası:', err.message);
+      console.error('[Zamanlayıcı] DB hatası:', err.message);
     }
   }
 
-  // Her 30 saniyede bir kontrol (60s yerine — daha güvenilir)
+  // Her 30 saniyede bir kontrol
   setInterval(checkAndSend, 30 * 1000);
 
-  // Uygulama (yeniden) başladığında 10 saniye sonra hemen kontrol et
-  // → Railway yeniden deploy etse bile zamanlı saat kaçmaz
+  // App başladığında 10 saniye sonra hemen kontrol
+  // (Railway deploy sırasında saat geçmişse bile yakalanır)
   setTimeout(checkAndSend, 10 * 1000);
 
   console.log('✓ Günlük rapor zamanlayıcı başlatıldı (30s aralık + startup check)');
+}
+
+// ── Marketplace senkronizasyon zamanlayıcı ────────────────────────────────────
+function startMarketplaceSyncScheduler(appPool) {
+  const { runMarketplaceSync } = require('./routes/marketplace');
+
+  async function doSync() {
+    try {
+      // Kimlik bilgisi var mı kontrol et
+      const credRow = await appPool.query(
+        "SELECT value FROM app_settings WHERE key = 'marketplace_credentials'"
+      );
+      if (!credRow.rows.length || !credRow.rows[0].value) return; // yapılandırılmamış
+
+      let creds;
+      try { creds = JSON.parse(credRow.rows[0].value); } catch { return; }
+
+      const hasAny = (creds.trendyol?.supplierId && creds.trendyol?.apiKey) ||
+                     (creds.hepsiburada?.merchantId && creds.hepsiburada?.apiKey);
+      if (!hasAny) return;
+
+      await runMarketplaceSync(appPool);
+    } catch (err) {
+      console.error('[Marketplace Zamanlayıcı] Hata:', err.message);
+    }
+  }
+
+  // Her 15 dakikada bir senkronize et
+  setInterval(doSync, 15 * 60 * 1000);
+  // Başlangıçta 30 saniye sonra ilk senkronizasyon
+  setTimeout(doSync, 30 * 1000);
+  console.log('✓ Marketplace senkronizasyon zamanlayıcı başlatıldı (15 dakika aralık)');
 }
 
 // Migration çalıştır, sonra sunucuyu başlat
@@ -209,6 +293,7 @@ runMigrations().then(() => {
   });
 
   startDailyReportScheduler(appPool);
+  startMarketplaceSyncScheduler(appPool);
 
   app.listen(PORT, () => {
     console.log(`Stok Takip Sistemi - Port: ${PORT}`);

@@ -135,6 +135,7 @@ function switchSection(name) {
   if (name === 'stockcount') loadStockCount();
   if (name === 'settings') loadSettings();
   if (name === 'reports') loadReportOptions();
+  if (name === 'orders') initOrdersSection();
 }
 
 // ==================== TOAST ====================
@@ -690,6 +691,8 @@ function openProductModal(product = null) {
   if (product) {
     document.getElementById('pName').value = product.name || '';
     document.getElementById('pBarcode').value = product.barcode || '';
+    document.getElementById('pBarcode2').value = product.barcode2 || '';
+    document.getElementById('pBarcode3').value = product.barcode3 || '';
     document.getElementById('pType').value = product.product_type_id || '';
     document.getElementById('pMaterial').value = product.material_id || '';
     document.getElementById('pColor').value = product.color || '';
@@ -713,7 +716,7 @@ function openProductModal(product = null) {
       preview.style.display = 'none';
     }
   } else {
-    ['pName','pBarcode','pColor','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
+    ['pName','pBarcode','pBarcode2','pBarcode3','pColor','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('pStock').value = 0;
     document.getElementById('pCritical').value = 5;
     document.getElementById('pIsActive').checked = true;
@@ -743,6 +746,8 @@ async function saveProduct() {
   const data = {
     name: document.getElementById('pName').value.trim(),
     barcode: document.getElementById('pBarcode').value.trim(),
+    barcode2: document.getElementById('pBarcode2').value.trim() || null,
+    barcode3: document.getElementById('pBarcode3').value.trim() || null,
     product_type_id: document.getElementById('pType').value || null,
     material_id: document.getElementById('pMaterial').value || null,
     color: document.getElementById('pColor').value.trim() || null,
@@ -1338,6 +1343,7 @@ function switchSettingsTab(tab) {
   if (tab === 'materials') loadMaterialsPanel();
   if (tab === 'media') loadMediaPanel();
   if (tab === 'email') loadEmailSettings();
+  if (tab === 'apiintegration') { loadMarketplaceCredentials(); loadSyncStatus(); }
 }
 
 async function loadSettings() {
@@ -2021,3 +2027,341 @@ function closeLightbox() {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
 
 document.getElementById('salesDate').addEventListener('change', loadSalesView);
+
+// ==================== MARKETPLACE ORDERS ====================
+
+let _ordersPage = 0;
+const ORDERS_PAGE_SIZE = 50;
+
+function initOrdersSection() {
+  // Varsayılan tarih aralığı: son 30 gün
+  const today = new Date().toISOString().split('T')[0];
+  const from30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const fromEl = document.getElementById('orderFromDate');
+  const toEl = document.getElementById('orderToDate');
+  if (fromEl && !fromEl.value) fromEl.value = from30;
+  if (toEl && !toEl.value) toEl.value = today;
+  _ordersPage = 0;
+  loadOrders();
+  loadSyncStatus();
+}
+
+async function loadOrders(page = 0) {
+  _ordersPage = page;
+  const platform = document.getElementById('orderPlatformFilter')?.value || '';
+  const status   = document.getElementById('orderStatusFilter')?.value || '';
+  const from     = document.getElementById('orderFromDate')?.value || '';
+  const to       = document.getElementById('orderToDate')?.value || '';
+
+  const params = new URLSearchParams({ limit: ORDERS_PAGE_SIZE, offset: page * ORDERS_PAGE_SIZE });
+  if (platform) params.set('platform', platform);
+  if (status)   params.set('status', status);
+  if (from)     params.set('from', from);
+  if (to)       params.set('to', to);
+
+  const tbody = document.getElementById('ordersTableBody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#6b7280;">Yükleniyor...</td></tr>';
+
+  try {
+    const res = await apiFetch(`/api/marketplace/orders?${params}`);
+    if (!res) return;
+    const data = await res.json();
+    renderOrders(data.orders || [], data.total || 0);
+    renderOrdersPagination(data.total || 0, page);
+    renderOrdersSummaryCards(data.orders || []);
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:30px;color:#dc2626;">Yükleme hatası: ${err.message}</td></tr>`;
+  }
+}
+
+function renderOrdersSummaryCards(orders) {
+  const el = document.getElementById('ordersSummaryCards');
+  if (!el) return;
+
+  const counts = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0 };
+  orders.forEach(o => { if (counts[o.status] !== undefined) counts[o.status]++; });
+
+  const cards = [
+    { key: 'bekliyor',      label: 'Bekliyor',       emoji: '⏳', bg: '#fffbeb', color: '#d97706', border: '#fde68a' },
+    { key: 'kargoda',       label: 'Kargoda',        emoji: '🚚', bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
+    { key: 'teslim_edildi', label: 'Teslim Edildi',  emoji: '✅', bg: '#f0fdf4', color: '#16a34a', border: '#bbf7d0' },
+    { key: 'iptal',         label: 'İptal',          emoji: '❌', bg: '#fff1f2', color: '#dc2626', border: '#fecaca' },
+  ];
+
+  el.innerHTML = cards.map(c => `
+    <div style="background:${c.bg};border:1px solid ${c.border};border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px;min-width:120px;">
+      <span style="font-size:20px;">${c.emoji}</span>
+      <div>
+        <div style="font-size:11px;color:${c.color};font-weight:600;">${c.label}</div>
+        <div style="font-size:20px;font-weight:800;color:${c.color};">${counts[c.key]}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderOrders(orders, total) {
+  const tbody = document.getElementById('ordersTableBody');
+  if (!tbody) return;
+
+  if (orders.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:#6b7280;">
+      <div style="font-size:32px;margin-bottom:8px;">📭</div>
+      <div>Sipariş bulunamadı</div>
+      <div style="font-size:12px;margin-top:4px;">API entegrasyonunu ayarlamak için Ayarlar → API Entegrasyonu bölümüne gidin</div>
+    </td></tr>`;
+    return;
+  }
+
+  const statusBadge = {
+    bekliyor:      '<span style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ Bekliyor</span>',
+    kargoda:       '<span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🚚 Kargoda</span>',
+    teslim_edildi: '<span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ Teslim</span>',
+    iptal:         '<span style="background:#fff1f2;color:#dc2626;border:1px solid #fecaca;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">❌ İptal</span>',
+    iade:          '<span style="background:#faf5ff;color:#7c3aed;border:1px solid #ddd6fe;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">↩️ İade</span>',
+  };
+
+  const platformBadge = {
+    trendyol:    '<span class="mp-badge trendyol">🟠 Trendyol</span>',
+    hepsiburada: '<span class="mp-badge hepsiburada">🔴 Hepsiburada</span>'
+  };
+
+  tbody.innerHTML = orders.map(order => {
+    const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
+    const itemsHtml = items.length > 0
+      ? items.map(item => {
+          const matched = item.p_name || item.product_name || '';
+          const bc = item.barcode || '';
+          const deductedIcon = item.stock_deducted ? ' <span title="Stok düşürüldü" style="color:#16a34a;">✓</span>' : '';
+          return `<div style="font-size:11px;line-height:1.4;">${escHtml(matched || bc)} <span style="color:#9ca3af;">${bc}</span> ×${item.quantity}${deductedIcon}</div>`;
+        }).join('')
+      : '<span style="color:#9ca3af;font-size:11px;">—</span>';
+
+    const anyDeducted  = items.some(i => i.stock_deducted);
+    const shouldDeduct = ['kargoda', 'teslim_edildi'].includes(order.status);
+    const stockCell = shouldDeduct
+      ? (anyDeducted ? '<span style="color:#16a34a;font-size:12px;font-weight:600;">✓ Düşürüldü</span>' : '<span style="color:#d97706;font-size:12px;">⏳ Bekliyor</span>')
+      : '—';
+
+    const dateStr = order.order_date ? new Date(order.order_date).toLocaleDateString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+    return `<tr>
+      <td>${platformBadge[order.platform] || escHtml(order.platform)}</td>
+      <td style="font-family:monospace;font-size:12px;">${escHtml(order.order_number || order.order_id)}</td>
+      <td style="font-size:12px;">${dateStr}</td>
+      <td>${statusBadge[order.status] || escHtml(order.status)}</td>
+      <td>${itemsHtml}</td>
+      <td style="font-weight:600;">${formatCurrency(order.total_price)}</td>
+      <td>${stockCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderOrdersPagination(total, currentPage) {
+  const el = document.getElementById('ordersPagination');
+  if (!el) return;
+  const totalPages = Math.ceil(total / ORDERS_PAGE_SIZE);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  let html = '';
+  if (currentPage > 0) {
+    html += `<button class="btn btn-secondary btn-sm" onclick="loadOrders(${currentPage - 1})">← Önceki</button>`;
+  }
+  html += `<span style="font-size:13px;color:rgba(255,255,255,0.8);align-self:center;">${currentPage + 1} / ${totalPages}</span>`;
+  if (currentPage < totalPages - 1) {
+    html += `<button class="btn btn-secondary btn-sm" onclick="loadOrders(${currentPage + 1})">Sonraki →</button>`;
+  }
+  el.innerHTML = html;
+}
+
+async function syncMarketplace() {
+  const btn = document.getElementById('syncBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '🔄 Senkronize ediliyor...'; }
+
+  try {
+    const res = await apiFetch('/api/marketplace/sync', { method: 'POST' });
+    if (res) {
+      showToast('Senkronizasyon başlatıldı — veriler yakında güncellenecek');
+      // 5 saniye sonra yenile
+      setTimeout(() => { loadOrders(_ordersPage); loadSyncStatus(); }, 5000);
+    }
+  } catch (err) {
+    showToast('Senkronizasyon hatası: ' + err.message, 'error');
+  } finally {
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 Şimdi Senkronize Et'; }
+    }, 5000);
+  }
+}
+
+async function loadSyncStatus() {
+  try {
+    const res = await apiFetch('/api/marketplace/sync-status');
+    if (!res) return;
+    const data = await res.json();
+
+    // Orders section status text
+    const statusEl = document.getElementById('syncStatusText');
+    if (statusEl) {
+      const parts = [];
+      if (data.trendyol?.lastSync) parts.push(`TY: ${new Date(data.trendyol.lastSync).toLocaleTimeString('tr-TR')}`);
+      if (data.hepsiburada?.lastSync) parts.push(`HB: ${new Date(data.hepsiburada.lastSync).toLocaleTimeString('tr-TR')}`);
+      statusEl.textContent = parts.length ? 'Son sync: ' + parts.join(' | ') : '';
+    }
+
+    // Settings panel info
+    const infoEl = document.getElementById('syncInfoPanel');
+    if (infoEl) {
+      let html = '';
+      if (data.trendyol) {
+        const ts = new Date(data.trendyol.lastSync).toLocaleString('tr-TR');
+        html += `<div style="margin-bottom:6px;">🟠 <strong>Trendyol</strong>: Son sync ${ts} — ${data.trendyol.info}</div>`;
+      } else {
+        html += `<div style="margin-bottom:6px;color:#9ca3af;">🟠 <strong>Trendyol</strong>: Henüz senkronize edilmedi</div>`;
+      }
+      if (data.hepsiburada) {
+        const ts = new Date(data.hepsiburada.lastSync).toLocaleString('tr-TR');
+        html += `<div style="margin-bottom:6px;">🔴 <strong>Hepsiburada</strong>: Son sync ${ts} — ${data.hepsiburada.info}</div>`;
+      } else {
+        html += `<div style="margin-bottom:6px;color:#9ca3af;">🔴 <strong>Hepsiburada</strong>: Henüz senkronize edilmedi</div>`;
+      }
+      if (data.lastError) {
+        const ts = data.lastErrorAt ? new Date(data.lastErrorAt).toLocaleString('tr-TR') : '';
+        html += `<div style="color:#dc2626;margin-top:8px;">⚠️ Son hata (${ts}): ${escHtml(data.lastError)}</div>`;
+      }
+      infoEl.innerHTML = html || '<span style="color:#9ca3af;">Henüz senkronizasyon yapılmadı.</span>';
+    }
+  } catch (err) {
+    console.error('Sync status hatası:', err);
+  }
+}
+
+// ==================== MARKETPLACE API SETTINGS ====================
+
+async function loadMarketplaceCredentials() {
+  try {
+    const res = await apiFetch('/api/settings/marketplace-credentials');
+    if (!res) return;
+    const data = await res.json();
+
+    // Trendyol
+    const ty = data.trendyol || {};
+    document.getElementById('tySupplierId').value = ty.supplierId || '';
+    document.getElementById('tyApiKey').value = ty.apiKey || '';
+    document.getElementById('tyApiSecret').value = ty.apiSecret || '';
+    const tyBadge = document.getElementById('tyConfigBadge');
+    const tyClear = document.getElementById('tyClearBtn');
+    if (ty.configured) {
+      if (tyBadge) tyBadge.style.display = '';
+      if (tyClear) tyClear.style.display = '';
+    } else {
+      if (tyBadge) tyBadge.style.display = 'none';
+      if (tyClear) tyClear.style.display = 'none';
+    }
+
+    // Hepsiburada
+    const hb = data.hepsiburada || {};
+    document.getElementById('hbMerchantId').value = hb.merchantId || '';
+    document.getElementById('hbApiKey').value = hb.apiKey || '';
+    const hbBadge = document.getElementById('hbConfigBadge');
+    const hbClear = document.getElementById('hbClearBtn');
+    if (hb.configured) {
+      if (hbBadge) hbBadge.style.display = '';
+      if (hbClear) hbClear.style.display = '';
+    } else {
+      if (hbBadge) hbBadge.style.display = 'none';
+      if (hbClear) hbClear.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Marketplace credentials hatası:', err);
+  }
+}
+
+async function saveTYCredentials() {
+  const supplierId = document.getElementById('tySupplierId').value.trim();
+  const apiKey     = document.getElementById('tyApiKey').value.trim();
+  const apiSecret  = document.getElementById('tyApiSecret').value.trim();
+  const resultEl   = document.getElementById('tyCredResult');
+
+  if (!supplierId || !apiKey || !apiSecret) {
+    resultEl.innerHTML = '<span style="color:#dc2626;">Tüm alanları doldurunuz</span>';
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/settings/marketplace-credentials', {
+      method: 'POST',
+      body: { platform: 'trendyol', supplierId, apiKey, apiSecret }
+    });
+    const data = await res.json();
+    if (res.ok) {
+      resultEl.innerHTML = '<span style="color:#16a34a;">✓ Kaydedildi</span>';
+      document.getElementById('tyConfigBadge').style.display = '';
+      document.getElementById('tyClearBtn').style.display = '';
+      showToast('Trendyol kimlik bilgileri kaydedildi');
+    } else {
+      resultEl.innerHTML = `<span style="color:#dc2626;">${data.error}</span>`;
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`;
+  }
+}
+
+async function clearTYCredentials() {
+  if (!confirm('Trendyol kimlik bilgilerini silmek istediğinizden emin misiniz?')) return;
+  try {
+    await apiFetch('/api/settings/marketplace-credentials/trendyol', { method: 'DELETE' });
+    document.getElementById('tySupplierId').value = '';
+    document.getElementById('tyApiKey').value = '';
+    document.getElementById('tyApiSecret').value = '';
+    document.getElementById('tyConfigBadge').style.display = 'none';
+    document.getElementById('tyClearBtn').style.display = 'none';
+    document.getElementById('tyCredResult').innerHTML = '';
+    showToast('Trendyol kimlik bilgileri silindi');
+  } catch (err) {
+    showToast('Silme hatası: ' + err.message, 'error');
+  }
+}
+
+async function saveHBCredentials() {
+  const merchantId = document.getElementById('hbMerchantId').value.trim();
+  const apiKey     = document.getElementById('hbApiKey').value.trim();
+  const resultEl   = document.getElementById('hbCredResult');
+
+  if (!merchantId || !apiKey) {
+    resultEl.innerHTML = '<span style="color:#dc2626;">Tüm alanları doldurunuz</span>';
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/settings/marketplace-credentials', {
+      method: 'POST',
+      body: { platform: 'hepsiburada', merchantId, apiKey }
+    });
+    const data = await res.json();
+    if (res.ok) {
+      resultEl.innerHTML = '<span style="color:#16a34a;">✓ Kaydedildi</span>';
+      document.getElementById('hbConfigBadge').style.display = '';
+      document.getElementById('hbClearBtn').style.display = '';
+      showToast('Hepsiburada kimlik bilgileri kaydedildi');
+    } else {
+      resultEl.innerHTML = `<span style="color:#dc2626;">${data.error}</span>`;
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`;
+  }
+}
+
+async function clearHBCredentials() {
+  if (!confirm('Hepsiburada kimlik bilgilerini silmek istediğinizden emin misiniz?')) return;
+  try {
+    await apiFetch('/api/settings/marketplace-credentials/hepsiburada', { method: 'DELETE' });
+    document.getElementById('hbMerchantId').value = '';
+    document.getElementById('hbApiKey').value = '';
+    document.getElementById('hbConfigBadge').style.display = 'none';
+    document.getElementById('hbClearBtn').style.display = 'none';
+    document.getElementById('hbCredResult').innerHTML = '';
+    showToast('Hepsiburada kimlik bilgileri silindi');
+  } catch (err) {
+    showToast('Silme hatası: ' + err.message, 'error');
+  }
+}

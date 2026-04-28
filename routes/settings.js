@@ -172,4 +172,114 @@ router.post('/test-email', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Marketplace API Kimlik Bilgileri ──────────────────────────────────────────
+
+// GET /api/settings/marketplace-credentials
+router.get('/marketplace-credentials', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'marketplace_credentials'"
+    );
+    if (!result.rows.length || !result.rows[0].value) {
+      return res.json({ trendyol: {}, hepsiburada: {} });
+    }
+    let creds;
+    try { creds = JSON.parse(result.rows[0].value); }
+    catch { return res.json({ trendyol: {}, hepsiburada: {} }); }
+
+    // Güvenlik: secret'ları maskele (sadece var/yok bilgisi ver)
+    const masked = {
+      trendyol: {
+        supplierId: creds.trendyol?.supplierId || '',
+        apiKey: creds.trendyol?.apiKey ? '***' + (creds.trendyol.apiKey.slice(-4) || '') : '',
+        apiSecret: creds.trendyol?.apiSecret ? '***masked***' : '',
+        configured: !!(creds.trendyol?.supplierId && creds.trendyol?.apiKey && creds.trendyol?.apiSecret)
+      },
+      hepsiburada: {
+        merchantId: creds.hepsiburada?.merchantId || '',
+        apiKey: creds.hepsiburada?.apiKey ? '***' + (creds.hepsiburada.apiKey.slice(-4) || '') : '',
+        configured: !!(creds.hepsiburada?.merchantId && creds.hepsiburada?.apiKey)
+      }
+    };
+    res.json(masked);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/settings/marketplace-credentials
+// Body: { platform: 'trendyol'|'hepsiburada', ...fields }
+router.post('/marketplace-credentials', authMiddleware, async (req, res) => {
+  try {
+    const { platform, supplierId, apiKey, apiSecret, merchantId } = req.body;
+    if (!['trendyol', 'hepsiburada'].includes(platform)) {
+      return res.status(400).json({ error: 'Geçersiz platform' });
+    }
+
+    // Mevcut kimlik bilgilerini al
+    const existingRow = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'marketplace_credentials'"
+    );
+    let creds = {};
+    if (existingRow.rows.length && existingRow.rows[0].value) {
+      try { creds = JSON.parse(existingRow.rows[0].value); } catch {}
+    }
+
+    // Platform bilgilerini güncelle (boş string = temizle)
+    if (platform === 'trendyol') {
+      if (!creds.trendyol) creds.trendyol = {};
+      if (supplierId !== undefined) creds.trendyol.supplierId = supplierId;
+      if (apiKey !== undefined && apiKey !== '***masked***' && !apiKey.startsWith('***')) {
+        creds.trendyol.apiKey = apiKey;
+      }
+      if (apiSecret !== undefined && apiSecret !== '***masked***' && !apiSecret.startsWith('***')) {
+        creds.trendyol.apiSecret = apiSecret;
+      }
+    } else if (platform === 'hepsiburada') {
+      if (!creds.hepsiburada) creds.hepsiburada = {};
+      if (merchantId !== undefined) creds.hepsiburada.merchantId = merchantId;
+      if (apiKey !== undefined && !apiKey.startsWith('***')) {
+        creds.hepsiburada.apiKey = apiKey;
+      }
+    }
+
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ('marketplace_credentials', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [JSON.stringify(creds)]
+    );
+
+    res.json({ ok: true, message: `${platform === 'trendyol' ? 'Trendyol' : 'Hepsiburada'} kimlik bilgileri kaydedildi` });
+  } catch (err) {
+    console.error('Marketplace credentials kayıt hatası:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/settings/marketplace-credentials/:platform — kimlik bilgilerini temizle
+router.delete('/marketplace-credentials/:platform', authMiddleware, async (req, res) => {
+  try {
+    const { platform } = req.params;
+    if (!['trendyol', 'hepsiburada'].includes(platform)) {
+      return res.status(400).json({ error: 'Geçersiz platform' });
+    }
+    const existingRow = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'marketplace_credentials'"
+    );
+    let creds = {};
+    if (existingRow.rows.length && existingRow.rows[0].value) {
+      try { creds = JSON.parse(existingRow.rows[0].value); } catch {}
+    }
+    delete creds[platform];
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ('marketplace_credentials', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [JSON.stringify(creds)]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
