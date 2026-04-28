@@ -15,7 +15,7 @@ const TY_STATUS_MAP = {
   'Shipped':              'kargoda',
   'Delivered':            'teslim_edildi',
   'Cancelled':            'iptal',
-  'UnDelivered':          'iptal',
+  'UnDelivered':          'iade',   // Teslim edilemedi = kurye iade sürecinde (iptal değil)
   'Returned':             'iade',
   'ReturnedAndDelivered': 'iade',
   'Repack':               'bekliyor',
@@ -33,7 +33,7 @@ const TY_STATUS_TR = {
   'Shipped':              'Kargoya Verildi',
   'Delivered':            'Teslim Edildi',
   'Cancelled':            'İptal Edildi',
-  'UnDelivered':          'Teslim Edilemedi',
+  'UnDelivered':          'Teslim Edilemedi (İade)',
   'Returned':             'İade Edildi',
   'ReturnedAndDelivered': 'İade Teslim Alındı',
   'Repack':               'Yeniden Paketleniyor',

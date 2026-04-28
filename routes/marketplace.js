@@ -173,16 +173,24 @@ router.get('/platform-stats', async (req, res) => {
   }
 });
 
-// ── GET /api/marketplace/status-counts — durum bazlı sayım (debug/UI) ────────
+// ── GET /api/marketplace/status-counts — filtreli durum sayımı ───────────────
 router.get('/status-counts', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT status, raw_status, COUNT(*) AS cnt
-      FROM marketplace_orders
-      GROUP BY status, raw_status
-      ORDER BY cnt DESC
-    `);
-    res.json(result.rows);
+    const { platform, from, to } = req.query;
+    const params = [];
+    const conditions = [];
+    if (platform) conditions.push(`platform = $${params.push(platform)}`);
+    if (from)     conditions.push(`DATE(order_date) >= $${params.push(from)}`);
+    if (to)       conditions.push(`DATE(order_date) <= $${params.push(to)}`);
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    const result = await pool.query(
+      `SELECT status, COUNT(*) AS cnt FROM marketplace_orders ${where} GROUP BY status`,
+      params
+    );
+    const counts = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0 };
+    result.rows.forEach(r => { if (counts[r.status] !== undefined) counts[r.status] = parseInt(r.cnt); });
+    res.json(counts);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

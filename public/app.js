@@ -2074,19 +2074,38 @@ async function loadOrders(page = 0) {
     const orders = data.orders || [];
     renderOrders(orders, data.total || 0);
     renderOrdersPagination(data.total || 0, page);
-    renderOrdersSummaryCards(orders);
+    // Durum kartları için tüm sayfalardaki sayımı al (filtre aynı)
+    loadStatusCounts(platform, status, from, to);
     updateStatusCounters(orders);
   } catch (err) {
     if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:30px;color:#dc2626;">Yükleme hatası: ${err.message}</td></tr>`;
   }
 }
 
-function renderOrdersSummaryCards(orders) {
+async function loadStatusCounts(platform, status, from, to) {
+  try {
+    const p = new URLSearchParams();
+    if (platform) p.set('platform', platform);
+    if (from)     p.set('from', from);
+    if (to)       p.set('to', to);
+    // status filtresi varsa tek kategori görünür, tümünü göster — parametre gönderme
+    const res = await apiFetch(`/api/marketplace/status-counts?${p}`);
+    if (!res) return;
+    const counts = await res.json();
+    renderOrdersSummaryCards(counts);
+  } catch (e) { /* sessiz hata */ }
+}
+
+function renderOrdersSummaryCards(counts) {
   const el = document.getElementById('ordersSummaryCards');
   if (!el) return;
 
-  const counts = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0 };
-  orders.forEach(o => { if (counts[o.status] !== undefined) counts[o.status]++; });
+  // Eski çağrı uyumu: eğer `counts` bir order dizisiyse hesapla
+  if (Array.isArray(counts)) {
+    const c = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0 };
+    counts.forEach(o => { if (c[o.status] !== undefined) c[o.status]++; });
+    counts = c;
+  }
 
   const cards = [
     { key: 'bekliyor',      cssKey: 'bekliyor', label: 'Bekliyor',      emoji: '⏳' },
@@ -2228,30 +2247,32 @@ function renderOrders(orders, total) {
 
   tbody.innerHTML = rows.join('');
 
+  // Ortalamalar — tfoot ve summaryEl her ikisi de kullanıyor, önce hesapla
+  const avgDesi    = validDesiCount > 0 ? (sumDesi / validDesiCount).toFixed(1) : '—';
+  const avgCommRate = commRateCount > 0
+    ? (sumCommRate / commRateCount)
+    : (sumComm > 0 && sumPrice > 0 ? (sumComm / sumPrice) * 100 : null);
+
   // Toplam satırı
-  const avgDesi = validDesiCount > 0 ? (sumDesi / validDesiCount).toFixed(1) : '—';
   if (tfoot) {
+    const commCell = avgCommRate !== null
+      ? `%${avgCommRate.toFixed(1)}`
+      : '—';
     tfoot.innerHTML = `<tr id="ordersTotalsRow">
       <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
       <td class="col-product"></td>
       <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
-      <td class="col-comm" style="text-align:right;font-weight:700;">${avgCommRate !== null ? `%${avgCommRate.toFixed(1)}` : (sumComm > 0 && sumPrice > 0 ? `%${((sumComm/sumPrice)*100).toFixed(1)}` : '—')}</td>
+      <td class="col-comm" style="text-align:right;font-weight:700;">${commCell}</td>
       <td class="col-desi" style="text-align:center;font-weight:700;">${validDesiCount > 0 ? 'Ort.' + avgDesi : '—'}</td>
       <td class="col-cargo"></td>
       <td class="col-stock"></td>
     </tr>`;
   }
 
-  // Özet metin — komisyon oran (%) olarak gösterilir
-  const avgCommRate = commRateCount > 0 ? (sumCommRate / commRateCount) : null;
+  // Özet metin
   if (summaryEl) {
     const parts = [`${total} sipariş`, `Ciro: ${formatCurrency(sumPrice)}`];
-    if (avgCommRate !== null) {
-      parts.push(`Ort. Komisyon: %${avgCommRate.toFixed(1)}`);
-    } else if (sumComm > 0 && sumPrice > 0) {
-      // Oranlar hiç gelmemişse ciro üzerinden hesapla
-      parts.push(`Ort. Komisyon: %${((sumComm / sumPrice) * 100).toFixed(1)}`);
-    }
+    if (avgCommRate !== null) parts.push(`Ort. Komisyon: %${avgCommRate.toFixed(1)}`);
     if (validDesiCount > 0) parts.push(`Ort. Desi: ${avgDesi}`);
     summaryEl.textContent = parts.join(' | ');
   }
