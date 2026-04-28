@@ -226,10 +226,14 @@ function mapOrder(order) {
   const lineDesiSum = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
   const totalDesi = pkgDesi > 0 ? pkgDesi : lineDesiSum;
 
+  // order_id: orderNumber öncelikli — stabil, her API versiyonunda aynı gelir
+  // package id (order.id) API versiyonları arasında tutarsız olabilir
+  const stableOrderId = String(order.orderNumber || order.id || order.orderId || '');
+
   return {
     platform:              'trendyol',
-    order_id:              String(order.id || order.orderId || order.orderNumber || ''),
-    order_number:          String(order.orderNumber || order.id || order.orderId || ''),
+    order_id:              stableOrderId,
+    order_number:          stableOrderId,
     status:                statusInfo.internal,
     status_tr:             statusInfo.tr,
     raw_status:            effectiveRaw,   // debug için gerçek kullanılan raw değer

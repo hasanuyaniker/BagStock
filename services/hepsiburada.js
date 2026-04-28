@@ -210,8 +210,8 @@ function normalizeHBOrder(order) {
 
   return {
     platform: 'hepsiburada',
-    order_id: String(order.id || order.orderId || order.packageId || ''),
-    order_number: String(order.orderNumber || order.id || order.packageId || ''),
+    order_id: String(order.orderNumber || order.id || order.orderId || order.packageId || ''),
+    order_number: String(order.orderNumber || order.id || order.orderId || order.packageId || ''),
     status: HB_STATUS_MAP[rawStatus] || 'bekliyor',
     status_tr: HB_STATUS_TR[rawStatus] || rawStatus,
     raw_status: rawStatus,

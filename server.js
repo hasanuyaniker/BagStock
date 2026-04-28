@@ -115,6 +115,49 @@ async function runMigrations() {
       if (result.rowCount > 0) console.log(`✓ ${result.rowCount} UnDelivered sipariş kargoda olarak düzeltildi`);
     }
 
+    // ── STOK GERİ YÜKLEME + TEKRAR DÜŞÜM FIX ─────────────────────────────────
+    // Her deploy'da stok tekrar düşüyordu (order_id tutarsızlığı → yeni satır →
+    // stock_deducted=FALSE → yeniden düşüm). Tüm düşümleri geri yükle ve sıfırla.
+    // Bir sonraki sync tek seferlik doğru düşümü yapacak.
+    const stockRestoreFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'marketplace_stock_restore_v2'`);
+    if (stockRestoreFlag.rows.length === 0) {
+      // 1. Marketplace'den düşürülen tüm stokları geri yükle
+      const restoreResult = await pool.query(`
+        UPDATE products p
+        SET stock_quantity = p.stock_quantity + sub.total_qty,
+            updated_at     = NOW()
+        FROM (
+          SELECT moi.product_id, SUM(moi.quantity) AS total_qty
+          FROM marketplace_order_items moi
+          WHERE moi.stock_deducted = TRUE
+            AND moi.product_id IS NOT NULL
+          GROUP BY moi.product_id
+        ) sub
+        WHERE p.id = sub.product_id
+      `);
+      // 2. Tüm items için stock_deducted bayrağını sıfırla
+      await pool.query(`UPDATE marketplace_order_items SET stock_deducted = FALSE`);
+      // 3. order_id alanını order_number ile normalize et (tutarlı UPSERT için)
+      await pool.query(`
+        UPDATE marketplace_orders
+        SET order_id = order_number
+        WHERE order_number IS NOT NULL
+          AND order_number <> ''
+          AND order_id <> order_number
+      `);
+      // 4. Çift kayıtları temizle (order_number bazında, eski id'liyi sil)
+      await pool.query(`
+        DELETE FROM marketplace_orders mo
+        WHERE id NOT IN (
+          SELECT MIN(id) FROM marketplace_orders GROUP BY platform, order_number
+        )
+        AND order_number IS NOT NULL AND order_number <> ''
+      `);
+      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('marketplace_stock_restore_v2', 'true') ON CONFLICT (key) DO NOTHING`);
+      console.log(`✓ Marketplace stok geri yükleme tamamlandı: ${restoreResult.rowCount} ürün güncellendi`);
+      console.log('✓ stock_deducted sıfırlandı — sonraki sync tek seferlik doğru düşüm yapacak');
+    }
+
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {
