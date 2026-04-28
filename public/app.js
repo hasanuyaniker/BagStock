@@ -2071,9 +2071,11 @@ async function loadOrders(page = 0) {
     const res = await apiFetch(`/api/marketplace/orders?${params}`);
     if (!res) return;
     const data = await res.json();
-    renderOrders(data.orders || [], data.total || 0);
+    const orders = data.orders || [];
+    renderOrders(orders, data.total || 0);
     renderOrdersPagination(data.total || 0, page);
-    renderOrdersSummaryCards(data.orders || []);
+    renderOrdersSummaryCards(orders);
+    updateStatusCounters(orders);
   } catch (err) {
     if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:30px;color:#dc2626;">Yükleme hatası: ${err.message}</td></tr>`;
   }
@@ -2087,21 +2089,37 @@ function renderOrdersSummaryCards(orders) {
   orders.forEach(o => { if (counts[o.status] !== undefined) counts[o.status]++; });
 
   const cards = [
-    { key: 'bekliyor',      label: 'Bekliyor',       emoji: '⏳', bg: '#fffbeb', color: '#d97706', border: '#fde68a' },
-    { key: 'kargoda',       label: 'Kargoda',        emoji: '🚚', bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
-    { key: 'teslim_edildi', label: 'Teslim Edildi',  emoji: '✅', bg: '#f0fdf4', color: '#16a34a', border: '#bbf7d0' },
-    { key: 'iptal',         label: 'İptal',          emoji: '❌', bg: '#fff1f2', color: '#dc2626', border: '#fecaca' },
+    { key: 'bekliyor',      cssKey: 'bekliyor', label: 'Bekliyor',      emoji: '⏳' },
+    { key: 'kargoda',       cssKey: 'kargoda',  label: 'Kargoda',       emoji: '🚚' },
+    { key: 'teslim_edildi', cssKey: 'teslim',   label: 'Teslim Edildi', emoji: '✅' },
+    { key: 'iptal',         cssKey: 'iptal',    label: 'İptal',         emoji: '❌' },
+    { key: 'iade',          cssKey: 'iade',     label: 'İade',          emoji: '↩️' }
   ];
 
   el.innerHTML = cards.map(c => `
-    <div style="background:${c.bg};border:1px solid ${c.border};border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:10px;min-width:120px;">
-      <span style="font-size:20px;">${c.emoji}</span>
+    <div class="order-stat-card osc-${c.cssKey}">
+      <span class="osc-icon">${c.emoji}</span>
       <div>
-        <div style="font-size:11px;color:${c.color};font-weight:600;">${c.label}</div>
-        <div style="font-size:20px;font-weight:800;color:${c.color};">${counts[c.key]}</div>
+        <div class="osc-label">${c.label}</div>
+        <div class="osc-count" id="count-${c.cssKey}">${counts[c.key]}</div>
       </div>
     </div>
   `).join('');
+}
+
+function updateStatusCounters(orders) {
+  const counts = { bekliyor: 0, kargoda: 0, teslim: 0, iptal: 0, iade: 0 };
+  orders.forEach(o => {
+    if (o.status === 'bekliyor')      counts.bekliyor++;
+    else if (o.status === 'kargoda')  counts.kargoda++;
+    else if (o.status === 'teslim_edildi') counts.teslim++;
+    else if (o.status === 'iptal')    counts.iptal++;
+    else if (o.status === 'iade')     counts.iade++;
+  });
+  for (const [key, val] of Object.entries(counts)) {
+    const el = document.getElementById(`count-${key}`);
+    if (el) el.textContent = val;
+  }
 }
 
 function renderOrders(orders, total) {
@@ -2123,14 +2141,14 @@ function renderOrders(orders, total) {
 
   const statusBadge = s => {
     const map = {
-      bekliyor:      ['#fffbeb','#d97706','#fde68a','⏳'],
-      kargoda:       ['#eff6ff','#2563eb','#bfdbfe','🚚'],
-      teslim_edildi: ['#f0fdf4','#16a34a','#bbf7d0','✅'],
-      iptal:         ['#fff1f2','#dc2626','#fecaca','❌'],
-      iade:          ['#faf5ff','#7c3aed','#ddd6fe','↩️']
+      bekliyor:      ['bekliyor', '⏳', 'Bekliyor'],
+      kargoda:       ['kargoda',  '🚚', 'Kargoda'],
+      teslim_edildi: ['teslim',   '✅', 'Teslim'],
+      iptal:         ['iptal',    '❌', 'İptal'],
+      iade:          ['iade',     '↩️', 'İade']
     };
-    const [bg,color,border,icon] = map[s] || ['#f3f4f6','#374151','#e5e7eb','•'];
-    return `<span style="background:${bg};color:${color};border:1px solid ${border};padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">${icon} ${s === 'teslim_edildi' ? 'Teslim' : s.charAt(0).toUpperCase() + s.slice(1)}</span>`;
+    const [cls, icon, label] = map[s] || ['', '•', s];
+    return `<span class="badge badge-${cls}">${icon} ${label}</span>`;
   };
 
   const platformBadge = {
@@ -2172,7 +2190,9 @@ function renderOrders(orders, total) {
       ? `${formatCurrency(comm)}${order.commission_rate ? `<br><span style="color:#9ca3af;font-size:10px;">%${parseFloat(order.commission_rate).toFixed(1)}</span>` : ''}`
       : '<span style="color:#d1d5db;">—</span>';
 
-    const desiHtml  = desi > 0 ? `${desi.toFixed(1)} desi` : '<span style="color:#d1d5db;">—</span>';
+    const desiHtml  = desi > 0
+      ? `<span title="Düzenlemek için tıkla" style="cursor:pointer;text-decoration:underline dotted;" onclick="editDesi(${order.id},${desi})">${desi.toFixed(1)}</span>`
+      : `<button onclick="editDesi(${order.id},0)" style="background:none;border:1px dashed #d1d5db;border-radius:4px;padding:1px 5px;font-size:10px;cursor:pointer;color:#9ca3af;" title="Desi gir">+ desi</button>`;
 
     const cargoHtml = order.cargo_company
       ? `<span style="font-size:11px;">${escHtml(order.cargo_company)}${order.cargo_tracking_number ? `<br><span style="color:#9ca3af;font-size:10px;">${escHtml(order.cargo_tracking_number)}</span>` : ''}</span>`
@@ -2240,6 +2260,36 @@ function renderOrdersPagination(total, currentPage) {
     html += `<button class="btn btn-secondary btn-sm" onclick="loadOrders(${currentPage + 1})">Sonraki →</button>`;
   }
   el.innerHTML = html;
+}
+
+// ── Desi düzenleme ───────────────────────────────────────────────────────────
+
+function editDesi(orderId, currentDesi) {
+  const val = prompt('Desi değerini girin:', currentDesi > 0 ? currentDesi.toFixed(1) : '');
+  if (val === null) return; // iptal
+  const parsed = parseFloat(val.replace(',', '.'));
+  if (isNaN(parsed) || parsed < 0) { showToast('Geçersiz desi değeri', 'error'); return; }
+  saveDesi(orderId, parsed);
+}
+
+async function saveDesi(orderId, desiValue) {
+  try {
+    const res = await apiFetch(`/api/marketplace/orders/${orderId}/desi`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ desi: desiValue })
+    });
+    if (!res) return;
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`Desi güncellendi: ${parseFloat(data.cargo_desi).toFixed(1)}`);
+      loadOrders(_ordersPage); // tabloyu yenile
+    } else {
+      showToast(data.error || 'Desi kaydedilemedi', 'error');
+    }
+  } catch (err) {
+    showToast('Desi güncelleme hatası: ' + err.message, 'error');
+  }
 }
 
 async function syncMarketplace() {

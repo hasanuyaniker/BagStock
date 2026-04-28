@@ -197,6 +197,26 @@ router.get('/sync-status', async (req, res) => {
   }
 });
 
+// ── PATCH /api/marketplace/orders/:id/desi ───────────────────────────────────
+router.patch('/orders/:id/desi', async (req, res) => {
+  try {
+    const id   = parseInt(req.params.id);
+    const desi = parseFloat(req.body.desi);
+    if (isNaN(id) || isNaN(desi) || desi < 0) {
+      return res.status(400).json({ error: 'Geçersiz id veya desi değeri' });
+    }
+    const result = await pool.query(
+      `UPDATE marketplace_orders SET cargo_desi = $1, updated_at = NOW() WHERE id = $2 RETURNING id, cargo_desi`,
+      [desi, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    res.json({ ok: true, id: result.rows[0].id, cargo_desi: result.rows[0].cargo_desi });
+  } catch (err) {
+    console.error('[Marketplace] Desi güncelleme hatası:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/marketplace/sync ────────────────────────────────────────────────
 router.post('/sync', async (req, res) => {
   res.json({ ok: true, message: 'Senkronizasyon başlatıldı' });
@@ -276,6 +296,19 @@ async function syncPlatform(db, platform, creds) {
       deducted += deductCount;
     }
 
+    // Trendyol Finance — komisyon verilerini senkronize et (sessiz, hata kritik değil)
+    if (platform === 'trendyol') {
+      try {
+        const { syncSettlements } = require('../services/trendyolFinance');
+        const finResult = await syncSettlements(db, creds, 30);
+        if (finResult.updated > 0) {
+          console.log(`[Marketplace] Trendyol Finance: ${finResult.updated} komisyon güncellendi`);
+        }
+      } catch (finErr) {
+        console.warn('[Marketplace] Trendyol Finance sync atlandı:', finErr.message);
+      }
+    }
+
     const info = `${upserted} sipariş, ${deducted} stok düşümü`;
     await db.query(
       `INSERT INTO app_settings (key, value) VALUES ($1, $2)
@@ -302,6 +335,16 @@ async function upsertOrder(db, order) {
 
   try {
     await client.query('BEGIN');
+
+    // Kargo e-posta bildirimi için: mevcut durumu önceden oku
+    let prevStatus = null;
+    if (order.status === 'kargoda') {
+      const prevRow = await client.query(
+        `SELECT status FROM marketplace_orders WHERE platform = $1 AND order_id = $2`,
+        [order.platform, order.order_id]
+      );
+      prevStatus = prevRow.rows[0]?.status || null;
+    }
 
     // Siparişi upsert et (tüm yeni alanlarla)
     const orderResult = await client.query(
@@ -416,6 +459,17 @@ async function upsertOrder(db, order) {
     }
 
     await client.query('COMMIT');
+
+    // Kargoya geçiş bildirimi — sadece yeni kargoda geçişlerinde
+    if (order.status === 'kargoda' && prevStatus !== 'kargoda') {
+      try {
+        const { sendShippingNotification } = require('../services/mailer');
+        await sendShippingNotification({ ...order, id: orderId });
+      } catch (mailErr) {
+        console.error('[Marketplace] Kargo e-posta hatası:', mailErr.message);
+      }
+    }
+
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

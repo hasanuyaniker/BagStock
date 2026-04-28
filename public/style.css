@@ -1937,11 +1937,59 @@ html {
   padding: 0 2px;
 }
 
+/* Sipariş durum kartları */
+.order-stat-card {
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 120px;
+  backdrop-filter: blur(6px);
+}
+.order-stat-card .osc-icon { font-size: 20px; }
+.order-stat-card .osc-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.75);
+}
+.order-stat-card .osc-count {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+}
+/* Renk varyantları */
+.order-stat-card.osc-bekliyor   { border-color: rgba(251,191,36,0.45); }
+.order-stat-card.osc-kargoda    { border-color: rgba(59,130,246,0.45); }
+.order-stat-card.osc-teslim     { border-color: rgba(16,185,129,0.45); }
+.order-stat-card.osc-iptal      { border-color: rgba(239,68,68,0.45);  }
+.order-stat-card.osc-iade       { border-color: rgba(167,139,250,0.45);}
+
+/* Durum badge'leri */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.badge-bekliyor      { background: rgba(251,191,36,0.2);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.4);  }
+.badge-kargoda       { background: rgba(59,130,246,0.2);  color: #60a5fa; border: 1px solid rgba(59,130,246,0.4);  }
+.badge-teslim        { background: rgba(16,185,129,0.2);  color: #34d399; border: 1px solid rgba(16,185,129,0.4);  }
+.badge-iptal         { background: rgba(239,68,68,0.2);   color: #f87171; border: 1px solid rgba(239,68,68,0.4);   }
+.badge-iade          { background: rgba(167,139,250,0.2); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.4); }
+
 /* Siparişler tablosu — sıkıştırılmış, yatay kaydırmalı */
 .orders-table-wrapper {
   overflow-x: auto;
   border-radius: 8px;
   -webkit-overflow-scrolling: touch;
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(255,255,255,0.2);
 }
 
 #ordersTable {
@@ -1951,10 +1999,16 @@ html {
   min-width: 780px;
 }
 
+#ordersTable thead {
+  background: rgba(91,61,232,0.08);
+}
+
 #ordersTable th {
   padding: 6px 7px;
   font-size: 11px;
   white-space: nowrap;
+  color: #374151;
+  border-bottom: 2px solid #e5e7eb;
 }
 
 #ordersTable td {
@@ -1964,6 +2018,13 @@ html {
   max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #1f2937;
+  border-bottom: 1px solid #f3f4f6;
+  background: #fff;
+}
+
+#ordersTable tbody tr:hover td {
+  background: #f5f3ff;
 }
 
 #ordersTable .col-order-no { max-width: 120px; }
@@ -1980,8 +2041,10 @@ html {
 /* Sipariş toplamlar satırı */
 #ordersTotalsRow td {
   font-weight: 700;
-  background: #f0f4ff;
+  background: #ede9fe !important;
+  color: #1f2937 !important;
   font-size: 12px;
+  border-top: 2px solid #c4b5fd;
 }
 
 /* ── Platform Performans Grafikleri ───────────────────────────── */

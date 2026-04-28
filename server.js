@@ -94,6 +94,16 @@ async function runMigrations() {
     for (const sql of mpCols) {
       await pool.query(sql);
     }
+    // Yeni sütunlar — marketplace_orders ve items tablolarına ekle
+    const extraCols = [
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS raw_status VARCHAR(50)`,
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_tracking_link VARCHAR(500)`,
+      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100)`
+    ];
+    for (const sql of extraCols) {
+      await pool.query(sql);
+    }
+
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {
