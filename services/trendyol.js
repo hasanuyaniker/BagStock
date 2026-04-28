@@ -1,17 +1,13 @@
 /**
- * Trendyol Satıcı API İstemcisi — v2
- * Yeni endpoint: https://apigw.trendyol.com/integration/order/sellers
- * 13 günlük dilim bazlı çekim + 429 retry + axios
+ * Trendyol Satıcı API İstemcisi — v3
+ * Native fetch (Node 18+) — axios bağımlılığı YOK
+ * Endpoint: https://apigw.trendyol.com/integration/order/sellers
+ * 13 günlük dilim bazlı çekim + 429 retry
  */
-
-const axios = require('axios');
 
 const TY_BASE = 'https://apigw.trendyol.com/integration/order/sellers';
 
-// Not: status parametresi gönderilmez → API tüm statüleri döner
-// (virgüllü liste yeni apigw endpoint'inde kabul edilmiyor; Shipped/Taşıma Durumunda siparişleri atlıyor)
-
-// Trendyol raw durum → BagStock dahili durum (stok mantığı için)
+// Trendyol raw durum → BagStock dahili durum
 const TY_STATUS_MAP = {
   'Created':              'bekliyor',
   'Picking':              'kargoda',
@@ -64,9 +60,54 @@ function makeTYHeaders(apiKey, apiSecret, supplierId) {
   };
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
- * startMs → endMs arasını en fazla MAX_DAYS günlük dilimlere böler
- * Trendyol API 14 gün limiti var, 13 gün alıyoruz (güvenlik payı)
+ * Tek bir sayfayı çeker — 429 ve geçici hatalarda retry yapar (native fetch)
+ */
+async function fetchChunk(url, headers, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, { headers });
+    } catch (netErr) {
+      if (attempt === maxRetries) throw new Error(`Ağ hatası: ${netErr.message}`);
+      console.warn(`[Trendyol] Ağ hatası, ${attempt + 1}. deneme tekrar deneniyor:`, netErr.message);
+      await sleep(1500 * (attempt + 1));
+      continue;
+    }
+
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('retry-after') || '5') * 1000;
+      const waitMs = Math.max(retryAfter, 2000) * (attempt + 1);
+      console.warn(`[Trendyol] 429 Rate limit — ${waitMs}ms bekleniyor (deneme ${attempt + 1})`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (res.status === 401) throw new Error('Trendyol API 401 Unauthorized — API kimlik bilgilerini kontrol edin');
+    if (res.status === 403) throw new Error('Trendyol API 403 Forbidden — supplierId veya izinleri kontrol edin');
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (attempt === maxRetries) throw new Error(`Trendyol API HTTP ${res.status}: ${body.substring(0, 300)}`);
+      console.warn(`[Trendyol] HTTP ${res.status} — ${attempt + 1}. deneme başarısız`);
+      await sleep(1500 * (attempt + 1));
+      continue;
+    }
+
+    try {
+      return await res.json();
+    } catch (parseErr) {
+      throw new Error(`Trendyol API yanıtı JSON değil: ${parseErr.message}`);
+    }
+  }
+}
+
+/**
+ * startMs → endMs arasını en fazla maxDays günlük dilimlere böler
  */
 function splitDateRangeToChunks(startMs, endMs, maxDays = 13) {
   const chunks = [];
@@ -78,46 +119,6 @@ function splitDateRangeToChunks(startMs, endMs, maxDays = 13) {
     cursor = chunkEnd + 1;
   }
   return chunks;
-}
-
-/**
- * 429 rate-limit — belirtilen süre kadar bekle ve tekrar dene
- */
-async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Tek bir sayfayı çeker. 429 gelirse bekleyip yeniden dener.
- */
-async function fetchChunk(url, headers, maxRetries = 3) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await axios.get(url, { headers, timeout: 30000 });
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 429) {
-        const retryAfter = parseInt(err.response.headers['retry-after'] || '5') * 1000;
-        const waitMs = Math.max(retryAfter, 2000) * (attempt + 1);
-        console.warn(`[Trendyol] 429 Rate limit — ${waitMs}ms bekleniyor (deneme ${attempt + 1}/${maxRetries})`);
-        await sleep(waitMs);
-        continue;
-      }
-      if (err.response?.status === 401) {
-        throw new Error(`Trendyol API 401 Unauthorized — API kimlik bilgilerini kontrol edin`);
-      }
-      if (err.response?.status === 403) {
-        throw new Error(`Trendyol API 403 Forbidden — supplierId veya izinleri kontrol edin`);
-      }
-      const status = err.response?.status || 'ağ hatası';
-      const body = JSON.stringify(err.response?.data || err.message || '').substring(0, 300);
-      if (attempt === maxRetries) {
-        throw new Error(`Trendyol API HTTP ${status}: ${body}`);
-      }
-      console.warn(`[Trendyol] HTTP ${status} — ${attempt + 1}. deneme başarısız, tekrar deneniyor...`);
-      await sleep(1500 * (attempt + 1));
-    }
-  }
 }
 
 // ── Durum haritalama ───────────────────────────────────────────────────────────
@@ -134,66 +135,97 @@ function mapStatus(rawStatus) {
 // ── Sipariş normalize ──────────────────────────────────────────────────────────
 
 function mapOrder(order) {
-  const rawStatus = order.status || order.shipmentPackageStatus || '';
+  // Trendyol yeni ve eski API'de farklı alan adları kullanabiliyor
+  const rawStatus = (
+    order.status ||
+    order.shipmentPackageStatus ||
+    order.packageStatus ||
+    ''
+  ).trim();
+
   const statusInfo = mapStatus(rawStatus);
 
-  const items = (order.lines || []).map(line => {
-    const lineRaw = line.lineItemStatusName || rawStatus;
+  // Paket seviyesinde desi (Trendyol portal'daki "Desi: 3" bu alandan gelir)
+  const pkgDesi = parseFloat(
+    order.volumetricWeight ||
+    order.desi ||
+    order.packageDesi ||
+    order.shipmentPackageDesi ||
+    order.cargoWeight ||
+    0
+  ) || 0;
+
+  const lines = order.lines || order.orderLineItems || [];
+
+  const items = lines.map(line => {
+    const lineRaw = (
+      line.lineItemStatusName ||
+      line.status ||
+      rawStatus
+    ).trim();
     const lineStatus = mapStatus(lineRaw);
+
+    // Satır seviyesinde desi — yoksa paket desi kullanılır
+    const lineDesi = parseFloat(
+      line.volumetricWeight || line.desi || line.packageDesi || 0
+    ) || pkgDesi;
+
+    // Komisyon — orders API'de varsa alınır, yoksa finance API tamamlar
+    const lineComm = parseFloat(
+      line.commissionFee || line.commissionAmount || line.commission || 0
+    ) || null;
+    const lineCommRate = parseFloat(
+      line.commissionRate || line.commissionRatio || 0
+    ) || null;
+
     return {
-      item_id:           String(line.id || line.lineItemId || ''),
-      barcode:           (line.barcode || '').trim(),
-      sku:               line.sku || line.merchantSku || '',
-      product_name:      line.productName || '',
-      quantity:          line.quantity || 1,
-      price:             parseFloat(line.price || line.amount || line.linePrice || 0),
+      item_id:           String(line.id || line.lineItemId || line.orderLineId || ''),
+      barcode:           (line.barcode || line.sku || '').trim(),
+      sku:               line.merchantSku || line.sku || '',
+      product_name:      line.productName || line.name || '',
+      quantity:          parseInt(line.quantity) || 1,
+      price:             parseFloat(line.price || line.amount || line.linePrice || line.salePrice || 0),
       raw_status:        lineRaw,
       status:            lineStatus.internal,
       status_tr:         lineStatus.tr,
       should_deduct:     lineStatus.deduct || statusInfo.deduct,
-      commission_amount: parseFloat(line.commissionAmount || line.commissionFee || 0) || null,
-      commission_rate:   parseFloat(line.commissionRate || 0) || null,
-      // desi: Trendyol satır seviyesinde volumetricWeight veya desi alanında gelir
-      cargo_desi: parseFloat(
-        line.volumetricWeight || line.desi || line.packageDesi ||
-        line.quantity * (order.volumetricWeight || 0) || 0
-      ) || null
+      commission_amount: lineComm,
+      commission_rate:   lineCommRate,
+      cargo_desi:        lineDesi > 0 ? lineDesi : null
     };
   });
 
-  const cargoCompany = order.cargoProviderName || order.shipmentPackageCargoCompany || '';
-  const cargoTracking = order.cargoTrackingNumber || '';
+  // Kargo bilgileri
+  const cargoCompany  = order.cargoProviderName || order.shipmentPackageCargoCompany || order.cargoCompany || '';
+  const cargoTracking = order.cargoTrackingNumber || order.trackingNumber || '';
   const cargoStatus   = order.shipmentPackageStatus || rawStatus;
 
+  // Toplam komisyon — satırlardan
   const totalCommission = items.reduce((s, i) => s + (i.commission_amount || 0), 0);
-  const avgCommissionRate = items.length > 0
-    ? items.reduce((s, i) => s + (i.commission_rate || 0), 0) / items.length
+  const commRates = items.filter(i => i.commission_rate).map(i => i.commission_rate);
+  const avgCommissionRate = commRates.length > 0
+    ? commRates.reduce((a, b) => a + b, 0) / commRates.length
     : null;
 
-  // Desi: önce paket (order) seviyesinde bak, yoksa satır toplamı
-  // Trendyol portal "Desi: 3" → order.volumetricWeight veya order.desi
-  const orderLevelDesi = parseFloat(
-    order.volumetricWeight || order.desi || order.packageDesi ||
-    order.shipmentPackageDesi || 0
-  ) || 0;
-  const lineLevelDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
-  const totalDesi = orderLevelDesi > 0 ? orderLevelDesi : lineLevelDesi;
+  // Toplam desi — paket seviyesi öncelikli, yoksa satır toplamı
+  const lineDesiSum = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
+  const totalDesi = pkgDesi > 0 ? pkgDesi : lineDesiSum;
 
   return {
     platform:              'trendyol',
-    order_id:              String(order.id || order.orderNumber || ''),
-    order_number:          String(order.orderNumber || order.id || ''),
+    order_id:              String(order.id || order.orderId || order.orderNumber || ''),
+    order_number:          String(order.orderNumber || order.id || order.orderId || ''),
     status:                statusInfo.internal,
     status_tr:             statusInfo.tr,
     raw_status:            rawStatus,
-    customer_name:         order.customerName || order.shipmentAddress?.fullName || '',
+    customer_name:         order.customerName || order.shipmentAddress?.fullName || order.buyerName || '',
     order_date:            order.orderDate ? new Date(order.orderDate) : new Date(),
-    total_price:           parseFloat(order.grossAmount || order.totalPrice || 0),
+    total_price:           parseFloat(order.grossAmount || order.totalPrice || order.amount || 0),
     currency:              'TRY',
     cargo_company:         cargoCompany,
     cargo_tracking_number: cargoTracking,
     cargo_status:          cargoStatus,
-    cargo_cost:            parseFloat(order.cargoFee || order.deliveryCost || 0) || null,
+    cargo_cost:            parseFloat(order.cargoFee || order.deliveryCost || order.shippingCost || 0) || null,
     commission_amount:     totalCommission > 0 ? totalCommission : null,
     commission_rate:       avgCommissionRate,
     cargo_desi:            totalDesi > 0 ? totalDesi : null,
@@ -207,10 +239,8 @@ function mapOrder(order) {
 // ── Ana Fonksiyon ─────────────────────────────────────────────────────────────
 
 /**
- * Son N günün siparişlerini çeker — 13 günlük dilimler, tüm sayfalar, tüm statüler
- * @param {object} creds - { supplierId, apiKey, apiSecret }
- * @param {number} days  - Kaç gün geriye git (varsayılan: 30)
- * @returns {Array}      - Normalleştirilmiş sipariş listesi
+ * Son N günün siparişlerini çeker — 13 günlük dilimler, tüm sayfalar
+ * status filtresi yok → API tüm statüleri döner (Shipped/Taşıma Durumunda dahil)
  */
 async function fetchTrendyolOrders(creds, days = 30) {
   const { supplierId, apiKey, apiSecret } = creds;
@@ -233,14 +263,14 @@ async function fetchTrendyolOrders(creds, days = 30) {
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const { startDate, endDate } = chunks[ci];
-    const chunkLabel = `Dilim ${ci + 1}/${chunks.length} (${new Date(startDate).toLocaleDateString('tr-TR')} → ${new Date(endDate).toLocaleDateString('tr-TR')})`;
+    const chunkLabel = `Dilim ${ci + 1}/${chunks.length}`;
 
     let page = 0;
     const size = 200;
     let totalPages = 1;
 
     while (page < totalPages) {
-      // status parametresi yok → API tüm statüleri döner (Created, Shipped, Delivered, vs.)
+      // status parametresi YOK — API tüm statüleri döner
       const url = `${TY_BASE}/${supplierId}/orders?` +
         `startDate=${startDate}&endDate=${endDate}` +
         `&orderByField=PackageLastModifiedDate&orderByDirection=DESC` +
@@ -250,41 +280,45 @@ async function fetchTrendyolOrders(creds, days = 30) {
       try {
         data = await fetchChunk(url, headers);
       } catch (err) {
-        if (page === 0 && ci === 0) throw err; // ilk dilim ilk sayfada hata kritik
+        if (page === 0 && ci === 0) throw err;
         console.error(`[Trendyol] ${chunkLabel} sayfa ${page} alınamadı:`, err.message);
         break;
       }
 
-      if (!data.content || !Array.isArray(data.content)) {
-        console.warn(`[Trendyol] ${chunkLabel} content yok:`, JSON.stringify(data).substring(0, 200));
+      // Yanıt yapısı kontrolü
+      const content = data?.content || data?.result || data?.orders || [];
+      if (!Array.isArray(content)) {
+        console.warn(`[Trendyol] ${chunkLabel} beklenmedik yanıt:`, JSON.stringify(data).substring(0, 300));
         break;
       }
 
-      totalPages = data.totalPages || 1;
-      console.log(`[Trendyol] ${chunkLabel} — Sayfa ${page + 1}/${totalPages}: ${data.content.length} sipariş`);
+      totalPages = data.totalPages || data.totalPage || 1;
+      console.log(`[Trendyol] ${chunkLabel} Sayfa ${page + 1}/${totalPages}: ${content.length} sipariş`);
       page++;
 
-      for (const raw of data.content) {
+      for (const raw of content) {
         const order = mapOrder(raw);
-        if (!seenIds.has(order.order_id)) {
+        if (order.order_id && !seenIds.has(order.order_id)) {
           seenIds.add(order.order_id);
           allOrders.push(order);
+          // İlk birkaç siparişin raw/parsed durumunu logla (debug için)
+          if (allOrders.length <= 3) {
+            console.log(`[Trendyol] Örnek sipariş — rawStatus: "${order.raw_status}" → internal: "${order.status}", desi: ${order.cargo_desi}, comm: ${order.commission_amount}`);
+          }
         }
       }
 
-      // Sayfa aralarında kısa bekleme (rate limit önlemi)
       if (page < totalPages) await sleep(200);
     }
 
-    // Dilimler arası kısa bekleme
     if (ci < chunks.length - 1) await sleep(300);
   }
 
-  console.log(`[Trendyol] Toplam ${allOrders.length} benzersiz sipariş çekildi`);
+  console.log(`[Trendyol] Toplam ${allOrders.length} benzersiz sipariş`);
   return allOrders;
 }
 
-// Geriye dönük uyumluluk için normalizeTYOrder de export et
+// Geriye dönük uyumluluk
 const normalizeTYOrder = mapOrder;
 
 module.exports = {
