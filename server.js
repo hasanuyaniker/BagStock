@@ -189,11 +189,18 @@ async function runMigrations() {
       console.log(`✓ [v3] ${markResult.rowCount} sipariş stock_deducted=TRUE olarak işaretlendi — yeniden düşüm engellendi`);
     }
 
-    // ── #11158294784 → teslim_edildi düzeltmesi ──────────────────────────────
-    const fix11158v2 = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_order_11158294784_teslim'`);
-    if (fix11158v2.rows.length === 0) {
-      await pool.query(`UPDATE marketplace_orders SET status='teslim_edildi', status_tr='Teslim Edildi', updated_at=NOW() WHERE order_number='11158294784'`);
-      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_order_11158294784_teslim','true') ON CONFLICT (key) DO NOTHING`);
+    // ── #11158294784 → teslim_edildi düzeltmesi (flag bağımsız, her deploy çalışır)
+    // Trendyol API bu sipariş için boş/yanlış status döndürüyor → bekliyor'a düşüyor.
+    // UPSERT CASE koruması aktif olmadan önce status teslim_edildi olmalı.
+    // Bu yüzden flag kullanmadan her deploy'da kontrol ediyoruz.
+    {
+      const r = await pool.query(
+        `UPDATE marketplace_orders
+         SET status='teslim_edildi', status_tr='Teslim Edildi', updated_at=NOW()
+         WHERE order_number='11158294784'
+           AND status NOT IN ('teslim_edildi','iade_bekliyor','iade_onaylandi')`
+      );
+      if (r.rowCount > 0) console.log('✓ #11158294784 teslim_edildi olarak düzeltildi');
     }
 
     // ── Picking/Invoiced → bekliyor düzeltmesi ───────────────────────────────
@@ -211,75 +218,6 @@ async function runMigrations() {
       await pool.query(`UPDATE marketplace_orders SET status='iade_onaylandi', updated_at=NOW() WHERE raw_status IN ('ReturnedAndDelivered','RETURN_ACCEPTED') AND status='iade'`);
       await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_iade_substatuses_v1','true') ON CONFLICT (key) DO NOTHING`);
       console.log('✓ İade alt durumları (iade_bekliyor / iade_onaylandi) güncellendi');
-    }
-
-    // ── Marketplace satışları sales tablosuna retroaktif ekle ────────────────
-    // stock_deducted=TRUE olan siparişlerin satış kayıtlarını raporlara ekler
-    const salesBackfillFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'marketplace_sales_backfill_v1'`);
-    if (salesBackfillFlag.rows.length === 0) {
-      const backfillResult = await pool.query(`
-        INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
-        SELECT
-          moi.product_id,
-          -moi.quantity,
-          DATE(mo.order_date),
-          'Marketplace #' || mo.order_number,
-          mo.platform
-        FROM marketplace_order_items moi
-        JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
-        WHERE mo.stock_deducted = TRUE
-          AND mo.status IN ('kargoda', 'teslim_edildi')
-          AND moi.product_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM sales s
-            WHERE s.note = 'Marketplace #' || mo.order_number
-          )
-        ON CONFLICT DO NOTHING
-      `);
-      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('marketplace_sales_backfill_v1','true') ON CONFLICT (key) DO NOTHING`);
-      if (backfillResult.rowCount > 0) console.log(`✓ ${backfillResult.rowCount} marketplace satış kaydı raporlara eklendi`);
-    }
-
-    // ── Komisyon oranı DB düzeltmesi (tutar bazlı yeniden hesapla) ───────────
-    const commRateFix = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_amount_v1'`);
-    if (commRateFix.rows.length === 0) {
-      const r = await pool.query(`
-        UPDATE marketplace_orders
-        SET commission_rate = ROUND((commission_amount / NULLIF(total_price, 0)) * 100, 2),
-            updated_at = NOW()
-        WHERE commission_amount IS NOT NULL AND commission_amount > 0
-          AND total_price > 0
-          AND commission_rate IS NOT NULL
-          AND ABS(commission_rate - ROUND((commission_amount / NULLIF(total_price, 0)) * 100, 2)) > 3
-      `);
-      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_amount_v1','true') ON CONFLICT (key) DO NOTHING`);
-      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} siparişin komisyon oranı tutardan yeniden hesaplandı`);
-    }
-
-    // ── Tek seferlik test e-postası — #11183935655 ───────────────────────────
-    const emailFlag11183 = await pool.query(`SELECT value FROM app_settings WHERE key = 'email_sent_11183935655'`);
-    if (emailFlag11183.rows.length === 0) {
-      try {
-        const orderRow = await pool.query(
-          `SELECT mo.*, json_agg(
-             json_build_object('item_id',moi.item_id,'barcode',moi.barcode,'product_name',moi.product_name,
-               'quantity',moi.quantity,'price',moi.price,'p_name',p.name)
-           ) AS items
-           FROM marketplace_orders mo
-           LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
-           LEFT JOIN products p ON p.id = moi.product_id
-           WHERE mo.order_number = '11183935655'
-           GROUP BY mo.id LIMIT 1`
-        );
-        if (orderRow.rows.length > 0) {
-          const { sendShippingNotification } = require('./services/mailer');
-          await sendShippingNotification(orderRow.rows[0]);
-          console.log('✓ Test e-postası gönderildi: #11183935655');
-        }
-      } catch (mailErr) {
-        console.error('✗ Test e-posta hatası:', mailErr.message);
-      }
-      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('email_sent_11183935655','true') ON CONFLICT (key) DO NOTHING`);
     }
 
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
@@ -491,6 +429,70 @@ function startMarketplaceSyncScheduler(appPool) {
   console.log('✓ Marketplace senkronizasyon zamanlayıcı başlatıldı (15 dakika aralık)');
 }
 
+// ── Arka plan data migration'ları (server başladıktan sonra, non-blocking) ───
+async function runBackgroundMigrations(appPool) {
+  try {
+    // 1. Marketplace satışları sales tablosuna retroaktif ekle
+    const salesBackfillFlag = await appPool.query(`SELECT value FROM app_settings WHERE key = 'marketplace_sales_backfill_v1'`);
+    if (salesBackfillFlag.rows.length === 0) {
+      const backfillResult = await appPool.query(`
+        INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
+        SELECT moi.product_id, -moi.quantity, DATE(mo.order_date),
+               'Marketplace #' || mo.order_number, mo.platform
+        FROM marketplace_order_items moi
+        JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
+        WHERE mo.stock_deducted = TRUE
+          AND mo.status IN ('kargoda', 'teslim_edildi')
+          AND moi.product_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM sales s WHERE s.note = 'Marketplace #' || mo.order_number)
+        ON CONFLICT DO NOTHING
+      `);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('marketplace_sales_backfill_v1','true') ON CONFLICT (key) DO NOTHING`);
+      if (backfillResult.rowCount > 0) console.log(`✓ [BG] ${backfillResult.rowCount} marketplace satış kaydı eklendi`);
+    }
+
+    // 2. Komisyon oranı düzeltmesi (tutar bazlı)
+    const commRateFix = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_amount_v1'`);
+    if (commRateFix.rows.length === 0) {
+      const r = await appPool.query(`
+        UPDATE marketplace_orders
+        SET commission_rate = ROUND((commission_amount / NULLIF(total_price,0)) * 100, 2), updated_at = NOW()
+        WHERE commission_amount IS NOT NULL AND commission_amount > 0 AND total_price > 0
+          AND commission_rate IS NOT NULL
+          AND ABS(commission_rate - ROUND((commission_amount / NULLIF(total_price,0)) * 100, 2)) > 3
+      `);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_amount_v1','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ [BG] ${r.rowCount} komisyon oranı düzeltildi`);
+    }
+
+    // 3. Tek seferlik test e-postası — #11183935655
+    const emailFlag = await appPool.query(`SELECT value FROM app_settings WHERE key = 'email_sent_11183935655'`);
+    if (emailFlag.rows.length === 0) {
+      try {
+        const orderRow = await appPool.query(
+          `SELECT mo.*, json_agg(json_build_object(
+             'item_id',moi.item_id,'barcode',moi.barcode,'product_name',moi.product_name,
+             'quantity',moi.quantity,'price',moi.price,'p_name',p.name)) AS items
+           FROM marketplace_orders mo
+           LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+           LEFT JOIN products p ON p.id = moi.product_id
+           WHERE mo.order_number = '11183935655' GROUP BY mo.id LIMIT 1`
+        );
+        if (orderRow.rows.length > 0) {
+          const { sendShippingNotification } = require('./services/mailer');
+          await sendShippingNotification(orderRow.rows[0]);
+          console.log('✓ [BG] Test e-postası gönderildi: #11183935655');
+        }
+      } catch (mailErr) {
+        console.error('✗ [BG] Test e-posta hatası:', mailErr.message);
+      }
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('email_sent_11183935655','true') ON CONFLICT (key) DO NOTHING`);
+    }
+  } catch (err) {
+    console.error('[BG Migration] Hata:', err.message);
+  }
+}
+
 // Migration çalıştır, sonra sunucuyu başlat
 runMigrations().then(() => {
   // Email bildirim durum kontrolü
@@ -510,5 +512,7 @@ runMigrations().then(() => {
 
   app.listen(PORT, () => {
     console.log(`Stok Takip Sistemi - Port: ${PORT}`);
+    // Ağır data migration'ları arka planda çalıştır — server başlangıcını bloke etmez
+    setTimeout(() => runBackgroundMigrations(appPool), 5000);
   });
 });
