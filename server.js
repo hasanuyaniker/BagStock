@@ -451,18 +451,25 @@ async function runBackgroundMigrations(appPool) {
       if (backfillResult.rowCount > 0) console.log(`✓ [BG] ${backfillResult.rowCount} marketplace satış kaydı eklendi`);
     }
 
-    // 2. Komisyon oranı düzeltmesi (tutar bazlı)
-    const commRateFix = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_amount_v1'`);
-    if (commRateFix.rows.length === 0) {
+    // 2. Komisyon oranı düzeltmesi v2 — ürün satır oranlarının basit ortalaması
+    // (v1'deki "tutar bazlı" hesap yanlıştı: 43/3748×100 = 1.1% çıkıyordu)
+    const commRateFixV2 = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_items_v2'`);
+    if (commRateFixV2.rows.length === 0) {
       const r = await appPool.query(`
-        UPDATE marketplace_orders
-        SET commission_rate = ROUND((commission_amount / NULLIF(total_price,0)) * 100, 2), updated_at = NOW()
-        WHERE commission_amount IS NOT NULL AND commission_amount > 0 AND total_price > 0
-          AND commission_rate IS NOT NULL
-          AND ABS(commission_rate - ROUND((commission_amount / NULLIF(total_price,0)) * 100, 2)) > 3
+        UPDATE marketplace_orders mo
+        SET commission_rate = sub.avg_rate, updated_at = NOW()
+        FROM (
+          SELECT marketplace_order_id, ROUND(AVG(commission_rate)::numeric, 2) AS avg_rate
+          FROM marketplace_order_items
+          WHERE commission_rate IS NOT NULL AND commission_rate > 0
+          GROUP BY marketplace_order_id
+        ) sub
+        WHERE mo.id = sub.marketplace_order_id
+          AND (mo.commission_rate IS NULL
+               OR ABS(mo.commission_rate - sub.avg_rate) > 1)
       `);
-      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_amount_v1','true') ON CONFLICT (key) DO NOTHING`);
-      if (r.rowCount > 0) console.log(`✓ [BG] ${r.rowCount} komisyon oranı düzeltildi`);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_items_v2','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ [BG] ${r.rowCount} komisyon oranı ürün ortalamasından düzeltildi`);
     }
 
     // 3. Tek seferlik test e-postası — #11183935655

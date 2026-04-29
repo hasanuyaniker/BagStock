@@ -203,12 +203,12 @@ function normalizeHBOrder(order) {
 
   // Toplamlar
   const totalCommission = items.reduce((s, i) => s + (i.commission_amount || 0), 0);
-  // Etkin komisyon oranı: tutar bazlı — ürün sayısından bağımsız
-  const totalSalePrice  = items.reduce((s, i) => s + (parseFloat(i.price || 0) * parseInt(i.quantity || 1)), 0);
+  // Komisyon oranı: ürün başına satır oranlarının basit ortalaması
+  // (toplam_oran / ürün_sayısı) — 2 ürün × %21.5 → %21.5
   const hbCommRates     = items.filter(i => i.commission_rate).map(i => i.commission_rate);
-  const avgCommissionRate = (totalCommission > 0 && totalSalePrice > 0)
-    ? Math.round((totalCommission / totalSalePrice) * 10000) / 100
-    : (hbCommRates.length > 0 ? hbCommRates.reduce((a, b) => a + b, 0) / hbCommRates.length : null);
+  const avgCommissionRate = hbCommRates.length > 0
+    ? Math.round((hbCommRates.reduce((a, b) => a + b, 0) / hbCommRates.length) * 100) / 100
+    : null;
   const totalDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
 
   return {

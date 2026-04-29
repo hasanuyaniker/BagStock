@@ -2217,7 +2217,7 @@ function renderOrders(orders, total) {
   };
 
   // Toplamlar
-  let sumPrice = 0, sumComm = 0, sumDesi = 0, validDesiCount = 0;
+  let sumPrice = 0, sumDesi = 0, validDesiCount = 0;
 
   const rows = orders.map(order => {
     const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
@@ -2244,15 +2244,16 @@ function renderOrders(orders, total) {
             : '<span style="color:#9ca3af;font-size:11px;" title="Sistemde eşleşen ürün bulunamadı">—</span>')
       : '<span style="color:#d1d5db;">—</span>';
 
-    const price = parseFloat(order.total_price) || 0;
-    const comm  = parseFloat(order.commission_amount) || 0;
-    const desi  = parseFloat(order.cargo_desi) || 0;
+    const price     = parseFloat(order.total_price) || 0;
+    const commRate  = parseFloat(order.commission_rate) || 0;
+    const desi      = parseFloat(order.cargo_desi) || 0;
     sumPrice += price;
-    sumComm  += comm;
     if (desi > 0) { sumDesi += desi; validDesiCount++; }
 
-    const commHtml = comm > 0
-      ? `${formatCurrency(comm)}${order.commission_rate ? `<br><span style="color:#9ca3af;font-size:10px;">%${parseFloat(order.commission_rate).toFixed(1)}</span>` : ''}`
+    // Komisyon: %oran üstte, hesaplanan TL tutarı (toplam_fiyat × oran / 100) altta
+    const commTL   = commRate > 0 ? (price * commRate / 100) : 0;
+    const commHtml = commRate > 0
+      ? `<span style="font-weight:600;">%${commRate.toFixed(1)}</span><br><span style="color:#9ca3af;font-size:10px;">${formatCurrency(commTL)}</span>`
       : '<span style="color:#d1d5db;">—</span>';
 
     // Desi API'den gelir — read-only göster
@@ -2297,7 +2298,7 @@ function renderOrders(orders, total) {
       <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
       <td class="col-product"></td>
       <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
-      <td class="col-comm" style="text-align:right;font-weight:700;">${sumComm > 0 ? formatCurrency(sumComm) : '—'}</td>
+      <td class="col-comm" style="text-align:right;font-weight:700;">—</td>
       <td class="col-desi" style="text-align:center;font-weight:700;">${validDesiCount > 0 ? 'Ort.' + avgDesi : '—'}</td>
       <td class="col-cargo"></td>
       <td class="col-stock"></td>
@@ -2307,7 +2308,6 @@ function renderOrders(orders, total) {
   // Özet metin
   if (summaryEl) {
     const parts = [`${total} sipariş`, `Ciro: ${formatCurrency(sumPrice)}`];
-    if (sumComm > 0) parts.push(`Komisyon: ${formatCurrency(sumComm)}`);
     if (validDesiCount > 0) parts.push(`Ort. Desi: ${avgDesi}`);
     summaryEl.textContent = parts.join(' | ');
   }
