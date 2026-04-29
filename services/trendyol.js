@@ -10,14 +10,14 @@ const TY_BASE = 'https://apigw.trendyol.com/integration/order/sellers';
 // Trendyol raw durum → BagStock dahili durum
 const TY_STATUS_MAP = {
   'Created':              'bekliyor',
-  'Picking':              'kargoda',
-  'Invoiced':             'kargoda',
+  'Picking':              'bekliyor',         // İşleme alınanlar → Bekliyor (henüz kargoya verilmedi)
+  'Invoiced':             'bekliyor',         // İşleme alınanlar → Bekliyor
   'Shipped':              'kargoda',
   'Delivered':            'teslim_edildi',
   'Cancelled':            'iptal',
-  'UnDelivered':          'kargoda', // Kurye teslim edemedi, paket hâlâ kargo şirketinde (Taşıma Durumunda)
-  'Returned':             'iade',
-  'ReturnedAndDelivered': 'iade',
+  'UnDelivered':          'kargoda',          // Kurye teslim edemedi, paket hâlâ kargo şirketinde
+  'Returned':             'iade_bekliyor',    // Aksiyon bekleyen iade
+  'ReturnedAndDelivered': 'iade_onaylandi',   // Onaylanan iade
   'Repack':               'bekliyor',
   'WaitingForSupply':     'bekliyor',
   'SentForPackaging':     'bekliyor',
@@ -34,8 +34,8 @@ const TY_STATUS_TR = {
   'Delivered':            'Teslim Edildi',
   'Cancelled':            'İptal Edildi',
   'UnDelivered':          'Teslim Edilemedi',
-  'Returned':             'İade Edildi',
-  'ReturnedAndDelivered': 'İade Teslim Alındı',
+  'Returned':             'İade Bekliyor',
+  'ReturnedAndDelivered': 'İade Onaylandı',
   'Repack':               'Yeniden Paketleniyor',
   'WaitingForSupply':     'Tedarik Bekleniyor',
   'SentForPackaging':     'Paketlemeye Gönderildi',
@@ -43,8 +43,8 @@ const TY_STATUS_TR = {
   'UnSupplied':           'Tedarik Edilemedi'
 };
 
-// Stok düşürme tetikleyici durumlar
-const TY_DEDUCT_STATUSES = new Set(['Picking', 'Invoiced', 'Shipped', 'Delivered']);
+// Stok düşürme tetikleyici durumlar — Picking/Invoiced çıkarıldı (kargoya verilmeden düşülmez)
+const TY_DEDUCT_STATUSES = new Set(['Shipped', 'Delivered']);
 
 // İade statüleri
 const TY_RETURN_STATUSES = new Set(['Returned', 'ReturnedAndDelivered']);

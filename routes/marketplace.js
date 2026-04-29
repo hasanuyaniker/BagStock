@@ -27,7 +27,12 @@ router.get('/orders', async (req, res) => {
     const conditions = [];
 
     if (platform) { conditions.push(`mo.platform = $${params.push(platform)}`); }
-    if (status)   { conditions.push(`mo.status = $${params.push(status)}`); }
+    // 'iade' filtresi iade_bekliyor ve iade_onaylandi'yı da kapsar
+    if (status === 'iade') {
+      conditions.push(`mo.status IN ('iade', 'iade_bekliyor', 'iade_onaylandi')`);
+    } else if (status) {
+      conditions.push(`mo.status = $${params.push(status)}`);
+    }
     // DATE() karşılaştırması — saat farkını ortadan kaldırır
     if (from) { conditions.push(`DATE(mo.order_date) >= $${params.push(from)}`); }
     if (to)   { conditions.push(`DATE(mo.order_date) <= $${params.push(to)}`); }
@@ -188,8 +193,13 @@ router.get('/status-counts', async (req, res) => {
       `SELECT status, COUNT(*) AS cnt FROM marketplace_orders ${where} GROUP BY status`,
       params
     );
-    const counts = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0 };
-    result.rows.forEach(r => { if (counts[r.status] !== undefined) counts[r.status] = parseInt(r.cnt); });
+    const counts = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0, iade_bekliyor: 0, iade_onaylandi: 0 };
+    result.rows.forEach(r => {
+      const n = parseInt(r.cnt);
+      if (r.status === 'iade_bekliyor')  { counts.iade += n; counts.iade_bekliyor  += n; }
+      else if (r.status === 'iade_onaylandi') { counts.iade += n; counts.iade_onaylandi += n; }
+      else if (counts[r.status] !== undefined) counts[r.status] = n;
+    });
     res.json(counts);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -236,6 +246,76 @@ router.patch('/orders/:id/desi', async (req, res) => {
     res.json({ ok: true, id: result.rows[0].id, cargo_desi: result.rows[0].cargo_desi });
   } catch (err) {
     console.error('[Marketplace] Desi güncelleme hatası:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/marketplace/orders/export ── CSV export ─────────────────────────
+router.get('/orders/export', async (req, res) => {
+  try {
+    const { platform, status, from, to } = req.query;
+    const params = [];
+    const conditions = [];
+    if (platform) conditions.push(`mo.platform = $${params.push(platform)}`);
+    if (status === 'iade') {
+      conditions.push(`mo.status IN ('iade', 'iade_bekliyor', 'iade_onaylandi')`);
+    } else if (status) {
+      conditions.push(`mo.status = $${params.push(status)}`);
+    }
+    if (from) conditions.push(`DATE(mo.order_date) >= $${params.push(from)}`);
+    if (to)   conditions.push(`DATE(mo.order_date) <= $${params.push(to)}`);
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    const result = await pool.query(
+      `SELECT mo.platform, mo.order_number, mo.status_tr, mo.raw_status,
+              mo.customer_name, mo.order_date, mo.total_price, mo.currency,
+              mo.cargo_company, mo.cargo_tracking_number, mo.cargo_desi,
+              mo.commission_amount,
+              STRING_AGG(
+                COALESCE(p.name, moi.product_name, moi.barcode) || ' ×' || moi.quantity::text,
+                ' | '
+              ) AS urunler
+       FROM marketplace_orders mo
+       LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+       LEFT JOIN products p ON p.id = moi.product_id
+       ${where}
+       GROUP BY mo.id
+       ORDER BY mo.order_date DESC`,
+      params
+    );
+
+    const STATUS_TR = {
+      bekliyor: 'Bekliyor', kargoda: 'Kargoda', teslim_edildi: 'Teslim Edildi',
+      iptal: 'İptal', iade_bekliyor: 'İade Bekliyor', iade_onaylandi: 'İade Onaylandı', iade: 'İade'
+    };
+
+    const header = ['Platform','Sipariş No','Durum','Müşteri','Tarih','Tutar','Kargo Firması','Takip No','Desi','Komisyon','Ürünler'];
+    const rows = result.rows.map(r => {
+      const dateStr = r.order_date ? new Date(r.order_date).toLocaleDateString('tr-TR') : '';
+      const platformLabel = r.platform === 'trendyol' ? 'Trendyol' : r.platform === 'hepsiburada' ? 'Hepsiburada' : r.platform;
+      const statusLabel = r.status_tr || STATUS_TR[r.status] || r.raw_status || '';
+      return [
+        platformLabel,
+        r.order_number || '',
+        statusLabel,
+        r.customer_name || '',
+        dateStr,
+        r.total_price || 0,
+        r.cargo_company || '',
+        r.cargo_tracking_number || '',
+        r.cargo_desi || '',
+        r.commission_amount || '',
+        (r.urunler || '').replace(/"/g, '""')
+      ].map(v => `"${v}"`).join(',');
+    });
+
+    const csv = '﻿' + [header.map(h => `"${h}"`).join(','), ...rows].join('\r\n');
+    const today = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=siparisler_${today}.csv`);
+    res.send(csv);
+  } catch (err) {
+    console.error('[Marketplace] CSV export hatası:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -524,6 +604,16 @@ async function upsertOrder(db, order) {
             'UPDATE marketplace_order_items SET stock_deducted = TRUE WHERE id = $1',
             [itemRow.id]
           );
+          // Satış raporlarına da ekle (marketplace kaynağı ile)
+          const saleDate = order.order_date
+            ? new Date(order.order_date).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0];
+          await client.query(
+            `INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [product.id, -item.quantity, saleDate,
+             `Marketplace #${order.order_number}`, order.platform]
+          );
           deductCount++;
           console.log(`[Marketplace] Stok düşüldü: ${product.name} (${item.barcode}) ${product.stock_quantity}→${newStock} [${order.platform} #${order.order_number}]`);
         }
@@ -540,8 +630,8 @@ async function upsertOrder(db, order) {
       await client.query('COMMIT');
     }
 
-    // Kargoya geçiş bildirimi — sadece yeni kargoda geçişlerinde
-    if (order.status === 'kargoda' && prevStatus !== 'kargoda') {
+    // Kargoya geçiş bildirimi — sadece bekliyor → kargoda geçişinde
+    if (order.status === 'kargoda' && prevStatus === 'bekliyor') {
       try {
         const { sendShippingNotification } = require('../services/mailer');
         await sendShippingNotification({ ...order, id: orderId });

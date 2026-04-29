@@ -1982,6 +1982,35 @@ function renderSalesReport(data) {
   document.getElementById('srResults').innerHTML = html;
 }
 
+function exportOrders() {
+  const platform = document.getElementById('orderPlatformFilter')?.value || '';
+  const status   = document.getElementById('orderStatusFilter')?.value   || '';
+  const from     = document.getElementById('orderFromDate')?.value        || '';
+  const to       = document.getElementById('orderToDate')?.value          || '';
+
+  const p = new URLSearchParams();
+  if (platform) p.set('platform', platform);
+  if (status)   p.set('status', status);
+  if (from)     p.set('from', from);
+  if (to)       p.set('to', to);
+
+  apiFetch(`/api/marketplace/orders/export?${p}`)
+    .then(res => {
+      if (!res.ok) throw new Error('Export başarısız');
+      return res.blob();
+    })
+    .then(blob => {
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      const today = new Date().toISOString().split('T')[0];
+      a.download = `siparisler_${today}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch(() => showToast('Export hatası', 'error'));
+}
+
 function exportSalesReport() {
   const from = document.getElementById('srFrom').value;
   const to   = document.getElementById('srTo').value;
@@ -2115,12 +2144,22 @@ function renderOrdersSummaryCards(counts) {
     { key: 'iade',          cssKey: 'iade',     label: 'İade',          emoji: '↩️' }
   ];
 
+  // İade alt kırılımı
+  const iadeBekliyor  = counts.iade_bekliyor  || 0;
+  const iadeOnaylandi = counts.iade_onaylandi || 0;
+  const iadeSubHtml = (iadeBekliyor > 0 || iadeOnaylandi > 0)
+    ? `<div style="font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px;">
+         <span title="Aksiyon Bekleyen">Bekl: ${iadeBekliyor}</span> · <span title="Onaylanan">Onayl: ${iadeOnaylandi}</span>
+       </div>`
+    : '';
+
   el.innerHTML = cards.map(c => `
     <div class="order-stat-card osc-${c.cssKey}">
       <span class="osc-icon">${c.emoji}</span>
       <div>
         <div class="osc-label">${c.label}</div>
-        <div class="osc-count" id="count-${c.cssKey}">${counts[c.key]}</div>
+        <div class="osc-count" id="count-${c.cssKey}">${counts[c.key] || 0}</div>
+        ${c.key === 'iade' ? iadeSubHtml : ''}
       </div>
     </div>
   `).join('');
@@ -2160,11 +2199,13 @@ function renderOrders(orders, total) {
 
   const statusBadge = s => {
     const map = {
-      bekliyor:      ['bekliyor', '⏳', 'Bekliyor'],
-      kargoda:       ['kargoda',  '🚚', 'Kargoda'],
-      teslim_edildi: ['teslim',   '✅', 'Teslim'],
-      iptal:         ['iptal',    '❌', 'İptal'],
-      iade:          ['iade',     '↩️', 'İade']
+      bekliyor:       ['bekliyor', '⏳', 'Bekliyor'],
+      kargoda:        ['kargoda',  '🚚', 'Kargoda'],
+      teslim_edildi:  ['teslim',   '✅', 'Teslim'],
+      iptal:          ['iptal',    '❌', 'İptal'],
+      iade:           ['iade',     '↩️', 'İade'],
+      iade_bekliyor:  ['iade',     '↩️', 'İade Bekliyor'],
+      iade_onaylandi: ['iade',     '✔️', 'İade Onaylandı']
     };
     const [cls, icon, label] = map[s] || ['', '•', s];
     return `<span class="badge badge-${cls}">${icon} ${label}</span>`;

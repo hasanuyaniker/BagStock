@@ -189,6 +189,30 @@ async function runMigrations() {
       console.log(`✓ [v3] ${markResult.rowCount} sipariş stock_deducted=TRUE olarak işaretlendi — yeniden düşüm engellendi`);
     }
 
+    // ── #11158294784 → teslim_edildi düzeltmesi ──────────────────────────────
+    const fix11158v2 = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_order_11158294784_teslim'`);
+    if (fix11158v2.rows.length === 0) {
+      await pool.query(`UPDATE marketplace_orders SET status='teslim_edildi', status_tr='Teslim Edildi', updated_at=NOW() WHERE order_number='11158294784'`);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_order_11158294784_teslim','true') ON CONFLICT (key) DO NOTHING`);
+    }
+
+    // ── Picking/Invoiced → bekliyor düzeltmesi ───────────────────────────────
+    const fixPickingInvoiced = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_picking_invoiced_to_bekliyor'`);
+    if (fixPickingInvoiced.rows.length === 0) {
+      const r = await pool.query(`UPDATE marketplace_orders SET status='bekliyor', updated_at=NOW() WHERE raw_status IN ('Picking','Invoiced') AND status='kargoda'`);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_picking_invoiced_to_bekliyor','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} Picking/Invoiced sipariş bekliyor olarak düzeltildi`);
+    }
+
+    // ── iade → iade_bekliyor / iade_onaylandi alt durum düzeltmesi ───────────
+    const fixIadeSubs = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_iade_substatuses_v1'`);
+    if (fixIadeSubs.rows.length === 0) {
+      await pool.query(`UPDATE marketplace_orders SET status='iade_bekliyor', updated_at=NOW() WHERE raw_status IN ('Returned','RETURNED','RETURN_IN_CARGO') AND status='iade'`);
+      await pool.query(`UPDATE marketplace_orders SET status='iade_onaylandi', updated_at=NOW() WHERE raw_status IN ('ReturnedAndDelivered','RETURN_ACCEPTED') AND status='iade'`);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_iade_substatuses_v1','true') ON CONFLICT (key) DO NOTHING`);
+      console.log('✓ İade alt durumları (iade_bekliyor / iade_onaylandi) güncellendi');
+    }
+
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {

@@ -64,7 +64,7 @@
         </div>
         <div class="sidebar-item" data-section="sales" onclick="switchSection('sales')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
-          <span>Günlük Satış</span>
+          <span>Manuel Stok Güncelleme</span>
         </div>
         <div class="sidebar-item" data-section="stockcount" id="stockcountNav" style="display:none;" onclick="switchSection('stockcount')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
@@ -230,13 +230,16 @@
                 <option value="kargoda">🚚 Kargoda</option>
                 <option value="teslim_edildi">✅ Teslim Edildi</option>
                 <option value="iptal">❌ İptal</option>
-                <option value="iade">↩️ İade</option>
+                <option value="iade">↩️ İade (Tümü)</option>
+                <option value="iade_bekliyor">↩️ İade — Aksiyon Bekleyen</option>
+                <option value="iade_onaylandi">✔️ İade — Onaylanan</option>
               </select>
               <input type="date" id="orderFromDate" style="padding:7px 10px;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-size:13px;background:rgba(255,255,255,0.15);color:#fff;">
               <input type="date" id="orderToDate" style="padding:7px 10px;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-size:13px;background:rgba(255,255,255,0.15);color:#fff;">
               <button class="btn btn-primary btn-sm" onclick="loadOrders()">Filtrele</button>
             </div>
-            <div class="toolbar-right">
+            <div class="toolbar-right" style="gap:8px;">
+              <button class="btn btn-secondary btn-sm" onclick="exportOrders()">📥 Excel</button>
               <button class="btn btn-secondary btn-sm" onclick="syncMarketplace()" id="syncBtn">🔄 Şimdi Senkronize Et</button>
               <div id="syncStatusText" style="font-size:12px;color:rgba(255,255,255,0.7);align-self:center;"></div>
             </div>
@@ -731,7 +734,7 @@
     </div>
     <div class="bottom-nav-item" data-section="sales" onclick="switchSection('sales')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
-      <span>Satış</span>
+      <span>Manuel</span>
     </div>
     <div class="bottom-nav-item" data-section="orders" onclick="switchSection('orders')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="4" rx="1"/><path d="M4 7v12a2 2 0 002 2h12a2 2 0 002-2V7"/><path d="M10 12h4"/><path d="M10 16h4"/></svg>

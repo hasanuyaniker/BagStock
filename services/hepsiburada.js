@@ -18,9 +18,9 @@ const HB_STATUS_MAP = {
   'UNDELIVERED':            'iptal',
   'CANCELLED':              'iptal',
   'CANCELLED_BEFORE_CARGO': 'iptal',
-  'RETURNED':               'iade',
-  'RETURN_ACCEPTED':        'iade',
-  'RETURN_IN_CARGO':        'iade'
+  'RETURNED':               'iade_bekliyor',   // Aksiyon bekleyen iade
+  'RETURN_ACCEPTED':        'iade_onaylandi',  // Onaylanan iade
+  'RETURN_IN_CARGO':        'iade_bekliyor'    // İade kargoda = aksiyon bekliyor
 };
 
 // Türkçe görüntüleme etiketleri
@@ -36,8 +36,8 @@ const HB_STATUS_TR = {
   'UNDELIVERED':            'Teslim Edilemedi',
   'CANCELLED':              'İptal Edildi',
   'CANCELLED_BEFORE_CARGO': 'Kargo Öncesi İptal',
-  'RETURNED':               'İade Edildi',
-  'RETURN_ACCEPTED':        'İade Kabul Edildi',
+  'RETURNED':               'İade Bekliyor',
+  'RETURN_ACCEPTED':        'İade Onaylandı',
   'RETURN_IN_CARGO':        'İade Kargoda'
 };
 
