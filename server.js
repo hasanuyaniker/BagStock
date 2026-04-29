@@ -158,6 +158,37 @@ async function runMigrations() {
       console.log('✓ stock_deducted sıfırlandı — sonraki sync tek seferlik doğru düşüm yapacak');
     }
 
+    // ── STOK GERİ YÜKLEME v3 — order-level guard ile birlikte ─────────────────
+    // v2 sonrası sync yeniden düşüm yaptı. v3: stokları geri yükle + mevcut
+    // tüm siparişleri stock_deducted=TRUE işaretle → yeni kod bir daha düşmez.
+    const stockRestoreFlagV3 = await pool.query(`SELECT value FROM app_settings WHERE key = 'marketplace_stock_restore_v3'`);
+    if (stockRestoreFlagV3.rows.length === 0) {
+      // 1. Düşürülmüş item stokları geri yükle
+      const restoreV3 = await pool.query(`
+        UPDATE products p
+        SET stock_quantity = p.stock_quantity + sub.total_qty,
+            updated_at     = NOW()
+        FROM (
+          SELECT moi.product_id, SUM(moi.quantity) AS total_qty
+          FROM marketplace_order_items moi
+          WHERE moi.stock_deducted = TRUE
+            AND moi.product_id IS NOT NULL
+          GROUP BY moi.product_id
+        ) sub
+        WHERE p.id = sub.product_id
+      `);
+      // 2. Tüm item-level bayrakları sıfırla
+      await pool.query(`UPDATE marketplace_order_items SET stock_deducted = FALSE`);
+      // 3. Mevcut tüm siparişleri order-level'de işaretli yap →
+      //    yeni guard bunları bir daha işlemez
+      const markResult = await pool.query(
+        `UPDATE marketplace_orders SET stock_deducted = TRUE, updated_at = NOW()`
+      );
+      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('marketplace_stock_restore_v3', 'true') ON CONFLICT (key) DO NOTHING`);
+      console.log(`✓ [v3] Stok geri yükleme: ${restoreV3.rowCount} ürün restore edildi`);
+      console.log(`✓ [v3] ${markResult.rowCount} sipariş stock_deducted=TRUE olarak işaretlendi — yeniden düşüm engellendi`);
+    }
+
     // 18.04.2026 öncesi satış verilerini tek seferlik temizle
     const cleanedFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'sales_cleaned_before_20260418'`);
     if (cleanedFlag.rows.length === 0) {

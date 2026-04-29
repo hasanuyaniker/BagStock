@@ -2190,12 +2190,17 @@ function renderOrders(orders, total) {
         }).join('')
       : '<span style="color:#9ca3af;">—</span>';
 
-    const anyDeducted  = items.some(i => i.stock_deducted);
+    // Order-level flag VEYA item-level flag: biri TRUE ise stok düşürülmüş demektir
+    const anyDeducted  = items.some(i => i.stock_deducted) || order.stock_deducted === true;
+    // Sistemde eşleşen ürün var mı? (p_name = products tablosundan JOIN)
+    const anyMatched   = items.some(i => i.product_id || i.p_name);
     const shouldDeduct = ['kargoda', 'teslim_edildi'].includes(order.status);
     const stockCell = shouldDeduct
       ? (anyDeducted
           ? '<span style="color:#16a34a;font-size:11px;font-weight:600;">✓ Düşürüldü</span>'
-          : '<span style="color:#d97706;font-size:11px;">⏳</span>')
+          : anyMatched
+            ? '<span style="color:#d97706;font-size:11px;" title="Stok düşümü bekleniyor">⏳</span>'
+            : '<span style="color:#9ca3af;font-size:11px;" title="Sistemde eşleşen ürün bulunamadı">—</span>')
       : '<span style="color:#d1d5db;">—</span>';
 
     const price = parseFloat(order.total_price) || 0;
