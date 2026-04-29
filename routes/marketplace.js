@@ -459,8 +459,19 @@ async function upsertOrder(db, order) {
           is_returned, return_reason, return_date)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (platform, order_id) DO UPDATE SET
-         status               = EXCLUDED.status,
-         status_tr            = EXCLUDED.status_tr,
+         -- Terminal durumlar (teslim_edildi, iade_onaylandi) bekliyor/kargoda'ya düşürülemez
+         status = CASE
+           WHEN marketplace_orders.status IN ('teslim_edildi','iade_onaylandi')
+                AND EXCLUDED.status IN ('bekliyor','kargoda','iptal')
+           THEN marketplace_orders.status
+           ELSE EXCLUDED.status
+         END,
+         status_tr = CASE
+           WHEN marketplace_orders.status IN ('teslim_edildi','iade_onaylandi')
+                AND EXCLUDED.status IN ('bekliyor','kargoda','iptal')
+           THEN marketplace_orders.status_tr
+           ELSE EXCLUDED.status_tr
+         END,
          raw_status           = EXCLUDED.raw_status,
          customer_name        = EXCLUDED.customer_name,
          total_price          = EXCLUDED.total_price,

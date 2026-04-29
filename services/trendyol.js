@@ -217,10 +217,13 @@ function mapOrder(order) {
 
   // Toplam komisyon — satırlardan
   const totalCommission = items.reduce((s, i) => s + (i.commission_amount || 0), 0);
+  // Etkin komisyon oranı: commission_amount / toplam satış fiyatı × 100
+  // Bu yöntem çok ürünlü siparişlerde ürün sayısından bağımsız, tutarlı sonuç verir
+  const totalSalePrice = items.reduce((s, i) => s + (parseFloat(i.price || 0) * parseInt(i.quantity || 1)), 0);
   const commRates = items.filter(i => i.commission_rate).map(i => i.commission_rate);
-  const avgCommissionRate = commRates.length > 0
-    ? commRates.reduce((a, b) => a + b, 0) / commRates.length
-    : null;
+  const avgCommissionRate = (totalCommission > 0 && totalSalePrice > 0)
+    ? Math.round((totalCommission / totalSalePrice) * 10000) / 100   // tutar bazlı etkin oran
+    : (commRates.length > 0 ? commRates.reduce((a, b) => a + b, 0) / commRates.length : null);
 
   // Toplam desi — paket seviyesi öncelikli, yoksa satır toplamı
   const lineDesiSum = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
