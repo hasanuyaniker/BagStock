@@ -2207,13 +2207,15 @@ function renderOrdersSummaryCards(data) {
     const counts = platforms.length === 1 ? byPlatform[platforms[0].key] : total;
     el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px;">${makeCards(counts, '')}</div>`;
   } else {
-    // İki platform: gruplar halinde göster
-    el.innerHTML = platforms.map(p => `
-      <div style="margin-bottom:8px;">
-        <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;padding-left:2px;">${p.label}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;">${makeCards(byPlatform[p.key] || {}, p.key + '-')}</div>
-      </div>
-    `).join('');
+    // İki platform: her biri ayrı kutuda
+    el.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;">` +
+      platforms.map(p => `
+        <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:10px 14px;flex:1;min-width:280px;">
+          <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.6);margin-bottom:8px;letter-spacing:.5px;">${p.label}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">${makeCards(byPlatform[p.key] || {}, p.key + '-')}</div>
+        </div>
+      `).join('') +
+    `</div>`;
   }
 }
 
@@ -2296,14 +2298,19 @@ function renderOrders(orders, total) {
             : '<span style="color:#9ca3af;font-size:11px;" title="Sistemde eşleşen ürün bulunamadı">—</span>')
       : '<span style="color:#d1d5db;">—</span>';
 
-    const price     = parseFloat(order.total_price) || 0;
-    const commRate  = parseFloat(order.commission_rate) || 0;
-    const desi      = parseFloat(order.cargo_desi) || 0;
+    const price        = parseFloat(order.total_price)        || 0;
+    const commAmountDB = parseFloat(order.commission_amount)  || 0;
+    const desi         = parseFloat(order.cargo_desi)         || 0;
     sumPrice += price;
     if (desi > 0) { sumDesi += desi; validDesiCount++; }
 
-    // Komisyon: %oran üstte, hesaplanan TL tutarı (toplam_fiyat × oran / 100) altta
-    const commTL   = commRate > 0 ? (price * commRate / 100) : 0;
+    // Komisyon oranı: DB'den geliyorsa kullan, yoksa amount/price'dan hesapla
+    let commRate = parseFloat(order.commission_rate) || 0;
+    if (!commRate && commAmountDB > 0 && price > 0) {
+      commRate = commAmountDB / price * 100;
+    }
+    // TL tutarı: DB amount varsa onu kullan, yoksa rate'ten hesapla
+    const commTL = commAmountDB > 0 ? commAmountDB : (commRate > 0 ? price * commRate / 100 : 0);
     const commHtml = commRate > 0
       ? `<span style="font-weight:600;">%${commRate.toFixed(1)}</span><br><span style="color:#9ca3af;font-size:10px;">${formatCurrency(commTL)}</span>`
       : '<span style="color:#d1d5db;">—</span>';

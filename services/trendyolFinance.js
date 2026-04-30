@@ -70,7 +70,7 @@ async function fetchSettlements(sellerId, apiKey, apiSecret, startDate, endDate)
 }
 
 /**
- * Hakediş verisinden sipariş bazlı komisyon haritası oluşturur
+ * Hakediş verisinden sipariş bazlı komisyon+desi haritası oluşturur
  */
 function buildCommissionMap(settlements) {
   const map = new Map();
@@ -80,11 +80,22 @@ function buildCommissionMap(settlements) {
     ).trim();
     if (!orderNo) continue;
 
-    const existing = map.get(orderNo) || { commissionFee: 0, commissionRate: null };
+    const existing = map.get(orderNo) || { commissionFee: 0, commissionRate: null, desi: null };
     const fee  = parseFloat(item.commissionFee || item.commission || item.commissionAmount || 0);
     const rate = parseFloat(item.commissionRate || item.commissionRatio || 0);
+    // Desi: Finance API'de gelebilecek tüm alan adları
+    const desi = parseFloat(
+      item.volumetricWeight || item.cargoWeight || item.desi ||
+      item.packageDesi || item.shipmentDesi || 0
+    ) || null;
+
     existing.commissionFee += fee;
-    if (rate && !existing.commissionRate) existing.commissionRate = rate;
+    // Oran: 0.215 gibi decimal geliyorsa × 100 yap (Trendyol bazen decimal döner)
+    if (rate > 0) {
+      const normalizedRate = rate < 1 ? Math.round(rate * 100 * 100) / 100 : Math.round(rate * 100) / 100;
+      if (!existing.commissionRate) existing.commissionRate = normalizedRate;
+    }
+    if (desi && !existing.desi) existing.desi = desi;
     map.set(orderNo, existing);
   }
   return map;
@@ -116,16 +127,18 @@ async function syncSettlements(db, creds, days = 30) {
   let updated = 0;
 
   for (const [orderNumber, info] of commMap.entries()) {
-    if (!info.commissionFee) continue;
+    if (!info.commissionFee && !info.commissionRate && !info.desi) continue;
+    // Finance API her zaman daha güvenilir — commission_amount IS NULL kontrolü kaldırıldı
+    // commission_rate: Finance'dan geliyorsa her zaman güncelle (daha doğru kaynak)
     const result = await db.query(
       `UPDATE marketplace_orders
-       SET commission_amount = $1,
-           commission_rate   = COALESCE($2, commission_rate),
+       SET commission_amount = CASE WHEN $1 > 0 THEN $1 ELSE commission_amount END,
+           commission_rate   = CASE WHEN $2 IS NOT NULL THEN $2 ELSE commission_rate END,
+           cargo_desi        = CASE WHEN $4 IS NOT NULL AND cargo_desi IS NULL THEN $4 ELSE cargo_desi END,
            updated_at        = NOW()
        WHERE platform = 'trendyol'
-         AND (order_number = $3 OR order_id = $3)
-         AND (commission_amount IS NULL OR commission_amount = 0)`,
-      [info.commissionFee, info.commissionRate || null, orderNumber]
+         AND (order_number = $3 OR order_id = $3)`,
+      [info.commissionFee || 0, info.commissionRate || null, orderNumber, info.desi || null]
     );
     if (result.rowCount > 0) updated++;
   }

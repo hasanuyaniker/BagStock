@@ -500,7 +500,41 @@ async function runBackgroundMigrations(appPool) {
       if (r2.rowCount > 0) console.log(`✓ [BG] ${r2.rowCount} hatalı komisyon oranı sıfırlandı (v3)`);
     }
 
-    // 3. Tek seferlik test e-postası — #11183935655
+    // 3. Komisyon oranı v4 — commission_rate NULL olanlarda amount/price'dan hesapla
+    // v3 migration tüm < 5% oranları NULL yaptı. Bu migration onları geri doldurur.
+    const commRateV4 = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_v4'`);
+    if (commRateV4.rows.length === 0) {
+      const r = await appPool.query(`
+        UPDATE marketplace_orders
+        SET commission_rate = ROUND((commission_amount / NULLIF(total_price, 0)) * 100, 2),
+            updated_at = NOW()
+        WHERE commission_rate IS NULL
+          AND commission_amount IS NOT NULL AND commission_amount > 0
+          AND total_price > 0
+      `);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_v4','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ [BG] ${r.rowCount} komisyon oranı amount/price'dan yeniden hesaplandı`);
+    }
+
+    // 4. Anne-Siyah manuel satış — platform düzeltmesi (normal → hepsiburada)
+    const anneSiyahFix = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_anne_siyah_platform_20260430'`);
+    if (anneSiyahFix.rows.length === 0) {
+      const r = await appPool.query(`
+        UPDATE sales s
+        SET marketplace = 'hepsiburada', updated_at = NOW()
+        FROM products p
+        WHERE s.product_id = p.id
+          AND s.marketplace = 'normal'
+          AND DATE(s.sale_date) = '2026-04-30'
+          AND (LOWER(p.name) LIKE '%anne%' AND LOWER(p.name) LIKE '%siyah%'
+               OR LOWER(p.color) LIKE '%siyah%' AND LOWER(p.name) LIKE '%anne%')
+          AND s.quantity_change < 0
+      `);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_anne_siyah_platform_20260430','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ [BG] Anne-Siyah satış platform'u hepsiburada olarak güncellendi (${r.rowCount} kayıt)`);
+    }
+
+    // 5. Tek seferlik test e-postası — #11183935655
     const emailFlag = await appPool.query(`SELECT value FROM app_settings WHERE key = 'email_sent_11183935655'`);
     if (emailFlag.rows.length === 0) {
       try {
