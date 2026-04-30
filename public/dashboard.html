@@ -441,6 +441,16 @@
 
           <!-- Email Test Panel -->
           <div class="settings-panel" id="panel-email">
+            <!-- Kargo Bildirimi Testi -->
+            <div class="settings-card" style="max-width:500px;margin-bottom:16px;">
+              <h3 style="font-size:15px;margin-bottom:8px;">🚚 Kargo Bildirim Testi</h3>
+              <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">
+                Sistemdeki en son "kargoda" siparişi için kargo bildirimi gönderir. Kargo emaillerinin çalışıp çalışmadığını test eder.
+              </p>
+              <button class="btn btn-primary" onclick="testShippingEmail()" id="testShippingEmailBtn">🚚 Test Gönder</button>
+              <div id="testShippingEmailResult" style="margin-top:16px;display:none;"></div>
+            </div>
+
             <!-- Stok Uyarı Testi -->
             <div class="settings-card" style="max-width:500px;margin-bottom:16px;">
               <h3 style="font-size:15px;margin-bottom:8px;">📧 Stok Uyarı Email Testi</h3>

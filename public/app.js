@@ -1743,6 +1743,36 @@ function downloadBackup() {
   }).catch(() => showToast('Yedekleme hatası', 'error'));
 }
 
+// ==================== KARGO TEST EMAIL ====================
+async function testShippingEmail() {
+  const btn = document.getElementById('testShippingEmailBtn');
+  const resultDiv = document.getElementById('testShippingEmailResult');
+  btn.disabled = true;
+  btn.textContent = 'Gönderiliyor...';
+  resultDiv.style.display = 'none';
+
+  try {
+    const res = await apiFetch('/api/marketplace/test-shipping-email', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      resultDiv.innerHTML = `<div style="background:#dcfce7;border:1px solid #bbf7d0;border-radius:8px;padding:14px;">
+        <strong style="color:#166534;">✅ ${data.message}</strong>
+      </div>`;
+    } else {
+      resultDiv.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;">
+        <strong style="color:#991b1b;">❌ Gönderilemedi</strong>
+        <p style="margin:6px 0 0;font-size:13px;color:#7f1d1d;">${data.error || 'Bilinmeyen hata'}</p>
+      </div>`;
+    }
+  } catch (err) {
+    resultDiv.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;color:#991b1b;">❌ İstek başarısız: ${err.message}</div>`;
+  }
+
+  resultDiv.style.display = 'block';
+  btn.disabled = false;
+  btn.textContent = '🚚 Test Gönder';
+}
+
 // ==================== EMAIL TEST ====================
 async function testEmail() {
   const btn = document.getElementById('testEmailBtn');
@@ -2125,44 +2155,66 @@ async function loadStatusCounts(platform, status, from, to) {
   } catch (e) { /* sessiz hata */ }
 }
 
-function renderOrdersSummaryCards(counts) {
+function renderOrdersSummaryCards(data) {
   const el = document.getElementById('ordersSummaryCards');
   if (!el) return;
 
-  // Eski çağrı uyumu: eğer `counts` bir order dizisiyse hesapla
-  if (Array.isArray(counts)) {
+  // Eski format uyumu (array veya düz counts nesnesi)
+  if (Array.isArray(data)) {
     const c = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0 };
-    counts.forEach(o => { if (c[o.status] !== undefined) c[o.status]++; });
-    counts = c;
+    data.forEach(o => { if (c[o.status] !== undefined) c[o.status]++; });
+    data = { total: c, byPlatform: {} };
+  } else if (data && !data.byPlatform) {
+    // düz counts nesnesi (eski API)
+    data = { total: data, byPlatform: {} };
   }
 
-  const cards = [
+  const { byPlatform = {}, total = {} } = data;
+
+  const cardDefs = [
     { key: 'bekliyor',      cssKey: 'bekliyor', label: 'Bekliyor',      emoji: '⏳' },
     { key: 'kargoda',       cssKey: 'kargoda',  label: 'Kargoda',       emoji: '🚚' },
-    { key: 'teslim_edildi', cssKey: 'teslim',   label: 'Teslim Edildi', emoji: '✅' },
+    { key: 'teslim_edildi', cssKey: 'teslim',   label: 'Teslim',        emoji: '✅' },
     { key: 'iptal',         cssKey: 'iptal',    label: 'İptal',         emoji: '❌' },
     { key: 'iade',          cssKey: 'iade',     label: 'İade',          emoji: '↩️' }
   ];
 
-  // İade alt kırılımı
-  const iadeBekliyor  = counts.iade_bekliyor  || 0;
-  const iadeOnaylandi = counts.iade_onaylandi || 0;
-  const iadeSubHtml = (iadeBekliyor > 0 || iadeOnaylandi > 0)
-    ? `<div style="font-size:10px;color:rgba(255,255,255,0.6);margin-top:2px;">
-         <span title="Aksiyon Bekleyen">Bekl: ${iadeBekliyor}</span> · <span title="Onaylanan">Onayl: ${iadeOnaylandi}</span>
-       </div>`
-    : '';
+  // Tek platform grubunun kartlarını üret
+  function makeCards(counts, prefix) {
+    const iadeBekl = counts.iade_bekliyor  || 0;
+    const iadeOnay = counts.iade_onaylandi || 0;
+    const iadeSubHtml = (iadeBekl > 0 || iadeOnay > 0)
+      ? `<div style="font-size:9px;color:rgba(255,255,255,0.6);margin-top:1px;">Bekl:${iadeBekl}·Onay:${iadeOnay}</div>`
+      : '';
+    return cardDefs.map(c => `
+      <div class="order-stat-card osc-${c.cssKey}" style="min-width:72px;">
+        <span class="osc-icon" style="font-size:16px;">${c.emoji}</span>
+        <div>
+          <div class="osc-label" style="font-size:10px;">${c.label}</div>
+          <div class="osc-count" id="${prefix}count-${c.cssKey}" style="font-size:18px;">${counts[c.key] || 0}</div>
+          ${c.key === 'iade' ? iadeSubHtml : ''}
+        </div>
+      </div>`).join('');
+  }
 
-  el.innerHTML = cards.map(c => `
-    <div class="order-stat-card osc-${c.cssKey}">
-      <span class="osc-icon">${c.emoji}</span>
-      <div>
-        <div class="osc-label">${c.label}</div>
-        <div class="osc-count" id="count-${c.cssKey}">${counts[c.key] || 0}</div>
-        ${c.key === 'iade' ? iadeSubHtml : ''}
+  const platforms = [
+    { key: 'trendyol',    label: '🟠 Trendyol' },
+    { key: 'hepsiburada', label: '🔴 Hepsiburada' }
+  ].filter(p => byPlatform[p.key]);
+
+  if (platforms.length <= 1) {
+    // Tek platform veya filtreli görünüm: tek satır
+    const counts = platforms.length === 1 ? byPlatform[platforms[0].key] : total;
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px;">${makeCards(counts, '')}</div>`;
+  } else {
+    // İki platform: gruplar halinde göster
+    el.innerHTML = platforms.map(p => `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;padding-left:2px;">${p.label}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">${makeCards(byPlatform[p.key] || {}, p.key + '-')}</div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 }
 
 function updateStatusCounters(orders) {

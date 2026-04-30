@@ -422,11 +422,11 @@ function startMarketplaceSyncScheduler(appPool) {
     }
   }
 
-  // Her 15 dakikada bir senkronize et
-  setInterval(doSync, 15 * 60 * 1000);
+  // Her 5 dakikada bir senkronize et
+  setInterval(doSync, 5 * 60 * 1000);
   // Başlangıçta 30 saniye sonra ilk senkronizasyon
   setTimeout(doSync, 30 * 1000);
-  console.log('✓ Marketplace senkronizasyon zamanlayıcı başlatıldı (15 dakika aralık)');
+  console.log('✓ Marketplace senkronizasyon zamanlayıcı başlatıldı (5 dakika aralık)');
 }
 
 // ── Arka plan data migration'ları (server başladıktan sonra, non-blocking) ───
@@ -455,6 +455,7 @@ async function runBackgroundMigrations(appPool) {
     // (v1'deki "tutar bazlı" hesap yanlıştı: 43/3748×100 = 1.1% çıkıyordu)
     const commRateFixV2 = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_items_v2'`);
     if (commRateFixV2.rows.length === 0) {
+      // Adım 1: Item-level oran varsa order-level'i güncelle
       const r = await appPool.query(`
         UPDATE marketplace_orders mo
         SET commission_rate = sub.avg_rate, updated_at = NOW()
@@ -468,8 +469,22 @@ async function runBackgroundMigrations(appPool) {
           AND (mo.commission_rate IS NULL
                OR ABS(mo.commission_rate - sub.avg_rate) > 1)
       `);
+      // Adım 2: Item-level oran yoksa, tutar-bazlı hesapla gelen yanlış oranları
+      // (< 5%) sıfırla — UI'da "—" gösterilsin, yanlış bilgi gösterilmesin
+      const r2 = await appPool.query(`
+        UPDATE marketplace_orders mo
+        SET commission_rate = NULL, updated_at = NOW()
+        WHERE mo.commission_rate IS NOT NULL
+          AND mo.commission_rate < 5
+          AND NOT EXISTS (
+            SELECT 1 FROM marketplace_order_items moi
+            WHERE moi.marketplace_order_id = mo.id
+              AND moi.commission_rate IS NOT NULL AND moi.commission_rate > 0
+          )
+      `);
       await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_items_v2','true') ON CONFLICT (key) DO NOTHING`);
-      if (r.rowCount > 0) console.log(`✓ [BG] ${r.rowCount} komisyon oranı ürün ortalamasından düzeltildi`);
+      if (r.rowCount > 0)  console.log(`✓ [BG] ${r.rowCount} komisyon oranı ürün ortalamasından düzeltildi`);
+      if (r2.rowCount > 0) console.log(`✓ [BG] ${r2.rowCount} hatalı komisyon oranı (< %%5) sıfırlandı`);
     }
 
     // 3. Tek seferlik test e-postası — #11183935655

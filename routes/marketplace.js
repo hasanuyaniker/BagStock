@@ -178,7 +178,7 @@ router.get('/platform-stats', async (req, res) => {
   }
 });
 
-// ── GET /api/marketplace/status-counts — filtreli durum sayımı ───────────────
+// ── GET /api/marketplace/status-counts — platform bazlı durum sayımı ─────────
 router.get('/status-counts', async (req, res) => {
   try {
     const { platform, from, to } = req.query;
@@ -190,17 +190,32 @@ router.get('/status-counts', async (req, res) => {
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const result = await pool.query(
-      `SELECT status, COUNT(*) AS cnt FROM marketplace_orders ${where} GROUP BY status`,
+      `SELECT platform, status, COUNT(*) AS cnt FROM marketplace_orders ${where} GROUP BY platform, status`,
       params
     );
-    const counts = { bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0, iade_bekliyor: 0, iade_onaylandi: 0 };
+
+    const emptyGroup = () => ({ bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0, iade_bekliyor: 0, iade_onaylandi: 0 });
+    const byPlatform = {};
+    const total = emptyGroup();
+
     result.rows.forEach(r => {
       const n = parseInt(r.cnt);
-      if (r.status === 'iade_bekliyor')  { counts.iade += n; counts.iade_bekliyor  += n; }
-      else if (r.status === 'iade_onaylandi') { counts.iade += n; counts.iade_onaylandi += n; }
-      else if (counts[r.status] !== undefined) counts[r.status] = n;
+      if (!byPlatform[r.platform]) byPlatform[r.platform] = emptyGroup();
+      const grp = byPlatform[r.platform];
+
+      if (r.status === 'iade_bekliyor') {
+        grp.iade += n; grp.iade_bekliyor += n;
+        total.iade += n; total.iade_bekliyor += n;
+      } else if (r.status === 'iade_onaylandi') {
+        grp.iade += n; grp.iade_onaylandi += n;
+        total.iade += n; total.iade_onaylandi += n;
+      } else if (grp[r.status] !== undefined) {
+        grp[r.status] += n;
+        total[r.status] += n;
+      }
     });
-    res.json(counts);
+
+    res.json({ byPlatform, total });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -327,6 +342,18 @@ router.post('/sync', async (req, res) => {
     await runMarketplaceSync(pool);
   } catch (err) {
     console.error('[Marketplace] Manuel sync hatası:', err.message);
+  }
+});
+
+// ── POST /api/marketplace/test-shipping-email ─────────────────────────────────
+router.post('/test-shipping-email', async (req, res) => {
+  try {
+    const { sendTestShippingNotification } = require('../services/mailer');
+    const result = await sendTestShippingNotification(pool);
+    res.json({ ok: true, message: `Test bildirimi gönderildi (${result.platform} #${result.orderNo})` });
+  } catch (err) {
+    console.error('[Marketplace] Test e-posta hatası:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -642,8 +669,12 @@ async function upsertOrder(db, order) {
     }
 
     // Kargoya geçiş bildirimi — sadece bekliyor → kargoda geçişinde
+    if (order.status === 'kargoda') {
+      console.log(`[Mailer] Kontrol: #${order.order_number} prevStatus=${prevStatus||'(yeni)'} → kargoda`);
+    }
     if (order.status === 'kargoda' && prevStatus === 'bekliyor') {
       try {
+        console.log(`[Mailer] Email tetiklendi → #${order.order_number}`);
         const { sendShippingNotification } = require('../services/mailer');
         await sendShippingNotification({ ...order, id: orderId });
       } catch (mailErr) {
