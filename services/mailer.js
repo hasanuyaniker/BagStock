@@ -104,32 +104,120 @@ async function sendShippingNotification(order) {
 }
 
 /**
- * Test kargo bildirimi gönderir (son kargoda siparişi kullanır)
+ * O gün kargoya verilen tüm siparişleri tek özet mail ile gönderir.
+ * Test butonuna basıldığında çağrılır.
+ * kargoda_at kolonu bugün olan siparişler = o gün kargoya verilenler
  */
-async function sendTestShippingNotification(db) {
+async function sendDailyShippingSummary(db) {
+  // Bugünkü kargoda siparişleri — Istanbul saatiyle
   const result = await db.query(`
     SELECT mo.*, json_agg(json_build_object(
-      'item_id',moi.item_id,'barcode',moi.barcode,'product_name',moi.product_name,
-      'quantity',moi.quantity,'price',moi.price,'p_name',p.name
+      'item_id', moi.item_id,
+      'barcode',  moi.barcode,
+      'product_name', moi.product_name,
+      'quantity', moi.quantity,
+      'price',    moi.price,
+      'p_name',   p.name
     ) ORDER BY moi.id) AS items
     FROM marketplace_orders mo
     LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
     LEFT JOIN products p ON p.id = moi.product_id
     WHERE mo.status = 'kargoda'
+      AND DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul') =
+          DATE(NOW() AT TIME ZONE 'Europe/Istanbul')
     GROUP BY mo.id
-    ORDER BY mo.updated_at DESC LIMIT 1
+    ORDER BY mo.kargoda_at DESC
   `);
 
   if (!result.rows.length) {
-    throw new Error('Sistemde "kargoda" durumunda sipariş bulunamadı');
+    throw new Error('Bugün kargoya verilen sipariş bulunamadı');
   }
 
-  const order = result.rows[0];
-  // items JSON agg null filtrele
-  order.items = (order.items || []).filter(i => i && i.barcode);
+  const orders = result.rows.map(o => ({
+    ...o,
+    items: (o.items || []).filter(i => i && i.barcode)
+  }));
 
-  await sendShippingNotification(order);
-  return { orderNo: order.order_number, platform: order.platform };
+  await sendDailyShippingEmail(orders);
+  return { message: `${orders.length} sipariş için günlük kargo özeti gönderildi` };
+}
+
+/**
+ * Birden fazla siparişi özet tablo olarak tek emailde gönderir
+ */
+async function sendDailyShippingEmail(orders) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY eksik — bildirim gönderilemedi');
+  }
+
+  let recipients;
+  if (process.env.NOTIFY_TO || process.env.NOTIFY_EMAIL) {
+    recipients = [{ email: process.env.NOTIFY_TO || process.env.NOTIFY_EMAIL }];
+  } else {
+    recipients = await getRecipients();
+  }
+  if (!recipients || recipients.length === 0) {
+    throw new Error('Alıcı bulunamadı');
+  }
+
+  const today = new Date().toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: 'long', year: 'numeric' });
+  const totalAmount = orders.reduce((s, o) => s + (parseFloat(o.total_price) || 0), 0);
+
+  // Özet tablo satırları
+  const rows = orders.map(o => {
+    const platform = o.platform === 'trendyol' ? '🟠 TY' : o.platform === 'hepsiburada' ? '🔴 HB' : o.platform;
+    const itemNames = (o.items || []).map(i => `${i.p_name || i.product_name || i.barcode} ×${i.quantity || 1}`).join('<br>') || '—';
+    const amount = parseFloat(o.total_price || 0).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' });
+    const cargo = [o.cargo_company, o.cargo_tracking_number].filter(Boolean).join(' / ') || '—';
+    return `<tr>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;white-space:nowrap;">${platform}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:12px;">${o.order_number || '—'}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:13px;">${itemNames}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:13px;text-align:right;font-weight:600;color:#059669;">${amount}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;">${cargo}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;">
+  <div style="background:linear-gradient(135deg,#5b3de8,#c026a8);padding:20px 28px;border-radius:10px 10px 0 0;">
+    <h2 style="color:#fff;margin:0;font-size:20px;">🚚 Günlük Kargo Özeti</h2>
+    <p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:13px;">${today} — ${orders.length} sipariş kargoya verildi</p>
+  </div>
+  <div style="background:#fff;padding:22px 28px;border:1px solid #e5e7eb;border-top:none;">
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="padding:9px 10px;text-align:left;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;font-weight:600;">Platform</th>
+          <th style="padding:9px 10px;text-align:left;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;font-weight:600;">Sipariş No</th>
+          <th style="padding:9px 10px;text-align:left;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;font-weight:600;">Ürünler</th>
+          <th style="padding:9px 10px;text-align:right;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;font-weight:600;">Tutar</th>
+          <th style="padding:9px 10px;text-align:left;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;font-weight:600;">Kargo</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="background:#f0fdf4;">
+          <td colspan="3" style="padding:10px;font-weight:700;font-size:13px;">TOPLAM (${orders.length} sipariş)</td>
+          <td style="padding:10px;text-align:right;font-weight:800;font-size:14px;color:#059669;">
+            ${totalAmount.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
+          </td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <div style="padding:10px 28px;background:#f9fafb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;font-size:11px;color:#9ca3af;">
+    BagStock Stok Yönetim Sistemi — Otomatik Bildirim
+  </div>
+</div>`.trim();
+
+  const subject = `🚚 Günlük Kargo Özeti — ${today} (${orders.length} sipariş)`;
+
+  for (const user of recipients) {
+    await sendViaResend(user.email, subject, html);
+    console.log(`[Mailer] ✓ Günlük kargo özeti → ${user.email} (${orders.length} sipariş)`);
+  }
 }
 
 /**
@@ -142,4 +230,4 @@ async function sendShippingEmails(orders) {
   }
 }
 
-module.exports = { sendShippingNotification, sendShippingEmails, sendTestShippingNotification };
+module.exports = { sendShippingNotification, sendShippingEmails, sendDailyShippingSummary };

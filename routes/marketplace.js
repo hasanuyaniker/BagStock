@@ -195,7 +195,12 @@ router.get('/status-counts', async (req, res) => {
     );
 
     const emptyGroup = () => ({ bekliyor: 0, kargoda: 0, teslim_edildi: 0, iptal: 0, iade: 0, iade_bekliyor: 0, iade_onaylandi: 0 });
+    // Her iki platformu her zaman göster (filtre yoksa ikisi de, filtre varsa sadece o)
     const byPlatform = {};
+    if (!platform) {
+      byPlatform.trendyol    = emptyGroup();
+      byPlatform.hepsiburada = emptyGroup();
+    }
     const total = emptyGroup();
 
     result.rows.forEach(r => {
@@ -346,11 +351,12 @@ router.post('/sync', async (req, res) => {
 });
 
 // ── POST /api/marketplace/test-shipping-email ─────────────────────────────────
+// Bugün kargoya verilen tüm siparişleri tek mail ile gönderir
 router.post('/test-shipping-email', async (req, res) => {
   try {
-    const { sendTestShippingNotification } = require('../services/mailer');
-    const result = await sendTestShippingNotification(pool);
-    res.json({ ok: true, message: `Test bildirimi gönderildi (${result.platform} #${result.orderNo})` });
+    const { sendDailyShippingSummary } = require('../services/mailer');
+    const result = await sendDailyShippingSummary(pool);
+    res.json({ ok: true, message: result.message });
   } catch (err) {
     console.error('[Marketplace] Test e-posta hatası:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -483,8 +489,10 @@ async function upsertOrder(db, order) {
           customer_name, order_date, total_price, currency,
           cargo_status, cargo_company, cargo_tracking_number, cargo_cost, cargo_desi,
           commission_amount, commission_rate,
-          is_returned, return_reason, return_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+          is_returned, return_reason, return_date,
+          kargoda_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+               CASE WHEN $4 = 'kargoda' THEN NOW() ELSE NULL END)
        ON CONFLICT (platform, order_id) DO UPDATE SET
          -- Terminal durumlar (teslim_edildi, iade_onaylandi) bekliyor/kargoda'ya düşürülemez
          status = CASE
@@ -498,6 +506,12 @@ async function upsertOrder(db, order) {
                 AND EXCLUDED.status IN ('bekliyor','kargoda','iptal')
            THEN marketplace_orders.status_tr
            ELSE EXCLUDED.status_tr
+         END,
+         -- kargoda_at: yalnızca bekliyor→kargoda geçişinde set et, sonradan değiştirme
+         kargoda_at = CASE
+           WHEN EXCLUDED.status = 'kargoda' AND marketplace_orders.status <> 'kargoda'
+           THEN NOW()
+           ELSE marketplace_orders.kargoda_at
          END,
          raw_status           = EXCLUDED.raw_status,
          customer_name        = EXCLUDED.customer_name,

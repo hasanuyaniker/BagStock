@@ -98,10 +98,24 @@ async function runMigrations() {
     const extraCols = [
       `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS raw_status VARCHAR(50)`,
       `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS cargo_tracking_link VARCHAR(500)`,
-      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100)`
+      `ALTER TABLE marketplace_order_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100)`,
+      // kargoda_at: sipariş ilk kez kargoda durumuna geçtiğinde set edilir
+      `ALTER TABLE marketplace_orders ADD COLUMN IF NOT EXISTS kargoda_at TIMESTAMPTZ`
     ];
     for (const sql of extraCols) {
       await pool.query(sql);
+    }
+
+    // Mevcut kargoda siparişleri için kargoda_at → updated_at kullan (yaklaşım)
+    const kargodaAtFlag = await pool.query(`SELECT value FROM app_settings WHERE key = 'init_kargoda_at_v1'`);
+    if (kargodaAtFlag.rows.length === 0) {
+      const r = await pool.query(`
+        UPDATE marketplace_orders
+        SET kargoda_at = updated_at
+        WHERE status = 'kargoda' AND kargoda_at IS NULL
+      `);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('init_kargoda_at_v1','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} kargoda siparişine kargoda_at set edildi`);
     }
 
     // UnDelivered siparişleri 'iade' yerine 'kargoda' olarak düzelt (tek seferlik)
@@ -451,40 +465,39 @@ async function runBackgroundMigrations(appPool) {
       if (backfillResult.rowCount > 0) console.log(`✓ [BG] ${backfillResult.rowCount} marketplace satış kaydı eklendi`);
     }
 
-    // 2. Komisyon oranı düzeltmesi v2 — ürün satır oranlarının basit ortalaması
-    // (v1'deki "tutar bazlı" hesap yanlıştı: 43/3748×100 = 1.1% çıkıyordu)
-    const commRateFixV2 = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_items_v2'`);
-    if (commRateFixV2.rows.length === 0) {
-      // Adım 1: Item-level oran varsa order-level'i güncelle
+    // 2. Komisyon oranı düzeltmesi v3 — ürün satır oranlarının basit ortalaması
+    // v1: yanlış tutar-bazlı (1.1% çıkıyordu), v2: aynı mantık, v3: kesin düzeltme
+    const commRateFixV3 = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_commission_rate_from_items_v3'`);
+    if (commRateFixV3.rows.length === 0) {
+      // Adım 1: Item-level oran varsa (Trendyol API'den gelmiş 21.5% gibi değerler)
+      // order-level'i bu oranların ortalamasıyla güncelle
       const r = await appPool.query(`
         UPDATE marketplace_orders mo
         SET commission_rate = sub.avg_rate, updated_at = NOW()
         FROM (
           SELECT marketplace_order_id, ROUND(AVG(commission_rate)::numeric, 2) AS avg_rate
           FROM marketplace_order_items
-          WHERE commission_rate IS NOT NULL AND commission_rate > 0
+          WHERE commission_rate IS NOT NULL AND commission_rate > 5
           GROUP BY marketplace_order_id
         ) sub
         WHERE mo.id = sub.marketplace_order_id
-          AND (mo.commission_rate IS NULL
+          AND (mo.commission_rate IS NULL OR mo.commission_rate < 5
                OR ABS(mo.commission_rate - sub.avg_rate) > 1)
       `);
-      // Adım 2: Item-level oran yoksa, tutar-bazlı hesapla gelen yanlış oranları
-      // (< 5%) sıfırla — UI'da "—" gösterilsin, yanlış bilgi gösterilmesin
+      // Adım 2: Item-level oran yoksa ve order'da < 5% sahte oran varsa → NULL
       const r2 = await appPool.query(`
         UPDATE marketplace_orders mo
         SET commission_rate = NULL, updated_at = NOW()
-        WHERE mo.commission_rate IS NOT NULL
-          AND mo.commission_rate < 5
+        WHERE mo.commission_rate IS NOT NULL AND mo.commission_rate < 5
           AND NOT EXISTS (
             SELECT 1 FROM marketplace_order_items moi
             WHERE moi.marketplace_order_id = mo.id
-              AND moi.commission_rate IS NOT NULL AND moi.commission_rate > 0
+              AND moi.commission_rate IS NOT NULL AND moi.commission_rate > 5
           )
       `);
-      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_items_v2','true') ON CONFLICT (key) DO NOTHING`);
-      if (r.rowCount > 0)  console.log(`✓ [BG] ${r.rowCount} komisyon oranı ürün ortalamasından düzeltildi`);
-      if (r2.rowCount > 0) console.log(`✓ [BG] ${r2.rowCount} hatalı komisyon oranı (< %%5) sıfırlandı`);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_commission_rate_from_items_v3','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0)  console.log(`✓ [BG] ${r.rowCount} komisyon oranı ürün ortalamasından düzeltildi (v3)`);
+      if (r2.rowCount > 0) console.log(`✓ [BG] ${r2.rowCount} hatalı komisyon oranı sıfırlandı (v3)`);
     }
 
     // 3. Tek seferlik test e-postası — #11183935655
