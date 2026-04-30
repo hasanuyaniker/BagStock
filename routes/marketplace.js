@@ -127,16 +127,42 @@ router.get('/platform-stats', async (req, res) => {
     const days = parseInt(req.query.days) || 30;
 
     const result = await pool.query(`
-      SELECT
-        platform,
-        COUNT(*) AS order_count,
-        COALESCE(SUM(total_price), 0) AS total_revenue,
-        COALESCE(SUM(commission_amount), 0) AS total_commission,
-        COALESCE(AVG(cargo_desi), 0) AS avg_desi
-      FROM marketplace_orders
-      WHERE
-        DATE(order_date) >= CURRENT_DATE - INTERVAL '${days} days'
-        AND status NOT IN ('iptal', 'iade')
+      WITH mp_data AS (
+        -- API üzerinden senkronize edilen marketplace siparişleri
+        SELECT platform,
+               COUNT(*) AS order_count,
+               COALESCE(SUM(total_price), 0) AS total_revenue,
+               COALESCE(SUM(commission_amount), 0) AS total_commission,
+               COALESCE(AVG(cargo_desi), 0) AS avg_desi
+        FROM marketplace_orders
+        WHERE DATE(order_date) >= CURRENT_DATE - INTERVAL '${days} days'
+          AND status NOT IN ('iptal', 'iade')
+        GROUP BY platform
+      ),
+      manual_data AS (
+        -- Manuel girilen platform satışları (API sync ile gelen kayıtlar hariç)
+        SELECT COALESCE(s.marketplace, 'normal') AS platform,
+               COUNT(*) AS order_count,
+               0::numeric AS total_revenue,
+               0::numeric AS total_commission,
+               0::numeric AS avg_desi
+        FROM sales s
+        WHERE DATE(s.sale_date) >= CURRENT_DATE - INTERVAL '${days} days'
+          AND s.quantity_change < 0
+          AND COALESCE(s.marketplace, 'normal') != 'normal'
+          AND (s.note IS NULL OR s.note NOT LIKE 'Marketplace #%')
+        GROUP BY s.marketplace
+      )
+      SELECT platform,
+             SUM(order_count)      AS order_count,
+             SUM(total_revenue)    AS total_revenue,
+             SUM(total_commission) AS total_commission,
+             COALESCE(AVG(NULLIF(avg_desi, 0)), 0) AS avg_desi
+      FROM (
+        SELECT * FROM mp_data
+        UNION ALL
+        SELECT * FROM manual_data
+      ) combined
       GROUP BY platform
     `);
 

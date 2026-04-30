@@ -2145,7 +2145,7 @@ html {
   .platform-chart-card { min-width: unset; }
 }
 
-/* ========== MOBİL DASHBOARD OPTİMİZASYONU (6.2" telefon) ========== */
+/* ========== MOBİL DASHBOARD OPTİMİZASYONU (6.2" telefon — dikey) ========== */
 @media (max-width: 768px) {
   /* KPI grid: 3 sütun — 5 kart 3+2 düzeninde */
   .kpi-grid {
@@ -2171,36 +2171,49 @@ html {
     flex-wrap: nowrap !important;
     gap: 8px !important;
     margin-top: 6px !important;
-    overflow-x: auto;
+    overflow-x: hidden;
   }
   .platform-chart-card {
     flex: 1 1 0 !important;
     min-width: 0 !important;
     padding: 10px 8px !important;
     border-radius: 10px !important;
+    overflow: hidden;
   }
+  /* Başlık: taşarsa kırp */
   .platform-chart-card h4 {
-    font-size: 10px !important;
+    font-size: 9px !important;
     margin-bottom: 8px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .platform-chart-wrapper {
     width: 90px !important;
     height: 90px !important;
     margin-bottom: 8px !important;
   }
-  .platform-chart-center .center-value {
-    font-size: 14px !important;
-  }
-  .platform-chart-center .center-label {
-    font-size: 9px !important;
+  .platform-chart-center .center-value { font-size: 13px !important; }
+  .platform-chart-center .center-label { font-size: 9px !important; }
+
+  /* Legend: 2 sütun (Platform + Adet) — Ciro ve % gizle */
+  .platform-legend th:nth-child(3),
+  .platform-legend th:nth-child(4),
+  .platform-legend td:nth-child(3),
+  .platform-legend td:nth-child(4) {
+    display: none !important;
   }
   .platform-legend th,
   .platform-legend td {
-    font-size: 10px !important;
+    font-size: 9px !important;
     padding: 3px 2px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 80px;
   }
 
-  /* Alt grafik satırı: daha küçük */
+  /* Stok + Tip grafik kartları: kompakt ama stok scrool etmeye devam */
   .charts-row {
     gap: 8px !important;
     margin-bottom: 10px !important;
@@ -2212,12 +2225,19 @@ html {
     font-size: 11px !important;
     margin-bottom: 8px !important;
   }
-  .chart-wrapper canvas {
-    max-height: 180px !important;
+  /* Stok grafiği wrapper: mobilde daha büyük görünüm */
+  .chart-wrapper-scroll {
+    height: 500px !important;
+    max-height: 520px !important;
+  }
+  /* Tip dağılımı (donut): sabit yükseklik */
+  .chart-wrapper:not(.chart-wrapper-scroll) {
+    height: 200px !important;
+    max-height: 200px !important;
   }
 }
 
-/* ========== YATAY MOBİL: DASHBOARD SÜPER KOMPAKT ========== */
+/* ========== MOBİL YATAY: DASHBOARD SÜPER KOMPAKT ========== */
 @media (max-width: 900px) and (orientation: landscape) {
   /* KPI: 5 sütun yatayda */
   .kpi-grid {
@@ -2225,35 +2245,53 @@ html {
     gap: 6px !important;
     margin-bottom: 8px !important;
   }
-  .kpi-card {
-    padding: 8px 6px !important;
-  }
+  .kpi-card { padding: 8px 6px !important; }
   .kpi-label { font-size: 8px !important; }
   .kpi-value { font-size: 14px !important; }
 
-  /* Platform grafikler: yatayda yan yana, çok küçük */
+  /* Platform grafikler: yan yana, küçük */
   .platform-charts-row {
     flex-direction: row !important;
     flex-wrap: nowrap !important;
     gap: 6px !important;
     margin-top: 4px !important;
+    overflow-x: hidden;
   }
   .platform-chart-card {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
     padding: 8px 6px !important;
+    overflow: hidden;
   }
   .platform-chart-card h4 {
-    font-size: 9px !important;
+    font-size: 8px !important;
     margin-bottom: 6px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .platform-chart-wrapper {
     width: 70px !important;
     height: 70px !important;
     margin-bottom: 6px !important;
   }
-  .platform-chart-center .center-value { font-size: 12px !important; }
+  .platform-chart-center .center-value { font-size: 11px !important; }
   .platform-chart-center .center-label { font-size: 8px !important; }
 
-  /* Alt grafikler: gizle ya da çok kompakt — yatayda alan kısıtlı */
+  /* Legend: landscape'te de 2 sütun */
+  .platform-legend th:nth-child(3),
+  .platform-legend th:nth-child(4),
+  .platform-legend td:nth-child(3),
+  .platform-legend td:nth-child(4) {
+    display: none !important;
+  }
+  .platform-legend th,
+  .platform-legend td {
+    font-size: 8px !important;
+    padding: 2px 2px !important;
+  }
+
+  /* Stok + Tip grafikler: yatayda da görünür */
   .charts-row {
     grid-template-columns: 1fr 1fr !important;
     gap: 6px !important;
@@ -2261,7 +2299,15 @@ html {
   }
   .chart-card { padding: 8px !important; }
   .chart-card h3 { font-size: 10px !important; margin-bottom: 6px !important; }
-  .chart-wrapper canvas { max-height: 120px !important; }
+  /* Stok grafiği yatayda biraz daha kısa — alan kısıtlı */
+  .chart-wrapper-scroll {
+    height: 260px !important;
+    max-height: 280px !important;
+  }
+  .chart-wrapper:not(.chart-wrapper-scroll) {
+    height: 140px !important;
+    max-height: 140px !important;
+  }
 }
 
 /* ── API Settings Panel ───────────────────────────────────────── */

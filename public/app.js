@@ -260,9 +260,11 @@ function renderStockChart(data) {
   });
 
   // Her bar için yeterli yükseklik — çakışmayı önler
-  const perBar = 36;
+  // Mobilde daha büyük bar yüksekliği (okunabilirlik)
+  const isMobile = window.innerWidth <= 768;
+  const perBar = isMobile ? 44 : 36;
   const wantH  = Math.max(200, sorted.length * perBar + 50);
-  const capH   = 400;
+  const capH   = isMobile ? 520 : 400;
 
   // Wrapper: kaydırmalı kap
   if (wrapper) {
@@ -2783,10 +2785,12 @@ function renderPlatformLegend(tableId, qtyData, totalCount, totalRevenue, revDat
 
   const rows = platforms.map(p => `
     <tr>
-      <td><span class="platform-dot" style="background:${p.color};"></span>${p.label}</td>
-      <td style="text-align:right;">${p.count} adet</td>
-      <td style="text-align:right;color:#6b7280;">%${p.qtyPct.toFixed(1).replace('.',',')}</td>
-      <td style="text-align:right;font-weight:600;">${formatCurrency(p.amount)}</td>
+      <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px;">
+        <span class="platform-dot" style="background:${p.color};"></span>${p.label}
+      </td>
+      <td style="text-align:right;white-space:nowrap;">${p.count}</td>
+      <td style="text-align:right;color:#6b7280;white-space:nowrap;">%${p.qtyPct.toFixed(1).replace('.',',')}</td>
+      <td style="text-align:right;font-weight:600;white-space:nowrap;">${formatCurrency(p.amount)}</td>
     </tr>
   `).join('');
 
@@ -2795,7 +2799,7 @@ function renderPlatformLegend(tableId, qtyData, totalCount, totalRevenue, revDat
   table.innerHTML = `
     <thead>
       <tr>
-        <th>Platform</th>
+        <th style="overflow:hidden;">Platform</th>
         <th style="text-align:right;">Adet</th>
         <th style="text-align:right;">%</th>
         <th style="text-align:right;">Ciro</th>
@@ -2804,8 +2808,8 @@ function renderPlatformLegend(tableId, qtyData, totalCount, totalRevenue, revDat
     <tbody>${rows}</tbody>
     <tfoot>
       <tr class="total-row">
-        <td><strong>TOPLAM</strong></td>
-        <td style="text-align:right;"><strong>${totalCount} adet</strong></td>
+        <td><strong>Toplam</strong></td>
+        <td style="text-align:right;"><strong>${totalCount}</strong></td>
         <td style="text-align:right;color:#6b7280;">%100</td>
         <td style="text-align:right;font-weight:800;">${totalRev}</td>
       </tr>
