@@ -534,6 +534,23 @@ async function runBackgroundMigrations(appPool) {
       if (r.rowCount > 0) console.log(`✓ [BG] Anne-Siyah satış platform'u hepsiburada olarak güncellendi (${r.rowCount} kayıt)`);
     }
 
+    // 4b. HF00106SYH barkodlu ürün — barkod bazlı platform düzeltmesi (v2, kesin eşleşme)
+    const hf00106Fix = await appPool.query(`SELECT value FROM app_settings WHERE key = 'fix_hf00106syh_platform_20260430_v2'`);
+    if (hf00106Fix.rows.length === 0) {
+      const r = await appPool.query(`
+        UPDATE sales s
+        SET marketplace = 'hepsiburada', updated_at = NOW()
+        FROM products p
+        WHERE s.product_id = p.id
+          AND s.marketplace = 'normal'
+          AND DATE(s.sale_date) = '2026-04-30'
+          AND (p.barcode = 'HF00106SYH' OR p.barcode2 = 'HF00106SYH' OR p.barcode3 = 'HF00106SYH')
+          AND s.quantity_change < 0
+      `);
+      await appPool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_hf00106syh_platform_20260430_v2','true') ON CONFLICT (key) DO NOTHING`);
+      console.log(`✓ [BG] HF00106SYH barkod platform düzeltmesi: ${r.rowCount} kayıt güncellendi`);
+    }
+
     // 5. Tek seferlik test e-postası — #11183935655
     const emailFlag = await appPool.query(`SELECT value FROM app_settings WHERE key = 'email_sent_11183935655'`);
     if (emailFlag.rows.length === 0) {

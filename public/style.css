@@ -2145,6 +2145,125 @@ html {
   .platform-chart-card { min-width: unset; }
 }
 
+/* ========== MOBİL DASHBOARD OPTİMİZASYONU (6.2" telefon) ========== */
+@media (max-width: 768px) {
+  /* KPI grid: 3 sütun — 5 kart 3+2 düzeninde */
+  .kpi-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 7px !important;
+    margin-bottom: 10px !important;
+  }
+  .kpi-card {
+    padding: 10px 8px !important;
+    border-radius: 10px !important;
+  }
+  .kpi-label { font-size: 9px !important; margin-bottom: 3px !important; }
+  .kpi-value { font-size: 16px !important; }
+
+  /* Platform grafik bölümü: daha kompakt */
+  #platformPerfSection h3 {
+    font-size: 11px !important;
+    margin-bottom: 6px !important;
+    margin-top: 4px !important;
+  }
+  .platform-charts-row {
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    margin-top: 6px !important;
+    overflow-x: auto;
+  }
+  .platform-chart-card {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    padding: 10px 8px !important;
+    border-radius: 10px !important;
+  }
+  .platform-chart-card h4 {
+    font-size: 10px !important;
+    margin-bottom: 8px !important;
+  }
+  .platform-chart-wrapper {
+    width: 90px !important;
+    height: 90px !important;
+    margin-bottom: 8px !important;
+  }
+  .platform-chart-center .center-value {
+    font-size: 14px !important;
+  }
+  .platform-chart-center .center-label {
+    font-size: 9px !important;
+  }
+  .platform-legend th,
+  .platform-legend td {
+    font-size: 10px !important;
+    padding: 3px 2px !important;
+  }
+
+  /* Alt grafik satırı: daha küçük */
+  .charts-row {
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+  .chart-card {
+    padding: 10px !important;
+  }
+  .chart-card h3 {
+    font-size: 11px !important;
+    margin-bottom: 8px !important;
+  }
+  .chart-wrapper canvas {
+    max-height: 180px !important;
+  }
+}
+
+/* ========== YATAY MOBİL: DASHBOARD SÜPER KOMPAKT ========== */
+@media (max-width: 900px) and (orientation: landscape) {
+  /* KPI: 5 sütun yatayda */
+  .kpi-grid {
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 6px !important;
+    margin-bottom: 8px !important;
+  }
+  .kpi-card {
+    padding: 8px 6px !important;
+  }
+  .kpi-label { font-size: 8px !important; }
+  .kpi-value { font-size: 14px !important; }
+
+  /* Platform grafikler: yatayda yan yana, çok küçük */
+  .platform-charts-row {
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    margin-top: 4px !important;
+  }
+  .platform-chart-card {
+    padding: 8px 6px !important;
+  }
+  .platform-chart-card h4 {
+    font-size: 9px !important;
+    margin-bottom: 6px !important;
+  }
+  .platform-chart-wrapper {
+    width: 70px !important;
+    height: 70px !important;
+    margin-bottom: 6px !important;
+  }
+  .platform-chart-center .center-value { font-size: 12px !important; }
+  .platform-chart-center .center-label { font-size: 8px !important; }
+
+  /* Alt grafikler: gizle ya da çok kompakt — yatayda alan kısıtlı */
+  .charts-row {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+    margin-bottom: 8px !important;
+  }
+  .chart-card { padding: 8px !important; }
+  .chart-card h3 { font-size: 10px !important; margin-bottom: 6px !important; }
+  .chart-wrapper canvas { max-height: 120px !important; }
+}
+
 /* ── API Settings Panel ───────────────────────────────────────── */
 #panel-apiintegration .settings-card {
   margin-bottom: 16px;

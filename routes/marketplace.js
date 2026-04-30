@@ -140,7 +140,16 @@ router.get('/platform-stats', async (req, res) => {
       GROUP BY platform
     `);
 
-    const rows = result.rows;
+    // Her iki platformu her zaman dahil et (veri yoksa 0 göster)
+    const KNOWN_PLATFORMS = ['trendyol', 'hepsiburada'];
+    const rowMap = {};
+    result.rows.forEach(r => { rowMap[r.platform] = r; });
+    // Bilinen platformları ekle, DB'de olmayan platformları 0 ile doldur
+    result.rows.forEach(r => { if (!KNOWN_PLATFORMS.includes(r.platform)) KNOWN_PLATFORMS.push(r.platform); });
+    const rows = KNOWN_PLATFORMS.map(p => rowMap[p] || {
+      platform: p, order_count: 0, total_revenue: 0, total_commission: 0, avg_desi: 0
+    });
+
     const totalCount   = rows.reduce((s, r) => s + parseInt(r.order_count),     0);
     const totalRevenue = rows.reduce((s, r) => s + parseFloat(r.total_revenue), 0);
 

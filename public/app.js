@@ -2636,8 +2636,8 @@ async function loadPlatformStats() {
     if (!res || !res.ok) return;
     const data = await res.json();
 
-    if (!data.byQuantity || data.byQuantity.length === 0) {
-      // Sipariş yoksa bölümü gizle
+    if (!data.byQuantity || data.totalCount === 0) {
+      // Hiç sipariş yoksa bölümü gizle
       const sec = document.getElementById('platformPerfSection');
       if (sec) sec.style.display = 'none';
       return;
