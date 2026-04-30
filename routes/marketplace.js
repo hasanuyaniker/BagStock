@@ -255,8 +255,96 @@ router.get('/status-counts', async (req, res) => {
       }
     });
 
+    // Manuel satışları da teslim_edildi olarak ekle
+    const manConditions = [`s.quantity_change < 0`, `COALESCE(s.marketplace,'normal') != 'normal'`, `(s.note IS NULL OR s.note NOT LIKE 'Marketplace #%')`];
+    const manParams = [];
+    if (platform) manConditions.push(`s.marketplace = $${manParams.push(platform)}`);
+    if (from)     manConditions.push(`DATE(s.sale_date) >= $${manParams.push(from)}`);
+    if (to)       manConditions.push(`DATE(s.sale_date) <= $${manParams.push(to)}`);
+    const manWhere = 'WHERE ' + manConditions.join(' AND ');
+
+    const manResult = await pool.query(
+      `SELECT COALESCE(s.marketplace,'normal') AS platform, COUNT(*) AS cnt
+       FROM sales s ${manWhere} GROUP BY s.marketplace`, manParams
+    );
+    manResult.rows.forEach(r => {
+      if (!byPlatform[r.platform]) byPlatform[r.platform] = emptyGroup();
+      const n = parseInt(r.cnt);
+      byPlatform[r.platform].teslim_edildi += n;
+      total.teslim_edildi += n;
+    });
+
     res.json({ byPlatform, total });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/marketplace/manual-orders — sales tablosundaki manuel platform satışları ──
+router.get('/manual-orders', async (req, res) => {
+  try {
+    const { platform, status, from, to, limit = 500, offset = 0 } = req.query;
+
+    // Manuel satışlar sadece teslim_edildi statüsündedir
+    if (status && status !== 'teslim_edildi') {
+      return res.json({ total: 0, orders: [] });
+    }
+
+    const params = [];
+    const conditions = [
+      `s.quantity_change < 0`,
+      `COALESCE(s.marketplace, 'normal') != 'normal'`,
+      `(s.note IS NULL OR s.note NOT LIKE 'Marketplace #%')`
+    ];
+    if (platform) conditions.push(`COALESCE(s.marketplace,'normal') = $${params.push(platform)}`);
+    if (from)     conditions.push(`DATE(s.sale_date) >= $${params.push(from)}`);
+    if (to)       conditions.push(`DATE(s.sale_date) <= $${params.push(to)}`);
+    const where = 'WHERE ' + conditions.join(' AND ');
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM sales s JOIN products p ON p.id = s.product_id ${where}`, params
+    );
+
+    const saleParams = [...params, Number(limit), Number(offset)];
+    const result = await pool.query(`
+      SELECT s.id, COALESCE(s.marketplace,'normal') AS platform,
+             s.sale_date, s.note,
+             ABS(s.quantity_change) AS quantity,
+             p.id AS product_db_id, p.name AS p_name,
+             p.barcode, p.color,
+             ABS(s.quantity_change) * COALESCE(p.cost_price, 0) AS total_price
+      FROM sales s
+      JOIN products p ON p.id = s.product_id
+      ${where}
+      ORDER BY s.sale_date DESC, s.id DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, saleParams);
+
+    const orders = result.rows.map(r => ({
+      order_id:      'manual-' + r.id,
+      order_number:  'MAN-' + r.id,
+      platform:      r.platform,
+      status:        'teslim_edildi',
+      status_tr:     'Manuel Satış',
+      raw_status:    'Manuel Satış',
+      order_date:    r.sale_date,
+      total_price:   parseFloat(r.total_price) || 0,
+      stock_deducted: true,
+      _source:       'manual',
+      note:          r.note,
+      items: [{
+        barcode:       r.barcode,
+        product_id:    r.product_db_id,
+        product_name:  r.p_name,
+        p_name:        r.p_name,
+        quantity:      parseInt(r.quantity),
+        stock_deducted: true
+      }]
+    }));
+
+    res.json({ total: parseInt(countResult.rows[0].count), orders });
+  } catch (err) {
+    console.error('[Marketplace] Manuel sipariş hatası:', err);
     res.status(500).json({ error: err.message });
   }
 });

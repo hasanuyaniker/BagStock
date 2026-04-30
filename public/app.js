@@ -2129,13 +2129,33 @@ async function loadOrders(page = 0) {
   if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#6b7280;">Yükleniyor...</td></tr>';
 
   try {
-    const res = await apiFetch(`/api/marketplace/orders?${params}`);
+    // Marketplace siparişleri + manuel satışları paralel çek
+    const manualParams = new URLSearchParams();
+    if (platform) manualParams.set('platform', platform);
+    if (status)   manualParams.set('status', status);
+    if (from)     manualParams.set('from', from);
+    if (to)       manualParams.set('to', to);
+
+    const [res, manRes] = await Promise.all([
+      apiFetch(`/api/marketplace/orders?${params}`),
+      apiFetch(`/api/marketplace/manual-orders?${manualParams}`)
+    ]);
     if (!res) return;
-    const data = await res.json();
-    const orders = data.orders || [];
-    renderOrders(orders, data.total || 0);
-    renderOrdersPagination(data.total || 0, page);
-    // Durum kartları için tüm sayfalardaki sayımı al (filtre aynı)
+    const data    = await res.json();
+    const manData = manRes ? await manRes.json().catch(() => ({ orders: [], total: 0 })) : { orders: [], total: 0 };
+
+    // Birleştir ve tarihe göre sırala (sayfalama: marketplace_orders önce, manuel sonra)
+    const mpOrders  = data.orders || [];
+    const manOrders = manData.orders || [];
+    // Sayfa bazlı birleşim: bu sayfanın mp siparişleri + ilk sayfadaysa manuel satışlar
+    const orders = page === 0
+      ? [...mpOrders, ...manOrders].sort((a, b) => new Date(b.order_date) - new Date(a.order_date))
+      : mpOrders;
+
+    const total = (data.total || 0) + (manData.total || 0);
+
+    renderOrders(orders, total);
+    renderOrdersPagination(data.total || 0, page); // sayfalama mp siparişlere göre
     loadStatusCounts(platform, status, from, to);
     updateStatusCounters(orders);
   } catch (err) {
@@ -2199,10 +2219,16 @@ function renderOrdersSummaryCards(data) {
       </div>`).join('');
   }
 
-  const platforms = [
-    { key: 'trendyol',    label: '🟠 Trendyol' },
-    { key: 'hepsiburada', label: '🔴 Hepsiburada' }
-  ].filter(p => byPlatform[p.key]);
+  const PLATFORM_CARD_LABELS = {
+    trendyol:    '🟠 Trendyol',
+    hepsiburada: '🔴 Hepsiburada',
+    dolap:       '🟣 Dolap',
+    amazon:      '🔵 Amazon',
+    pttavm:      '🟢 PTT AVM'
+  };
+  const platforms = Object.keys(byPlatform)
+    .filter(k => byPlatform[k])
+    .map(k => ({ key: k, label: PLATFORM_CARD_LABELS[k] || ('📦 ' + k) }));
 
   if (platforms.length <= 1) {
     // Tek platform veya filtreli görünüm: tek satır
@@ -2269,7 +2295,10 @@ function renderOrders(orders, total) {
 
   const platformBadge = {
     trendyol:    '<span class="mp-badge trendyol" style="white-space:nowrap;">🟠 TY</span>',
-    hepsiburada: '<span class="mp-badge hepsiburada" style="white-space:nowrap;">🔴 HB</span>'
+    hepsiburada: '<span class="mp-badge hepsiburada" style="white-space:nowrap;">🔴 HB</span>',
+    dolap:       '<span class="mp-badge" style="background:#7c3aed;color:#fff;white-space:nowrap;">🟣 Dolap</span>',
+    amazon:      '<span class="mp-badge" style="background:#1a73e8;color:#fff;white-space:nowrap;">🔵 AMZ</span>',
+    pttavm:      '<span class="mp-badge" style="background:#1ec87b;color:#fff;white-space:nowrap;">🟢 PTT</span>'
   };
 
   // Toplamlar
@@ -2334,8 +2363,14 @@ function renderOrders(orders, total) {
     const statusLabel = order.status_tr || order.raw_status || order.status || '';
     const statusHtml  = statusBadge(order.status);
 
-    return `<tr title="${escHtml(statusLabel)}">
-      <td class="col-platform">${platformBadge[order.platform] || escHtml(order.platform)}</td>
+    // Manuel satış satırı farklı renkle işaretle
+    const rowStyle = order._source === 'manual' ? ' style="background:rgba(124,58,237,0.04);"' : '';
+    const manualTag = order._source === 'manual'
+      ? `<span style="font-size:9px;background:#7c3aed;color:#fff;border-radius:3px;padding:1px 4px;margin-left:3px;">MAN</span>`
+      : '';
+
+    return `<tr title="${escHtml(statusLabel)}"${rowStyle}>
+      <td class="col-platform">${platformBadge[order.platform] || escHtml(order.platform)}${manualTag}</td>
       <td class="col-order-no" style="font-family:monospace;font-size:11px;">${escHtml(order.order_number || order.order_id)}</td>
       <td class="col-date" style="font-size:11px;">${dateStr}</td>
       <td class="col-status">${statusHtml}</td>
@@ -2617,11 +2652,12 @@ async function clearHBCredentials() {
 // ==================== PLATFORM PERFORMANS GRAFİKLERİ ====================
 
 const PLATFORM_COLORS = {
-  trendyol:    '#F27A1A',
-  hepsiburada: '#FF6B00',
-  dolap:       '#7c3aed',
-  amazon:      '#f59e0b',
-  pttavm:      '#dc2626'
+  trendyol:    '#F27A1A',   // Trendyol turuncu (marka rengi)
+  hepsiburada: '#E61E28',   // Hepsiburada kırmızı (marka rengi)
+  dolap:       '#7c3aed',   // Dolap mor
+  amazon:      '#1a73e8',   // Amazon mavi
+  pttavm:      '#1ec87b',   // PTT AVM yeşil
+  normal:      '#64748b'    // Manuel/normal gri
 };
 
 const PLATFORM_LABELS = {
@@ -2629,7 +2665,8 @@ const PLATFORM_LABELS = {
   hepsiburada: 'Hepsiburada',
   dolap:       'Dolap',
   amazon:      'Amazon',
-  pttavm:      'PTT AVM'
+  pttavm:      'PTT AVM',
+  normal:      'Normal'
 };
 
 async function loadPlatformStats() {
