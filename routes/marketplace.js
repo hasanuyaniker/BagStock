@@ -606,6 +606,10 @@ async function upsertOrder(db, order) {
     }
 
     // Siparişi upsert et (tüm yeni alanlarla)
+    // kargoda_at: yeni sipariş kargoda ise şimdiki zamanı JS'de hesapla ($21)
+    // $4'ü CASE WHEN içinde reuse etmek PostgreSQL'de tip çakışmasına yol açar
+    const kargodaAtInsert = order.status === 'kargoda' ? new Date().toISOString() : null;
+
     const orderResult = await client.query(
       `INSERT INTO marketplace_orders
          (platform, order_id, order_number, status, status_tr, raw_status,
@@ -614,8 +618,7 @@ async function upsertOrder(db, order) {
           commission_amount, commission_rate,
           is_returned, return_reason, return_date,
           kargoda_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               CASE WHEN $4 = 'kargoda' THEN NOW() ELSE NULL END)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (platform, order_id) DO UPDATE SET
          -- Terminal durumlar (teslim_edildi, iade_onaylandi) bekliyor/kargoda'ya düşürülemez
          status = CASE
@@ -665,7 +668,8 @@ async function upsertOrder(db, order) {
         order.commission_rate   || null,
         order.is_returned || false,
         order.return_reason  || null,
-        order.return_date    || null
+        order.return_date    || null,
+        kargodaAtInsert                           // $21
       ]
     );
 
