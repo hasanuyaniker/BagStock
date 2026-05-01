@@ -107,8 +107,8 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     console.log(`[HepsiB] Status=${status} çekiliyor...`);
 
     while (hasMore) {
+      // merchantId URL PATH'inde gönderilir, query param değil
       const params = new URLSearchParams({
-        merchantId,                          // HB API zorunlu parametre
         status,
         beginDate: formatHBDate(startDate),
         endDate: formatHBDate(endDate),
@@ -116,7 +116,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
         offset: String(offset)
       });
 
-      const url = `${HB_BASE}/api/orders?${params}`;
+      const url = `${HB_BASE}/api/orders/merchantid/${merchantId}?${params}`;
       console.log(`[HepsiB] GET ${url}`);
       let data;
 
