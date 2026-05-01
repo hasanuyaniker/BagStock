@@ -197,8 +197,9 @@ router.get('/marketplace-credentials', authMiddleware, async (req, res) => {
       },
       hepsiburada: {
         merchantId: creds.hepsiburada?.merchantId || '',
-        apiKey: creds.hepsiburada?.apiKey ? '***' + (creds.hepsiburada.apiKey.slice(-4) || '') : '',
-        configured: !!(creds.hepsiburada?.merchantId && creds.hepsiburada?.apiKey)
+        username:   creds.hepsiburada?.username   || '',
+        apiKey:     creds.hepsiburada?.apiKey ? '***' + (creds.hepsiburada.apiKey.slice(-4) || '') : '',
+        configured: !!(creds.hepsiburada?.merchantId && creds.hepsiburada?.username && creds.hepsiburada?.apiKey)
       }
     };
     res.json(masked);
@@ -211,7 +212,7 @@ router.get('/marketplace-credentials', authMiddleware, async (req, res) => {
 // Body: { platform: 'trendyol'|'hepsiburada', ...fields }
 router.post('/marketplace-credentials', authMiddleware, async (req, res) => {
   try {
-    const { platform, supplierId, apiKey, apiSecret, merchantId } = req.body;
+    const { platform, supplierId, apiKey, apiSecret, merchantId, username } = req.body;
     if (!['trendyol', 'hepsiburada'].includes(platform)) {
       return res.status(400).json({ error: 'Geçersiz platform' });
     }
@@ -238,6 +239,7 @@ router.post('/marketplace-credentials', authMiddleware, async (req, res) => {
     } else if (platform === 'hepsiburada') {
       if (!creds.hepsiburada) creds.hepsiburada = {};
       if (merchantId !== undefined) creds.hepsiburada.merchantId = merchantId;
+      if (username  !== undefined) creds.hepsiburada.username   = username;
       if (apiKey !== undefined && !apiKey.startsWith('***')) {
         creds.hepsiburada.apiKey = apiKey;
       }

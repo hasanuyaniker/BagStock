@@ -47,8 +47,15 @@ const HB_DEDUCT_STATUSES = new Set(['IN_CARGO', 'AT_CARGO', 'IN_TRANSIT', 'DELIV
 // İade statüleri
 const HB_RETURN_STATUSES = new Set(['RETURNED', 'RETURN_ACCEPTED', 'RETURN_IN_CARGO']);
 
-function makeHBHeaders(merchantId, apiKey) {
-  const credentials = Buffer.from(`${merchantId}:${apiKey}`).toString('base64');
+/**
+ * Entegratör servis anahtarı auth:
+ * - username: entegratör kullanıcı adı
+ * - apiKey:   servis anahtarı (şifre)
+ * Fallback: merchantId:apiKey (eski format uyumluluğu)
+ */
+function makeHBHeaders(merchantId, apiKey, username) {
+  const user = username || merchantId;   // username yoksa merchantId kullan (geriye dönük uyumluluk)
+  const credentials = Buffer.from(`${user}:${apiKey}`).toString('base64');
   return {
     'Authorization': `Basic ${credentials}`,
     'Content-Type': 'application/json',
@@ -58,17 +65,17 @@ function makeHBHeaders(merchantId, apiKey) {
 
 /**
  * Son N günün siparişlerini çeker — tüm sayfalar, tüm statüler
- * @param {object} creds - { merchantId, apiKey }
+ * @param {object} creds - { merchantId, username, apiKey }
  * @param {number} days  - Kaç gün geriye git (varsayılan: 30)
  * @returns {Array}      - Normalleştirilmiş sipariş listesi
  */
 async function fetchHepsiburadaOrders(creds, days = 30) {
-  const { merchantId, apiKey } = creds;
+  const { merchantId, username, apiKey } = creds;
   if (!merchantId || !apiKey) {
     throw new Error('Hepsiburada kimlik bilgileri eksik (merchantId, apiKey)');
   }
 
-  const headers = makeHBHeaders(merchantId, apiKey);
+  const headers = makeHBHeaders(merchantId, apiKey, username);
 
   // Günün başı/sonu ile tarih aralığı
   const endDate = new Date();

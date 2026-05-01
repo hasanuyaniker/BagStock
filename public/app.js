@@ -2544,7 +2544,8 @@ async function loadMarketplaceCredentials() {
     // Hepsiburada
     const hb = data.hepsiburada || {};
     document.getElementById('hbMerchantId').value = hb.merchantId || '';
-    document.getElementById('hbApiKey').value = hb.apiKey || '';
+    document.getElementById('hbUsername').value   = hb.username  || '';
+    document.getElementById('hbApiKey').value     = hb.apiKey    || '';
     const hbBadge = document.getElementById('hbConfigBadge');
     const hbClear = document.getElementById('hbClearBtn');
     if (hb.configured) {
@@ -2607,18 +2608,19 @@ async function clearTYCredentials() {
 
 async function saveHBCredentials() {
   const merchantId = document.getElementById('hbMerchantId').value.trim();
+  const username   = document.getElementById('hbUsername').value.trim();
   const apiKey     = document.getElementById('hbApiKey').value.trim();
   const resultEl   = document.getElementById('hbCredResult');
 
-  if (!merchantId || !apiKey) {
-    resultEl.innerHTML = '<span style="color:#dc2626;">Tüm alanları doldurunuz</span>';
+  if (!merchantId || !username || !apiKey) {
+    resultEl.innerHTML = '<span style="color:#dc2626;">Tüm alanları doldurunuz (Merchant ID, Kullanıcı Adı, Servis Anahtarı)</span>';
     return;
   }
 
   try {
     const res = await apiFetch('/api/settings/marketplace-credentials', {
       method: 'POST',
-      body: { platform: 'hepsiburada', merchantId, apiKey }
+      body: { platform: 'hepsiburada', merchantId, username, apiKey }
     });
     const data = await res.json();
     if (res.ok) {
@@ -2639,7 +2641,8 @@ async function clearHBCredentials() {
   try {
     await apiFetch('/api/settings/marketplace-credentials/hepsiburada', { method: 'DELETE' });
     document.getElementById('hbMerchantId').value = '';
-    document.getElementById('hbApiKey').value = '';
+    document.getElementById('hbUsername').value   = '';
+    document.getElementById('hbApiKey').value     = '';
     document.getElementById('hbConfigBadge').style.display = 'none';
     document.getElementById('hbClearBtn').style.display = 'none';
     document.getElementById('hbCredResult').innerHTML = '';
