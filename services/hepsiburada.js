@@ -48,18 +48,21 @@ const HB_DEDUCT_STATUSES = new Set(['IN_CARGO', 'AT_CARGO', 'IN_TRANSIT', 'DELIV
 const HB_RETURN_STATUSES = new Set(['RETURNED', 'RETURN_ACCEPTED', 'RETURN_IN_CARGO']);
 
 /**
- * Entegratör servis anahtarı auth:
- * - username: entegratör kullanıcı adı
- * - apiKey:   servis anahtarı (şifre)
- * Fallback: merchantId:apiKey (eski format uyumluluğu)
+ * Hepsiburada Basic Auth:
+ *   username = merchantId  (Merchant ID)
+ *   password = apiKey      (Secret Key / Servis Anahtarı)
+ *
+ * User-Agent header = username alanı (Developer Username, örn. "huflex_dev")
+ * Bu değer HB entegratör portalında tanımlıdır.
  */
-function makeHBHeaders(merchantId, apiKey, username) {
-  const user = username || merchantId;   // username yoksa merchantId kullan (geriye dönük uyumluluk)
-  const credentials = Buffer.from(`${user}:${apiKey}`).toString('base64');
+function makeHBHeaders(merchantId, apiKey, developerUsername) {
+  // Basic Auth: merchantId:secretKey
+  const credentials = Buffer.from(`${merchantId}:${apiKey}`).toString('base64');
   return {
     'Authorization': `Basic ${credentials}`,
-    'Content-Type': 'application/json',
-    'Accept': 'application/json'
+    'User-Agent':    developerUsername || 'BagStock',  // HB zorunlu: Developer Username
+    'Content-Type':  'application/json',
+    'Accept':        'application/json'
   };
 }
 

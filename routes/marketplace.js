@@ -485,12 +485,15 @@ router.post('/test-hb-connection', async (req, res) => {
     const hb = creds.hepsiburada;
     if (!hb?.merchantId || !hb?.apiKey) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
 
-    const user = hb.username || hb.merchantId;
-    const basicAuth = Buffer.from(`${user}:${hb.apiKey}`).toString('base64');
+    // Basic Auth: merchantId:secretKey (HB resmi formatı)
+    // User-Agent: developer username (örn. huflex_dev)
+    const basicAuth = Buffer.from(`${hb.merchantId}:${hb.apiKey}`).toString('base64');
+    const developerUsername = hb.username || 'BagStock';
     const headers = {
       'Authorization': `Basic ${basicAuth}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'User-Agent':    developerUsername,
+      'Content-Type':  'application/json',
+      'Accept':        'application/json'
     };
 
     // Basit test: bugünden 1 günlük WAITING_IN_MERCHANT listesi
@@ -498,7 +501,8 @@ router.post('/test-hb-connection', async (req, res) => {
     const url = `https://listing-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
 
     console.log(`[HB Test] GET ${url}`);
-    console.log(`[HB Test] Auth user: ${user}`);
+    console.log(`[HB Test] Basic Auth user: ${hb.merchantId} (merchantId)`);
+    console.log(`[HB Test] User-Agent: ${developerUsername}`);
 
     const fetchRes = await fetch(url, { headers });
     const rawText  = await fetchRes.text();
@@ -507,11 +511,12 @@ router.post('/test-hb-connection', async (req, res) => {
     console.log(`[HB Test] Yanıt: ${rawText.substring(0, 500)}`);
 
     res.json({
-      status:   fetchRes.status,
-      ok:       fetchRes.ok,
+      status:          fetchRes.status,
+      ok:              fetchRes.ok,
       url,
-      authUser: user,
-      response: rawText.substring(0, 1000)
+      basicAuthUser:   hb.merchantId,
+      userAgent:       developerUsername,
+      response:        rawText.substring(0, 1000)
     });
   } catch (err) {
     console.error('[HB Test] Hata:', err.message);

@@ -2651,7 +2651,7 @@ async function testHBConnection() {
       const statusColor = data.ok ? '#16a34a' : '#dc2626';
       result.innerHTML =
         `<span style="color:${statusColor};font-weight:700;">HTTP ${data.status} ${data.ok ? '✓ BAŞARILI' : '✗ HATA'}</span>\n` +
-        `URL: ${data.url}\nAuth kullanıcı: ${data.authUser}\n\nYanıt:\n${data.response}`;
+        `URL: ${data.url}\nBasic Auth: ${data.basicAuthUser || data.authUser} (merchantId)\nUser-Agent: ${data.userAgent || '-'}\n\nYanıt:\n${data.response}`;
     } else {
       result.textContent = `Hata: ${data.error}`;
     }

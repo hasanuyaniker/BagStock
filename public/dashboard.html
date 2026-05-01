@@ -520,20 +520,21 @@
                 <span id="hbConfigBadge" style="display:none;background:#dcfce7;color:#16a34a;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">✓ Yapılandırıldı</span>
               </div>
               <p style="font-size:12px;color:#6b7280;margin-bottom:14px;">
-                Hepsiburada Satıcı Paneli → Entegratör Yönetimi → Servis Anahtarı bölümünden alabilirsiniz.
+                Hepsiburada Satıcı Paneli → Entegratör Yönetimi → Servis Anahtarı bölümünden alabilirsiniz.<br>
+                <span style="color:#8b5cf6;font-weight:600;">Auth:</span> Basic Auth = Merchant ID : Servis Anahtarı &nbsp;|&nbsp; <span style="color:#8b5cf6;font-weight:600;">User-Agent:</span> Developer Username (örn. huflex_dev)
               </p>
               <div class="form-row">
                 <div class="form-group">
-                  <label>Merchant ID</label>
-                  <input type="text" id="hbMerchantId" placeholder="Merchant ID">
+                  <label>Merchant ID <span style="font-weight:400;color:#9ca3af;">(Basic Auth kullanıcısı)</span></label>
+                  <input type="text" id="hbMerchantId" placeholder="Merchant ID (UUID)">
                 </div>
                 <div class="form-group">
-                  <label>Kullanıcı Adı (Username)</label>
-                  <input type="text" id="hbUsername" placeholder="Kullanıcı adınız" autocomplete="off">
+                  <label>Developer Username <span style="font-weight:400;color:#9ca3af;">(User-Agent)</span></label>
+                  <input type="text" id="hbUsername" placeholder="örn. huflex_dev" autocomplete="off">
                 </div>
                 <div class="form-group full">
-                  <label>Servis Anahtarı (Şifre)</label>
-                  <input type="password" id="hbApiKey" placeholder="Servis Anahtarı / Şifre">
+                  <label>Servis Anahtarı <span style="font-weight:400;color:#9ca3af;">(Basic Auth şifresi)</span></label>
+                  <input type="password" id="hbApiKey" placeholder="Servis Anahtarı / Secret Key">
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
