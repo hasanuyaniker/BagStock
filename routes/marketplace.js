@@ -501,7 +501,7 @@ router.post('/test-hb-connection', async (req, res) => {
 
     // Basit test: bugünden 1 günlük WAITING_IN_MERCHANT listesi
     const today = new Date().toISOString().split('T')[0];
-    const url = `https://oms-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
+    const url = `https://listing-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
 
     console.log(`[HB Test] GET ${url}`);
     console.log(`[HB Test] Basic Auth user: ${developerUsername} (developer username)`);
