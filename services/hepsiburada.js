@@ -3,7 +3,7 @@
  * Dokümantasyon: https://developers.hepsiburada.com
  */
 
-const HB_BASE = 'https://listing-external.hepsiburada.com';
+const HB_BASE = 'https://oms-external.hepsiburada.com';
 
 // Hepsiburada raw durum → BagStock dahili durum
 const HB_STATUS_MAP = {
