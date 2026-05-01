@@ -538,9 +538,11 @@
               </div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <button class="btn btn-primary btn-sm" onclick="saveHBCredentials()">Kaydet</button>
+                <button class="btn btn-secondary btn-sm" onclick="testHBConnection()" id="hbTestBtn">🔌 Bağlantıyı Test Et</button>
                 <button class="btn btn-secondary btn-sm" onclick="clearHBCredentials()" id="hbClearBtn" style="display:none;">Kimlik Bilgilerini Sil</button>
                 <div id="hbCredResult" style="font-size:13px;"></div>
               </div>
+              <div id="hbTestResult" style="margin-top:10px;display:none;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;"></div>
             </div>
 
             <!-- Sync Info -->

@@ -2636,6 +2636,33 @@ async function saveHBCredentials() {
   }
 }
 
+async function testHBConnection() {
+  const btn    = document.getElementById('hbTestBtn');
+  const result = document.getElementById('hbTestResult');
+  if (!result) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Test ediliyor...';
+  result.style.display = 'block';
+  result.textContent = 'İstek gönderiliyor...';
+  try {
+    const res  = await apiFetch('/api/marketplace/test-hb-connection', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      const statusColor = data.ok ? '#16a34a' : '#dc2626';
+      result.innerHTML =
+        `<span style="color:${statusColor};font-weight:700;">HTTP ${data.status} ${data.ok ? '✓ BAŞARILI' : '✗ HATA'}</span>\n` +
+        `URL: ${data.url}\nAuth kullanıcı: ${data.authUser}\n\nYanıt:\n${data.response}`;
+    } else {
+      result.textContent = `Hata: ${data.error}`;
+    }
+  } catch (err) {
+    result.textContent = `Bağlantı hatası: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔌 Bağlantıyı Test Et';
+  }
+}
+
 async function clearHBCredentials() {
   if (!confirm('Hepsiburada kimlik bilgilerini silmek istediğinizden emin misiniz?')) return;
   try {

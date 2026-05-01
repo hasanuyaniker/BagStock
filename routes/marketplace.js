@@ -475,6 +475,50 @@ router.post('/sync', async (req, res) => {
 
 // ── POST /api/marketplace/test-shipping-email ─────────────────────────────────
 // Bugün kargoya verilen tüm siparişleri tek mail ile gönderir
+// ── POST /api/marketplace/test-hb-connection — HB API bağlantı testi ────────
+router.post('/test-hb-connection', async (req, res) => {
+  try {
+    const credRow = await pool.query("SELECT value FROM app_settings WHERE key = 'marketplace_credentials'");
+    if (!credRow.rows.length) return res.status(400).json({ error: 'HB kimlik bilgileri bulunamadı' });
+    let creds = {};
+    try { creds = JSON.parse(credRow.rows[0].value); } catch {}
+    const hb = creds.hepsiburada;
+    if (!hb?.merchantId || !hb?.apiKey) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    const user = hb.username || hb.merchantId;
+    const basicAuth = Buffer.from(`${user}:${hb.apiKey}`).toString('base64');
+    const headers = {
+      'Authorization': `Basic ${basicAuth}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+
+    // Basit test: bugünden 1 günlük WAITING_IN_MERCHANT listesi
+    const today = new Date().toISOString().split('T')[0];
+    const url = `https://listing-external.hepsiburada.com/api/orders?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
+
+    console.log(`[HB Test] GET ${url}`);
+    console.log(`[HB Test] Auth user: ${user}`);
+
+    const fetchRes = await fetch(url, { headers });
+    const rawText  = await fetchRes.text();
+
+    console.log(`[HB Test] HTTP ${fetchRes.status}`);
+    console.log(`[HB Test] Yanıt: ${rawText.substring(0, 500)}`);
+
+    res.json({
+      status:   fetchRes.status,
+      ok:       fetchRes.ok,
+      url,
+      authUser: user,
+      response: rawText.substring(0, 1000)
+    });
+  } catch (err) {
+    console.error('[HB Test] Hata:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/test-shipping-email', async (req, res) => {
   try {
     const { sendDailyShippingSummary } = require('../services/mailer');

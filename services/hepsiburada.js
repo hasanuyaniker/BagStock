@@ -95,11 +95,16 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   const allOrders = [];
   const seenIds = new Set();
 
+  console.log(`[HepsiB] Bağlantı: ${HB_BASE} | merchantId=${merchantId} | username=${username || '(yok)'}`);
+  console.log(`[HepsiB] Tarih aralığı: ${formatHBDate(startDate)} → ${formatHBDate(endDate)}`);
+
   for (const status of statuses) {
     let offset = 0;
     const limit = 50;
     let hasMore = true;
     let pageNum = 0;
+
+    console.log(`[HepsiB] Status=${status} çekiliyor...`);
 
     while (hasMore) {
       const params = new URLSearchParams({
@@ -111,31 +116,34 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
       });
 
       const url = `${HB_BASE}/api/orders?${params}`;
+      console.log(`[HepsiB] GET ${url}`);
       let data;
 
       try {
         const res = await fetch(url, { headers });
+        console.log(`[HepsiB] HTTP ${res.status} — Status=${status} offset=${offset}`);
+
         if (!res.ok) {
           const errText = await res.text();
+          console.error(`[HepsiB] Hata yanıtı: ${errText.substring(0, 400)}`);
           if (res.status === 404 || res.status === 204) { hasMore = false; break; }
-          // İlk sayfa + ilk status'ta hata → throw
-          if (offset === 0 && status === statuses[0]) {
-            throw new Error(`Hepsiburada API HTTP ${res.status}: ${errText.substring(0, 300)}`);
-          }
-          // Diğer sayfa/statüslerde hata → atla
-          console.warn(`[HepsiB] Status=${status} offset=${offset} HTTP ${res.status} — atlanıyor`);
-          hasMore = false;
-          break;
+          // Her durumda hata fırlat — sessiz geçme
+          throw new Error(`Hepsiburada API HTTP ${res.status}: ${errText.substring(0, 300)}`);
         }
-        data = await res.json();
+
+        const rawText = await res.text();
+        console.log(`[HepsiB] Ham yanıt (ilk 300 karakter): ${rawText.substring(0, 300)}`);
+        try { data = JSON.parse(rawText); } catch (e) {
+          throw new Error(`JSON parse hatası: ${e.message} | Ham: ${rawText.substring(0, 100)}`);
+        }
       } catch (err) {
-        if (offset === 0 && status === statuses[0]) throw err;
-        console.error(`[HepsiB] Status=${status} offset=${offset} hata:`, err.message);
-        hasMore = false;
-        break;
+        console.error(`[HepsiB] Fetch hatası Status=${status} offset=${offset}: ${err.message}`);
+        throw err; // her zaman üste ilet — sessiz geçme
       }
 
       const orders = extractHBOrders(data);
+      console.log(`[HepsiB] extractHBOrders → ${orders.length} sipariş | data keys: ${Object.keys(data || {}).join(',')}`);
+
       if (!orders || orders.length === 0) { hasMore = false; break; }
 
       pageNum++;
