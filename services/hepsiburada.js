@@ -56,11 +56,16 @@ const HB_RETURN_STATUSES = new Set(['RETURNED', 'RETURN_ACCEPTED', 'RETURN_IN_CA
  * Bu değer HB entegratör portalında tanımlıdır.
  */
 function makeHBHeaders(merchantId, apiKey, developerUsername) {
-  // Basic Auth: merchantId:secretKey
-  const credentials = Buffer.from(`${merchantId}:${apiKey}`).toString('base64');
+  // Hepsiburada Entegratör API auth:
+  //   Basic Auth username = developer username (huflex_dev)
+  //   Basic Auth password = service key (ST2JJ9A3EC4p)
+  //   User-Agent          = developer username (zorunlu)
+  //   merchantId          = sadece URL path'te (/merchantid/{merchantId})
+  const authUser = developerUsername || merchantId;
+  const credentials = Buffer.from(`${authUser}:${apiKey}`).toString('base64');
   return {
     'Authorization': `Basic ${credentials}`,
-    'User-Agent':    developerUsername || 'BagStock',  // HB zorunlu: Developer Username
+    'User-Agent':    developerUsername || 'BagStock',
     'Content-Type':  'application/json',
     'Accept':        'application/json'
   };

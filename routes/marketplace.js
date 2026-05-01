@@ -485,10 +485,13 @@ router.post('/test-hb-connection', async (req, res) => {
     const hb = creds.hepsiburada;
     if (!hb?.merchantId || !hb?.apiKey) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
 
-    // Basic Auth: merchantId:secretKey (HB resmi formatı)
-    // User-Agent: developer username (örn. huflex_dev)
-    const basicAuth = Buffer.from(`${hb.merchantId}:${hb.apiKey}`).toString('base64');
+    // Hepsiburada Entegratör API:
+    //   Basic Auth user = developer username (huflex_dev)
+    //   Basic Auth pass = service key
+    //   User-Agent      = developer username (zorunlu)
+    //   merchantId      = sadece URL path'te
     const developerUsername = hb.username || 'BagStock';
+    const basicAuth = Buffer.from(`${developerUsername}:${hb.apiKey}`).toString('base64');
     const headers = {
       'Authorization': `Basic ${basicAuth}`,
       'User-Agent':    developerUsername,
@@ -501,7 +504,7 @@ router.post('/test-hb-connection', async (req, res) => {
     const url = `https://listing-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
 
     console.log(`[HB Test] GET ${url}`);
-    console.log(`[HB Test] Basic Auth user: ${hb.merchantId} (merchantId)`);
+    console.log(`[HB Test] Basic Auth user: ${developerUsername} (developer username)`);
     console.log(`[HB Test] User-Agent: ${developerUsername}`);
 
     const fetchRes = await fetch(url, { headers });
@@ -514,7 +517,7 @@ router.post('/test-hb-connection', async (req, res) => {
       status:          fetchRes.status,
       ok:              fetchRes.ok,
       url,
-      basicAuthUser:   hb.merchantId,
+      basicAuthUser:   developerUsername,
       userAgent:       developerUsername,
       response:        rawText.substring(0, 1000)
     });
