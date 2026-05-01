@@ -274,14 +274,14 @@ body {
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 14px;
-  margin-bottom: 22px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .kpi-card {
   background: var(--bg-card);
-  border-radius: 14px;
-  padding: 20px;
+  border-radius: 12px;
+  padding: 14px 16px;
   border-top: 3px solid var(--border);
   box-shadow: var(--shadow-sm);
   transition: transform .2s, box-shadow .2s;
@@ -316,8 +316,8 @@ body {
 .kpi-card.orange { border-top-color: var(--orange); }
 .kpi-card.orange::before { background: var(--orange); }
 
-.kpi-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.kpi-value { font-size: 26px; font-weight: 800; color: var(--text-primary); }
+.kpi-label { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.kpi-value { font-size: 22px; font-weight: 800; color: var(--text-primary); }
 .kpi-value.green  { color: var(--green); }
 .kpi-value.red    { color: var(--red); }
 .kpi-value.orange { color: var(--orange); }
@@ -1500,12 +1500,12 @@ input[type="date"]:focus {
   font-weight: 700;
   white-space: nowrap;
 }
-.mp-badge.normal      { background: rgba(148,163,184,0.15); color: #64748b; }
-.mp-badge.trendyol    { background: rgba(242,122,26,0.15);  color: #c45d09; }
-.mp-badge.hepsiburada { background: rgba(255,97,0,0.15);    color: #b34500; }
-.mp-badge.dolap       { background: rgba(168,85,247,0.12);  color: #7c3aed; }
-.mp-badge.amazon      { background: rgba(245,158,11,0.12);  color: #b45309; }
-.mp-badge.pttavm      { background: rgba(239,68,68,0.12);   color: #dc2626; }
+.mp-badge.normal      { background: rgba(148,163,184,0.18); color: #475569; }
+.mp-badge.trendyol    { background: rgba(242,122,26,0.18);  color: #ea580c; }
+.mp-badge.hepsiburada { background: rgba(230,30,40,0.18);   color: #dc2626; }
+.mp-badge.dolap       { background: rgba(139,92,246,0.18);  color: #7c3aed; }
+.mp-badge.amazon      { background: rgba(59,130,246,0.18);  color: #1d4ed8; }
+.mp-badge.pttavm      { background: rgba(16,185,129,0.18);  color: #047857; }
 
 /* Marketplace select — satış kartında */
 .marketplace-select {
@@ -2049,37 +2049,37 @@ html {
 
 /* ── Platform Performans Grafikleri ───────────────────────────── */
 #platformPerfSection {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
 .platform-charts-row {
   display: flex;
-  gap: 20px;
+  gap: 14px;
   flex-wrap: wrap;
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .platform-chart-card {
   background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
-  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+  padding: 14px 16px;
   flex: 1;
-  min-width: 280px;
+  min-width: 240px;
 }
 
 .platform-chart-card h4 {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: #374151;
-  margin: 0 0 16px;
+  margin: 0 0 10px;
 }
 
 .platform-chart-wrapper {
   position: relative;
-  width: 140px;
-  height: 140px;
-  margin: 0 auto 12px;
+  width: 110px;
+  height: 110px;
+  margin: 0 auto 10px;
 }
 
 .platform-chart-center {
@@ -2092,14 +2092,14 @@ html {
 }
 
 .platform-chart-center .center-value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 800;
   color: #1a1f3e;
   line-height: 1.1;
 }
 
 .platform-chart-center .center-label {
-  font-size: 11px;
+  font-size: 10px;
   color: #6b7280;
   font-weight: 500;
 }
@@ -2178,23 +2178,23 @@ html {
     min-width: 0 !important;
     padding: 10px 8px !important;
     border-radius: 10px !important;
-    overflow: hidden;
+    overflow: visible;   /* legend gizlenmesin */
   }
   /* Başlık: taşarsa kırp */
   .platform-chart-card h4 {
     font-size: 9px !important;
-    margin-bottom: 8px !important;
+    margin-bottom: 6px !important;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .platform-chart-wrapper {
-    width: 90px !important;
-    height: 90px !important;
-    margin-bottom: 8px !important;
+    width: 80px !important;
+    height: 80px !important;
+    margin-bottom: 6px !important;
   }
-  .platform-chart-center .center-value { font-size: 13px !important; }
-  .platform-chart-center .center-label { font-size: 9px !important; }
+  .platform-chart-center .center-value { font-size: 12px !important; }
+  .platform-chart-center .center-label { font-size: 8px !important; }
 
   /* Legend: 2 sütun (Platform + Adet) — Ciro ve % gizle */
   .platform-legend th:nth-child(3),
@@ -2210,7 +2210,7 @@ html {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 80px;
+    max-width: 120px;
   }
 
   /* Stok + Tip grafik kartları: kompakt ama stok scrool etmeye devam */

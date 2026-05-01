@@ -2226,6 +2226,14 @@ function renderOrdersSummaryCards(data) {
     amazon:      '🔵 Amazon',
     pttavm:      '🟢 PTT AVM'
   };
+  const PLATFORM_LABEL_COLORS = {
+    trendyol:    '#fbbf24',
+    hepsiburada: '#f87171',
+    dolap:       '#c4b5fd',
+    amazon:      '#93c5fd',
+    pttavm:      '#6ee7b7',
+    normal:      'rgba(255,255,255,0.75)'
+  };
   const platforms = Object.keys(byPlatform)
     .filter(k => byPlatform[k])
     .map(k => ({ key: k, label: PLATFORM_CARD_LABELS[k] || ('📦 ' + k) }));
@@ -2239,7 +2247,7 @@ function renderOrdersSummaryCards(data) {
     el.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;">` +
       platforms.map(p => `
         <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:10px 14px;flex:1;min-width:280px;">
-          <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.6);margin-bottom:8px;letter-spacing:.5px;">${p.label}</div>
+          <div style="font-size:11px;font-weight:700;color:${PLATFORM_LABEL_COLORS[p.key] || 'rgba(255,255,255,0.85)'};margin-bottom:8px;letter-spacing:.5px;text-shadow:0 1px 3px rgba(0,0,0,0.3);">${p.label}</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;">${makeCards(byPlatform[p.key] || {}, p.key + '-')}</div>
         </div>
       `).join('') +
