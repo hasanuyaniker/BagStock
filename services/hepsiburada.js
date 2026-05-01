@@ -108,6 +108,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
 
     while (hasMore) {
       const params = new URLSearchParams({
+        merchantId,                          // HB API zorunlu parametre
         status,
         beginDate: formatHBDate(startDate),
         endDate: formatHBDate(endDate),
