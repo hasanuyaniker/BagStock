@@ -485,40 +485,29 @@ router.post('/test-hb-connection', async (req, res) => {
     const hb = creds.hepsiburada;
     if (!hb?.merchantId || !hb?.apiKey) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
 
-    // Hepsiburada resmi mail konfirmasyonu:
-    //   Basic Auth Username = merchantId
-    //   Basic Auth Password = secretKey
-    //   User-Agent          = developer username (huflex_dev)
+    // Doğru SIT URL'leri (docs'tan doğrulandı)
+    const { makeHBHeaders, getHBBase, formatHBDate } = require('../services/hepsiburada');
     const developerUsername = hb.username || 'BagStock';
-    const basicAuth = Buffer.from(`${hb.merchantId}:${hb.apiKey}`).toString('base64');
-    const headers = {
-      'Authorization': `Basic ${basicAuth}`,
-      'User-Agent':    developerUsername,
-      'Content-Type':  'application/json',
-      'Accept':        'application/json'
-    };
+    const environment       = hb.environment || 'sit';
+    const headers = makeHBHeaders(hb.merchantId, hb.apiKey, developerUsername);
 
-    // Test için birden fazla olası URL + path kombinasyonunu dene
-    const today = new Date().toISOString().split('T')[0];
-    const qp = `status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
+    const today = formatHBDate(new Date());
+    const base  = getHBBase(environment);
+
+    // Doğru endpoint + doğru param isimleri (lowercase begindate/enddate)
     const candidates = [
-      // SIT ortamı — farklı path varyasyonları
-      `https://listing-external-sit.hepsiburada.com/orders/merchantid/${hb.merchantId}?${qp}`,
-      `https://listing-external-sit.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?${qp}`,
-      `https://listing-external-sit.hepsiburada.com/integration/orders/merchantid/${hb.merchantId}?${qp}`,
-      // Prod ortamı (mevcut credentials SIT için ama deneyelim)
-      `https://listing-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?${qp}`,
+      `${base}/orders/merchantid/${hb.merchantId}?begindate=${today}&enddate=${today}&limit=1&offset=0`,
+      `${base}/packages/merchantid/${hb.merchantId}?begindate=${today}&enddate=${today}&limit=1&offset=0`,
     ];
 
     const results = [];
     for (const url of candidates) {
       try {
         console.log(`[HB Test] GET ${url}`);
-        const fetchRes = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+        const fetchRes = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
         const rawText  = await fetchRes.text();
         console.log(`[HB Test] HTTP ${fetchRes.status} — ${url}`);
         results.push({ url, status: fetchRes.status, ok: fetchRes.ok, response: rawText.substring(0, 500) });
-        if (fetchRes.ok) break; // Başarılı bulundu, devam etme
       } catch (e) {
         results.push({ url, status: 0, ok: false, response: `Bağlantı hatası: ${e.message}` });
       }
@@ -531,6 +520,7 @@ router.post('/test-hb-connection', async (req, res) => {
       url:           best.url,
       basicAuthUser: hb.merchantId,
       userAgent:     developerUsername,
+      environment,
       response:      best.response,
       allResults:    results
     });

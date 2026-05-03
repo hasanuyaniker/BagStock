@@ -2553,9 +2553,11 @@ async function loadMarketplaceCredentials() {
 
     // Hepsiburada
     const hb = data.hepsiburada || {};
-    document.getElementById('hbMerchantId').value = hb.merchantId || '';
-    document.getElementById('hbUsername').value   = hb.username  || '';
-    document.getElementById('hbApiKey').value     = hb.apiKey    || '';
+    document.getElementById('hbMerchantId').value  = hb.merchantId  || '';
+    document.getElementById('hbUsername').value    = hb.username   || '';
+    document.getElementById('hbApiKey').value      = hb.apiKey     || '';
+    const envEl = document.getElementById('hbEnvironment');
+    if (envEl) envEl.value = hb.environment || 'sit';
     const hbBadge = document.getElementById('hbConfigBadge');
     const hbClear = document.getElementById('hbClearBtn');
     if (hb.configured) {
@@ -2617,10 +2619,11 @@ async function clearTYCredentials() {
 }
 
 async function saveHBCredentials() {
-  const merchantId = document.getElementById('hbMerchantId').value.trim();
-  const username   = document.getElementById('hbUsername').value.trim();
-  const apiKey     = document.getElementById('hbApiKey').value.trim();
-  const resultEl   = document.getElementById('hbCredResult');
+  const merchantId  = document.getElementById('hbMerchantId').value.trim();
+  const username    = document.getElementById('hbUsername').value.trim();
+  const apiKey      = document.getElementById('hbApiKey').value.trim();
+  const environment = document.getElementById('hbEnvironment')?.value || 'sit';
+  const resultEl    = document.getElementById('hbCredResult');
 
   if (!merchantId || !username || !apiKey) {
     resultEl.innerHTML = '<span style="color:#dc2626;">Tüm alanları doldurunuz (Merchant ID, Kullanıcı Adı, Servis Anahtarı)</span>';
@@ -2630,7 +2633,7 @@ async function saveHBCredentials() {
   try {
     const res = await apiFetch('/api/settings/marketplace-credentials', {
       method: 'POST',
-      body: { platform: 'hepsiburada', merchantId, username, apiKey }
+      body: { platform: 'hepsiburada', merchantId, username, apiKey, environment }
     });
     const data = await res.json();
     if (res.ok) {

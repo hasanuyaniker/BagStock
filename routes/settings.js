@@ -238,8 +238,10 @@ router.post('/marketplace-credentials', authMiddleware, async (req, res) => {
       }
     } else if (platform === 'hepsiburada') {
       if (!creds.hepsiburada) creds.hepsiburada = {};
-      if (merchantId !== undefined) creds.hepsiburada.merchantId = merchantId;
-      if (username  !== undefined) creds.hepsiburada.username   = username;
+      if (merchantId !== undefined) creds.hepsiburada.merchantId   = merchantId;
+      if (username   !== undefined) creds.hepsiburada.username     = username;
+      const { environment } = req.body;
+      if (environment !== undefined) creds.hepsiburada.environment = environment;
       if (apiKey !== undefined && !apiKey.startsWith('***')) {
         creds.hepsiburada.apiKey = apiKey;
       }
