@@ -11,6 +11,7 @@ const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
 const authMiddleware = require('../middleware/auth');
+const { createHBTestOrder } = require('../services/hepsiburada');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -535,7 +536,26 @@ router.post('/create-test-hb-order', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
-      // DB'den rastgele ürün al
+      // 1. HB kimlik bilgilerini DB'den al
+      const settingsRow = await client.query(
+        "SELECT value FROM app_settings WHERE key = 'marketplace_credentials'"
+      );
+      let hbCreds = null;
+      if (settingsRow.rows.length && settingsRow.rows[0].value) {
+        try {
+          const parsed = JSON.parse(settingsRow.rows[0].value);
+          if (parsed.hepsiburada?.merchantId && parsed.hepsiburada?.apiKey) {
+            hbCreds = parsed.hepsiburada;
+          }
+        } catch {}
+      }
+      if (!hbCreds) {
+        return res.status(400).json({
+          error: 'Hepsiburada kimlik bilgileri eksik. Ayarlar → API Credentials bölümünden ekleyin.'
+        });
+      }
+
+      // 2. DB'den rastgele ürün al
       const prodRes = await client.query(
         `SELECT id, name, barcode, barcode2, cost_price FROM products
          WHERE stock_quantity > 0 AND is_active = true
@@ -546,7 +566,7 @@ router.post('/create-test-hb-order', async (req, res) => {
         return res.status(400).json({ error: 'Stokta aktif ürün bulunamadı' });
       }
 
-      // Rastgele veri üret
+      // 3. Rastgele veri üret
       const NAMES = ['Ayşe Yılmaz','Fatma Kaya','Zeynep Demir','Emine Çelik','Hatice Şahin',
                      'Meryem Arslan','Özlem Kurt','Gülsüm Öztürk','Sevim Aydın','Büşra Doğan'];
       const CARGO = ['Yurtiçi Kargo','MNG Kargo','Aras Kargo','Sürat Kargo','PTT Kargo'];
@@ -557,23 +577,76 @@ router.post('/create-test-hb-order', async (req, res) => {
         { status:'teslim_edildi', status_tr:'Teslim Edildi',      raw:'DELIVERED' },
       ];
 
-      const ts   = Date.now();
-      const rand = Math.floor(Math.random() * 9000 + 1000);
-      const orderId = `HB-TEST-${ts}-${rand}`;
-      const st   = STATUSES[Math.floor(Math.random() * STATUSES.length)];
-      const cust = NAMES[Math.floor(Math.random() * NAMES.length)];
-      const cargo = CARGO[Math.floor(Math.random() * CARGO.length)];
+      const ts        = Date.now();
+      const rand      = Math.floor(Math.random() * 9000 + 1000);
+      const st        = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+      const cust      = NAMES[Math.floor(Math.random() * NAMES.length)];
+      const cargo     = CARGO[Math.floor(Math.random() * CARGO.length)];
+
+      // 1-3 ürün seç
+      const itemCount   = Math.min(products.length, Math.floor(Math.random() * 2) + 1);
+      const items       = products.slice(0, itemCount);
+      const itemQtys    = items.map(() => Math.floor(Math.random() * 2) + 1);
+      const totalPrice  = items.reduce((s, p, i) =>
+        s + parseFloat(p.cost_price || 0) * 1.3 * itemQtys[i], 0);
+
+      // 4. HB SIT stub API'ye test siparişi gönder
+      const hbOrderNumber = `TEST-${ts}-${rand}`;
+      const hbBody = {
+        Customer: {
+          CustomerId: 'dfc8a27f-faae-4cb2-859c-8a7d50ee77be',
+          Name: cust
+        },
+        DeliveryAddress: {
+          AddressDetail: 'Test Adres, No: 1',
+          AddressId:     'e66765b3-d37d-488c-ae15-47051245dc9b',
+          AlternatePhoneNumber: '05321538212',
+          City:        'İstanbul',
+          CountryCode: 'TR',
+          District:    'Beşiktaş',
+          Email:       'test@bagstock.com',
+          Name:        cust,
+          PhoneNumber: '02122613231'
+        },
+        LineItems: items.map((p, i) => ({
+          MerchantSku: p.barcode || String(p.id),
+          Quantity:    itemQtys[i],
+          Price:       Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100
+        })),
+        OrderDate:     new Date().toISOString(),
+        OrderNumber:   hbOrderNumber,
+        PaymentStatus: 'Paid'
+      };
+
+      let hbApiResponse;
+      try {
+        hbApiResponse = await createHBTestOrder(hbCreds, hbBody);
+        console.log('[HB Test Order] HB SIT API başarılı:', JSON.stringify(hbApiResponse).substring(0, 300));
+      } catch (hbErr) {
+        console.error('[HB Test Order] HB SIT API hatası:', hbErr.message);
+        return res.status(502).json({
+          error: `Hepsiburada SIT API hatası: ${hbErr.message}`
+        });
+      }
+
+      // HB'nin döndürdüğü sipariş ID'sini kullan; yoksa kendi ürettiğimizi kullan
+      const hbAssignedId =
+        hbApiResponse?.orderId      ||
+        hbApiResponse?.OrderId      ||
+        hbApiResponse?.orderNumber  ||
+        hbApiResponse?.OrderNumber  ||
+        hbApiResponse?.id           ||
+        null;
+      const orderId = hbAssignedId ? String(hbAssignedId) : `HB-TEST-${ts}-${rand}`;
+
       const tracking = st.status === 'kargoda' || st.status === 'teslim_edildi'
         ? `TRK${rand}${Math.floor(Math.random()*100000)}`
         : null;
 
-      // 1-3 ürün seç
-      const itemCount = Math.min(products.length, Math.floor(Math.random() * 2) + 1);
-      const items = products.slice(0, itemCount);
-      const totalPrice = items.reduce((s, p) => s + parseFloat(p.cost_price || 0) * 1.3, 0);
-
+      // 5. Local DB'ye kaydet
       await client.query('BEGIN');
 
+      // order_id = HB'nin atadığı ID (portal'da görünür), order_number = bizim TEST-... numaramız (filtreleme için)
       const orderResult = await client.query(
         `INSERT INTO marketplace_orders
            (platform, order_id, order_number, status, status_tr, raw_status,
@@ -583,7 +656,7 @@ router.post('/create-test-hb-order', async (req, res) => {
          VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8,'TRY',$9,$10,$11,$12,$13,false,$14)
          RETURNING id`,
         [
-          'hepsiburada', orderId, orderId,
+          'hepsiburada', orderId, hbOrderNumber,
           st.status, st.status_tr, st.raw,
           cust, Math.round(totalPrice * 100) / 100,
           st.raw,
@@ -597,8 +670,9 @@ router.post('/create-test-hb-order', async (req, res) => {
 
       const moId = orderResult.rows[0].id;
 
-      for (const p of items) {
-        const qty = Math.floor(Math.random() * 2) + 1;
+      for (let i = 0; i < items.length; i++) {
+        const p   = items[i];
+        const qty = itemQtys[i];
         const itemId = `TEST-${orderId}-${p.id}-${Date.now()}`;
         await client.query(
           `INSERT INTO marketplace_order_items
@@ -613,13 +687,11 @@ router.post('/create-test-hb-order', async (req, res) => {
         if (st.status === 'kargoda' || st.status === 'teslim_edildi') {
           await client.query(
             `UPDATE products SET stock_quantity = GREATEST(0, stock_quantity - $1), updated_at = NOW()
-             WHERE id = $2`,
-            [qty, p.id]
+             WHERE id = $2`, [qty, p.id]
           );
           await client.query(
             `UPDATE marketplace_order_items SET stock_deducted = true
-             WHERE marketplace_order_id = $1 AND product_id = $2`,
-            [moId, p.id]
+             WHERE marketplace_order_id = $1 AND product_id = $2`, [moId, p.id]
           );
           await client.query(
             `INSERT INTO sales (product_id, quantity_change, sale_date, marketplace, note)
@@ -633,9 +705,13 @@ router.post('/create-test-hb-order', async (req, res) => {
 
       res.json({
         ok: true,
-        order: { id: moId, order_id: orderId, status: st.status, status_tr: st.status_tr,
-                 customer_name: cust, cargo_company: cargo, tracking, total_price: Math.round(totalPrice*100)/100,
-                 items: items.map(p => p.name) }
+        hbApiResponse,
+        order: {
+          id: moId, order_id: orderId, status: st.status, status_tr: st.status_tr,
+          customer_name: cust, cargo_company: cargo, tracking,
+          total_price: Math.round(totalPrice*100)/100,
+          items: items.map(p => p.name)
+        }
       });
     } catch (e) {
       await client.query('ROLLBACK');
@@ -665,7 +741,8 @@ router.get('/test-hb-orders', async (req, res) => {
        FROM marketplace_orders mo
        LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
        LEFT JOIN products p ON p.id = moi.product_id
-       WHERE mo.platform = 'hepsiburada' AND mo.order_id LIKE 'HB-TEST-%'
+       WHERE mo.platform = 'hepsiburada'
+         AND (mo.order_number LIKE 'TEST-%' OR mo.order_id LIKE 'HB-TEST-%')
        GROUP BY mo.id
        ORDER BY mo.order_date DESC
        LIMIT 50`
@@ -680,7 +757,8 @@ router.get('/test-hb-orders', async (req, res) => {
 router.delete('/test-hb-orders', async (req, res) => {
   try {
     await pool.query(
-      `DELETE FROM marketplace_orders WHERE platform='hepsiburada' AND order_id LIKE 'HB-TEST-%'`
+      `DELETE FROM marketplace_orders WHERE platform='hepsiburada'
+       AND (order_number LIKE 'TEST-%' OR order_id LIKE 'HB-TEST-%')`
     );
     res.json({ ok: true });
   } catch (err) {
