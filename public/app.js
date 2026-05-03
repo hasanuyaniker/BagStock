@@ -2657,9 +2657,18 @@ async function testHBConnection() {
     const data = await res.json();
     if (res.ok) {
       const statusColor = data.ok ? '#16a34a' : '#dc2626';
-      result.innerHTML =
-        `<span style="color:${statusColor};font-weight:700;">HTTP ${data.status} ${data.ok ? '✓ BAŞARILI' : '✗ HATA'}</span>\n` +
-        `URL: ${data.url}\nBasic Auth: ${data.basicAuthUser || data.authUser} (merchantId)\nUser-Agent: ${data.userAgent || '-'}\n\nYanıt:\n${data.response}`;
+      let txt = `<span style="color:${statusColor};font-weight:700;">HTTP ${data.status} ${data.ok ? '✓ BAŞARILI' : '✗ HATA'}</span>\n`;
+      txt += `Basic Auth: ${data.basicAuthUser} (merchantId)\nUser-Agent: ${data.userAgent}\n\n`;
+      if (data.allResults && data.allResults.length > 1) {
+        txt += '── Tüm URL denemeleri ──\n';
+        data.allResults.forEach(r => {
+          const icon = r.ok ? '✓' : (r.status === 0 ? '✗ bağlanamadı' : `✗ ${r.status}`);
+          txt += `${icon}  ${r.url}\n     ${r.response.substring(0, 120)}\n`;
+        });
+      } else {
+        txt += `URL: ${data.url}\n\nYanıt:\n${data.response}`;
+      }
+      result.innerHTML = txt;
     } else {
       result.textContent = `Hata: ${data.error}`;
     }

@@ -485,13 +485,12 @@ router.post('/test-hb-connection', async (req, res) => {
     const hb = creds.hepsiburada;
     if (!hb?.merchantId || !hb?.apiKey) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
 
-    // Hepsiburada Entegratör API:
-    //   Basic Auth user = developer username (huflex_dev)
-    //   Basic Auth pass = service key
-    //   User-Agent      = developer username (zorunlu)
-    //   merchantId      = sadece URL path'te
+    // Hepsiburada resmi mail konfirmasyonu:
+    //   Basic Auth Username = merchantId
+    //   Basic Auth Password = secretKey
+    //   User-Agent          = developer username (huflex_dev)
     const developerUsername = hb.username || 'BagStock';
-    const basicAuth = Buffer.from(`${developerUsername}:${hb.apiKey}`).toString('base64');
+    const basicAuth = Buffer.from(`${hb.merchantId}:${hb.apiKey}`).toString('base64');
     const headers = {
       'Authorization': `Basic ${basicAuth}`,
       'User-Agent':    developerUsername,
@@ -499,27 +498,38 @@ router.post('/test-hb-connection', async (req, res) => {
       'Accept':        'application/json'
     };
 
-    // Basit test: bugünden 1 günlük WAITING_IN_MERCHANT listesi
+    // Test için birden fazla olası URL'yi dene (SIT + prod)
     const today = new Date().toISOString().split('T')[0];
-    const url = `https://listing-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
+    const pathSuffix = `/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
+    const candidates = [
+      `https://listing-external-sit.hepsiburada.com${pathSuffix}`,
+      `https://listing-external.hepsiburada.com${pathSuffix}`,
+      `https://oms-external-sit.hepsiburada.com${pathSuffix}`,
+    ];
 
-    console.log(`[HB Test] GET ${url}`);
-    console.log(`[HB Test] Basic Auth user: ${developerUsername} (developer username)`);
-    console.log(`[HB Test] User-Agent: ${developerUsername}`);
+    const results = [];
+    for (const url of candidates) {
+      try {
+        console.log(`[HB Test] GET ${url}`);
+        const fetchRes = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+        const rawText  = await fetchRes.text();
+        console.log(`[HB Test] HTTP ${fetchRes.status} — ${url}`);
+        results.push({ url, status: fetchRes.status, ok: fetchRes.ok, response: rawText.substring(0, 500) });
+        if (fetchRes.ok) break; // Başarılı bulundu, devam etme
+      } catch (e) {
+        results.push({ url, status: 0, ok: false, response: `Bağlantı hatası: ${e.message}` });
+      }
+    }
 
-    const fetchRes = await fetch(url, { headers });
-    const rawText  = await fetchRes.text();
-
-    console.log(`[HB Test] HTTP ${fetchRes.status}`);
-    console.log(`[HB Test] Yanıt: ${rawText.substring(0, 500)}`);
-
+    const best = results.find(r => r.ok) || results[0];
     res.json({
-      status:          fetchRes.status,
-      ok:              fetchRes.ok,
-      url,
-      basicAuthUser:   developerUsername,
-      userAgent:       developerUsername,
-      response:        rawText.substring(0, 1000)
+      ok:            best.ok,
+      status:        best.status,
+      url:           best.url,
+      basicAuthUser: hb.merchantId,
+      userAgent:     developerUsername,
+      response:      best.response,
+      allResults:    results
     });
   } catch (err) {
     console.error('[HB Test] Hata:', err.message);
