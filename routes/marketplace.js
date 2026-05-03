@@ -609,11 +609,12 @@ router.post('/create-test-hb-order', async (req, res) => {
 
       for (const p of items) {
         const qty = Math.floor(Math.random() * 2) + 1;
+        const itemId = `TEST-${orderId}-${p.id}-${Date.now()}`;
         await client.query(
           `INSERT INTO marketplace_order_items
-             (marketplace_order_id, product_id, barcode, product_name, quantity, price, raw_status, status, stock_deducted)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)`,
-          [moId, p.id, p.barcode || '', p.name || '', qty,
+             (marketplace_order_id, item_id, product_id, barcode, product_name, quantity, price, raw_status, status, stock_deducted)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false)`,
+          [moId, itemId, p.id, p.barcode || '', p.name || '', qty,
            Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100,
            st.raw, st.status]
         );
