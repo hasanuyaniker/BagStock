@@ -2719,7 +2719,8 @@ async function createTestHBOrder() {
     const data = await res.json();
     if (res.ok && data.ok) {
       const o = data.order;
-      msg.innerHTML = `<span style="color:#16a34a;font-weight:600;">✓ ${o.order_id} oluşturuldu — ${o.status_tr}</span>`;
+      msg.innerHTML = `<span style="color:#16a34a;font-weight:600;">✓ ${o.order_id} oluşturuldu — ${o.status_tr}</span>
+        &nbsp;<a href="#" onclick="goToOrders();return false;" style="font-size:11px;color:#5b3de8;">Siparişlerde Gör →</a>`;
       await loadTestHBOrders();
     } else {
       msg.innerHTML = `<span style="color:#dc2626;">${data.error || 'Hata'}</span>`;
@@ -2730,6 +2731,19 @@ async function createTestHBOrder() {
     btn.disabled = false;
     btn.textContent = '➕ Yeni Test Siparişi Oluştur';
   }
+}
+
+function goToOrders() {
+  // Platform filtresini temizle, bugünü kapsasın, sonra orders sekmesine geç
+  const platEl = document.getElementById('orderPlatformFilter');
+  if (platEl) platEl.value = 'hepsiburada';
+  const today = new Date().toISOString().split('T')[0];
+  const fromEl = document.getElementById('orderFromDate');
+  const toEl   = document.getElementById('orderToDate');
+  if (fromEl) fromEl.value = today;
+  if (toEl)   toEl.value   = today;
+  switchSection('orders');
+  loadOrders(0);
 }
 
 async function loadTestHBOrders() {
@@ -2784,7 +2798,10 @@ async function loadTestHBOrders() {
         </tr>`;
     });
     html += '</tbody></table></div>';
-    html += `<p style="font-size:10px;color:#9ca3af;margin-top:8px;">Toplam ${rows.length} test siparişi · ✓ = stok düşürüldü</p>`;
+    html += `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+      <p style="font-size:10px;color:#9ca3af;margin:0;">Toplam ${rows.length} test siparişi · ✓ = stok düşürüldü</p>
+      <button onclick="goToOrders()" class="btn btn-sm btn-secondary" style="font-size:11px;padding:4px 10px;">📋 Siparişler Sayfasında Gör →</button>
+    </div>`;
     panel.innerHTML = html;
   } catch (err) {
     panel.innerHTML = `<p style="color:#dc2626;font-size:12px;">${err.message}</p>`;
