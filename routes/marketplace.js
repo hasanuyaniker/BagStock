@@ -498,13 +498,16 @@ router.post('/test-hb-connection', async (req, res) => {
       'Accept':        'application/json'
     };
 
-    // Test için birden fazla olası URL'yi dene (SIT + prod)
+    // Test için birden fazla olası URL + path kombinasyonunu dene
     const today = new Date().toISOString().split('T')[0];
-    const pathSuffix = `/api/orders/merchantid/${hb.merchantId}?status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
+    const qp = `status=WAITING_IN_MERCHANT&beginDate=${today}&endDate=${today}&limit=1&offset=0`;
     const candidates = [
-      `https://listing-external-sit.hepsiburada.com${pathSuffix}`,
-      `https://listing-external.hepsiburada.com${pathSuffix}`,
-      `https://oms-external-sit.hepsiburada.com${pathSuffix}`,
+      // SIT ortamı — farklı path varyasyonları
+      `https://listing-external-sit.hepsiburada.com/orders/merchantid/${hb.merchantId}?${qp}`,
+      `https://listing-external-sit.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?${qp}`,
+      `https://listing-external-sit.hepsiburada.com/integration/orders/merchantid/${hb.merchantId}?${qp}`,
+      // Prod ortamı (mevcut credentials SIT için ama deneyelim)
+      `https://listing-external.hepsiburada.com/api/orders/merchantid/${hb.merchantId}?${qp}`,
     ];
 
     const results = [];
