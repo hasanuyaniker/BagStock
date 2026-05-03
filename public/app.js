@@ -2524,6 +2524,8 @@ async function loadSyncStatus() {
   } catch (err) {
     console.error('Sync status hatası:', err);
   }
+  // Test siparişlerini de yükle (panel varsa)
+  if (document.getElementById('testHBOrdersPanel')) loadTestHBOrders();
 }
 
 // ==================== MARKETPLACE API SETTINGS ====================
@@ -2693,6 +2695,110 @@ async function clearHBCredentials() {
     showToast('Hepsiburada kimlik bilgileri silindi');
   } catch (err) {
     showToast('Silme hatası: ' + err.message, 'error');
+  }
+}
+
+// ==================== HB TEST SİPARİŞ YÖNETİMİ ====================
+
+const STATUS_STYLES = {
+  bekliyor:      { bg:'rgba(245,158,11,0.12)', color:'#b45309', icon:'⏳' },
+  kargoda:       { bg:'rgba(59,130,246,0.12)',  color:'#1d4ed8', icon:'🚚' },
+  teslim_edildi: { bg:'rgba(16,185,129,0.12)', color:'#047857', icon:'✅' },
+  iptal:         { bg:'rgba(239,68,68,0.12)',   color:'#dc2626', icon:'✗'  },
+  iade_bekliyor: { bg:'rgba(168,85,247,0.12)',  color:'#7c3aed', icon:'↩️' },
+};
+
+async function createTestHBOrder() {
+  const btn = document.getElementById('createTestOrderBtn');
+  const msg = document.getElementById('testOrderMsg');
+  btn.disabled = true;
+  btn.textContent = '⏳ Oluşturuluyor...';
+  msg.textContent = '';
+  try {
+    const res  = await apiFetch('/api/marketplace/create-test-hb-order', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      const o = data.order;
+      msg.innerHTML = `<span style="color:#16a34a;font-weight:600;">✓ ${o.order_id} oluşturuldu — ${o.status_tr}</span>`;
+      await loadTestHBOrders();
+    } else {
+      msg.innerHTML = `<span style="color:#dc2626;">${data.error || 'Hata'}</span>`;
+    }
+  } catch (err) {
+    msg.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '➕ Yeni Test Siparişi Oluştur';
+  }
+}
+
+async function loadTestHBOrders() {
+  const panel = document.getElementById('testHBOrdersPanel');
+  if (!panel) return;
+  try {
+    const res  = await apiFetch('/api/marketplace/test-hb-orders');
+    const rows = await res.json();
+    if (!rows.length) {
+      panel.innerHTML = '<p style="font-size:12px;color:#9ca3af;padding:8px 0;">Henüz test siparişi yok.</p>';
+      return;
+    }
+    let html = `<div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb;">
+            <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">SİPARİŞ NO</th>
+            <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">DURUM</th>
+            <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">MÜŞTERİ</th>
+            <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">ÜRÜNLER</th>
+            <th style="padding:8px 6px;text-align:right;color:#6b7280;font-size:10px;">TUTAR</th>
+            <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">KARGO</th>
+            <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">TARİH</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    rows.forEach(o => {
+      const st  = STATUS_STYLES[o.status] || STATUS_STYLES.bekliyor;
+      const items = Array.isArray(o.items) ? o.items.filter(i => i && i.name) : [];
+      const itemStr = items.map(i => `${i.name||'?'} ×${i.quantity||1}${i.deducted?' ✓':''}`).join('<br>');
+      const dateStr = o.order_date ? new Date(o.order_date).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+      html += `
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:8px 6px;font-family:monospace;font-size:11px;color:#374151;">
+            <span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-size:10px;">HB</span>
+            ${escHtml(o.order_id.replace('HB-TEST-','').substring(0,12))}
+          </td>
+          <td style="padding:8px 6px;">
+            <span style="background:${st.bg};color:${st.color};border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap;">
+              ${st.icon} ${escHtml(o.status_tr||o.status)}
+            </span>
+          </td>
+          <td style="padding:8px 6px;color:#374151;">${escHtml(o.customer_name||'-')}</td>
+          <td style="padding:8px 6px;color:#374151;line-height:1.6;">${itemStr||'-'}</td>
+          <td style="padding:8px 6px;text-align:right;font-weight:700;color:#1a1f3e;">${formatCurrency(o.total_price)}</td>
+          <td style="padding:8px 6px;color:#6b7280;font-size:11px;">
+            ${o.cargo_company ? escHtml(o.cargo_company) : '-'}
+            ${o.cargo_tracking_number ? `<br><span style="font-family:monospace;">${o.cargo_tracking_number}</span>` : ''}
+          </td>
+          <td style="padding:8px 6px;color:#6b7280;white-space:nowrap;">${dateStr}</td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    html += `<p style="font-size:10px;color:#9ca3af;margin-top:8px;">Toplam ${rows.length} test siparişi · ✓ = stok düşürüldü</p>`;
+    panel.innerHTML = html;
+  } catch (err) {
+    panel.innerHTML = `<p style="color:#dc2626;font-size:12px;">${err.message}</p>`;
+  }
+}
+
+async function deleteTestHBOrders() {
+  if (!confirm('Tüm test siparişleri silinecek. Emin misiniz?')) return;
+  try {
+    await apiFetch('/api/marketplace/test-hb-orders', { method: 'DELETE' });
+    document.getElementById('testOrderMsg').innerHTML = '<span style="color:#16a34a;">✓ Silindi</span>';
+    await loadTestHBOrders();
+  } catch (err) {
+    showToast('Hata: ' + err.message, 'error');
   }
 }
 

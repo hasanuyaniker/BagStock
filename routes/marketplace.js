@@ -540,6 +540,163 @@ router.post('/test-hb-connection', async (req, res) => {
   }
 });
 
+// ── POST /api/marketplace/create-test-hb-order — HB SIT test siparişi ────────
+router.post('/create-test-hb-order', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      // DB'den rastgele ürün al
+      const prodRes = await client.query(
+        `SELECT id, name, barcode, barcode2, cost_price FROM products
+         WHERE stock_quantity > 0 AND is_active = true
+         ORDER BY RANDOM() LIMIT 3`
+      );
+      const products = prodRes.rows;
+      if (products.length === 0) {
+        return res.status(400).json({ error: 'Stokta aktif ürün bulunamadı' });
+      }
+
+      // Rastgele veri üret
+      const NAMES = ['Ayşe Yılmaz','Fatma Kaya','Zeynep Demir','Emine Çelik','Hatice Şahin',
+                     'Meryem Arslan','Özlem Kurt','Gülsüm Öztürk','Sevim Aydın','Büşra Doğan'];
+      const CARGO = ['Yurtiçi Kargo','MNG Kargo','Aras Kargo','Sürat Kargo','PTT Kargo'];
+      const STATUSES = [
+        { status:'bekliyor',      status_tr:'Satıcıda Bekliyor',  raw:'WAITING_IN_MERCHANT' },
+        { status:'bekliyor',      status_tr:'Paketleme Bekliyor', raw:'PREPARING_FOR_SHIPMENT' },
+        { status:'kargoda',       status_tr:'Kargoya Verildi',    raw:'IN_CARGO' },
+        { status:'teslim_edildi', status_tr:'Teslim Edildi',      raw:'DELIVERED' },
+      ];
+
+      const ts   = Date.now();
+      const rand = Math.floor(Math.random() * 9000 + 1000);
+      const orderId = `HB-TEST-${ts}-${rand}`;
+      const st   = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+      const cust = NAMES[Math.floor(Math.random() * NAMES.length)];
+      const cargo = CARGO[Math.floor(Math.random() * CARGO.length)];
+      const tracking = st.status === 'kargoda' || st.status === 'teslim_edildi'
+        ? `TRK${rand}${Math.floor(Math.random()*100000)}`
+        : null;
+
+      // 1-3 ürün seç
+      const itemCount = Math.min(products.length, Math.floor(Math.random() * 2) + 1);
+      const items = products.slice(0, itemCount);
+      const totalPrice = items.reduce((s, p) => s + parseFloat(p.cost_price || 0) * 1.3, 0);
+
+      await client.query('BEGIN');
+
+      const orderResult = await client.query(
+        `INSERT INTO marketplace_orders
+           (platform, order_id, order_number, status, status_tr, raw_status,
+            customer_name, order_date, total_price, currency,
+            cargo_status, cargo_company, cargo_tracking_number,
+            commission_amount, commission_rate, is_returned, kargoda_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8,'TRY',$9,$10,$11,$12,$13,false,$14)
+         RETURNING id`,
+        [
+          'hepsiburada', orderId, orderId,
+          st.status, st.status_tr, st.raw,
+          cust, Math.round(totalPrice * 100) / 100,
+          st.raw,
+          st.status === 'kargoda' || st.status === 'teslim_edildi' ? cargo : null,
+          tracking,
+          Math.round(totalPrice * 0.215 * 100) / 100,  // %21.5 komisyon
+          21.5,
+          st.status === 'kargoda' ? new Date().toISOString() : null
+        ]
+      );
+
+      const moId = orderResult.rows[0].id;
+
+      for (const p of items) {
+        const qty = Math.floor(Math.random() * 2) + 1;
+        await client.query(
+          `INSERT INTO marketplace_order_items
+             (marketplace_order_id, product_id, barcode, product_name, quantity, price, raw_status, status, stock_deducted)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)`,
+          [moId, p.id, p.barcode || '', p.name || '', qty,
+           Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100,
+           st.raw, st.status]
+        );
+
+        // Kargoda/teslim ise stok düş
+        if (st.status === 'kargoda' || st.status === 'teslim_edildi') {
+          await client.query(
+            `UPDATE products SET stock_quantity = GREATEST(0, stock_quantity - $1), updated_at = NOW()
+             WHERE id = $2`,
+            [qty, p.id]
+          );
+          await client.query(
+            `UPDATE marketplace_order_items SET stock_deducted = true
+             WHERE marketplace_order_id = $1 AND product_id = $2`,
+            [moId, p.id]
+          );
+          await client.query(
+            `INSERT INTO sales (product_id, quantity_change, sale_date, marketplace, note)
+             VALUES ($1, $2, NOW(), 'hepsiburada', $3)`,
+            [p.id, -qty, `Marketplace #${orderId}`]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+
+      res.json({
+        ok: true,
+        order: { id: moId, order_id: orderId, status: st.status, status_tr: st.status_tr,
+                 customer_name: cust, cargo_company: cargo, tracking, total_price: Math.round(totalPrice*100)/100,
+                 items: items.map(p => p.name) }
+      });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[HB Test Order] Hata:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/marketplace/test-hb-orders — HB test siparişlerini listele ───────
+router.get('/test-hb-orders', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT mo.id, mo.order_id, mo.order_number, mo.status, mo.status_tr,
+              mo.customer_name, mo.order_date, mo.total_price,
+              mo.cargo_company, mo.cargo_tracking_number, mo.commission_amount,
+              JSON_AGG(JSON_BUILD_OBJECT(
+                'name', COALESCE(p.name, moi.product_name),
+                'barcode', moi.barcode,
+                'quantity', moi.quantity,
+                'deducted', moi.stock_deducted
+              ) ORDER BY moi.id) AS items
+       FROM marketplace_orders mo
+       LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+       LEFT JOIN products p ON p.id = moi.product_id
+       WHERE mo.platform = 'hepsiburada' AND mo.order_id LIKE 'HB-TEST-%'
+       GROUP BY mo.id
+       ORDER BY mo.order_date DESC
+       LIMIT 50`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/marketplace/test-hb-orders — tüm test siparişlerini sil ──────
+router.delete('/test-hb-orders', async (req, res) => {
+  try {
+    await pool.query(
+      `DELETE FROM marketplace_orders WHERE platform='hepsiburada' AND order_id LIKE 'HB-TEST-%'`
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/test-shipping-email', async (req, res) => {
   try {
     const { sendDailyShippingSummary } = require('../services/mailer');
