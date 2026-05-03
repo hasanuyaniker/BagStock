@@ -591,6 +591,8 @@ router.post('/create-test-hb-order', async (req, res) => {
         s + parseFloat(p.cost_price || 0) * 1.3 * itemQtys[i], 0);
 
       // 4. HB SIT stub API'ye test siparişi gönder
+      // Not: LineItems kaldırıldı — docs curl örneğinde yok; alan adları bilinmiyor.
+      // Telefon formatları docs'taki default değerlerle birebir eşleştirildi.
       const hbOrderNumber = `TEST-${ts}-${rand}`;
       const hbBody = {
         Customer: {
@@ -598,24 +600,17 @@ router.post('/create-test-hb-order', async (req, res) => {
           Name: cust
         },
         DeliveryAddress: {
-          AddressDetail: 'Test Adres, No: 1',
-          AddressId:     'e66765b3-d37d-488c-ae15-47051245dc9b',
-          AlternatePhoneNumber: '05321538212',
-          City:        'İstanbul',
-          CountryCode: 'TR',
-          District:    'Beşiktaş',
-          Email:       'test@bagstock.com',
-          Name:        cust,
-          PhoneNumber: '02122613231'
+          AddressDetail:        'Trump Towers',
+          AddressId:            'e66765b3-d37d-488c-ae15-47051245dc9b',
+          AlternatePhoneNumber: '045321538212',
+          City:                 'İstanbul',
+          CountryCode:          'TR',
+          District:             'Kustepe',
+          Email:                'customer@hepsiburada.com.tr',
+          Name:                 'Hepsiburada Office',
+          PhoneNumber:          '902822613231'
         },
-        LineItems: items.map((p, i) => ({
-          MerchantSku: p.barcode || String(p.id),
-          Quantity:    itemQtys[i],
-          Price:       Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100
-        })),
-        OrderDate:     new Date().toISOString(),
-        OrderNumber:   hbOrderNumber,
-        PaymentStatus: 'Paid'
+        OrderNumber: hbOrderNumber
       };
 
       let hbApiResponse;
