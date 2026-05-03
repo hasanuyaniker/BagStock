@@ -591,8 +591,9 @@ router.post('/create-test-hb-order', async (req, res) => {
         s + parseFloat(p.cost_price || 0) * 1.3 * itemQtys[i], 0);
 
       // 4. HB SIT stub API'ye test siparişi gönder
-      // Not: LineItems kaldırıldı — docs curl örneğinde yok; alan adları bilinmiyor.
-      // Telefon formatları docs'taki default değerlerle birebir eşleştirildi.
+      // LineItems alan adları docs'tan doğrulandı:
+      //   CargoCompanyId, DeliveryOptionId, ListingId, MerchantId, MerchantSku,
+      //   Quantity, Sku, Vat, isBnplMP, CustomizedProductValue
       const hbOrderNumber = `TEST-${ts}-${rand}`;
       const hbBody = {
         Customer: {
@@ -610,6 +611,17 @@ router.post('/create-test-hb-order', async (req, res) => {
           Name:                 'Hepsiburada Office',
           PhoneNumber:          '902822613231'
         },
+        LineItems: items.map((p, i) => ({
+          CargoCompanyId:  1,
+          DeliveryOptionId: 1,
+          ListingId:       p.barcode || String(p.id),
+          MerchantId:      hbCreds.merchantId,
+          MerchantSku:     p.barcode || String(p.id),
+          Quantity:        itemQtys[i],
+          Sku:             p.barcode || String(p.id),
+          Vat:             20,
+          isBnplMP:        false
+        })),
         OrderNumber: hbOrderNumber
       };
 
