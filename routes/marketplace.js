@@ -581,30 +581,38 @@ router.post('/create-test-hb-order', async (req, res) => {
 
       // 3. Rastgele listing seç (HB envanterinden)
       const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
-      const shuffled   = shuffle(hbListings);
-      const itemCount  = Math.min(shuffled.length, Math.floor(Math.random() * 2) + 1);
-      const selected   = shuffled.slice(0, itemCount);   // seçilen HB listing'leri
-      const itemQtys   = selected.map(() => Math.floor(Math.random() * 2) + 1);
-      const totalPrice = selected.reduce((s, l, i) => s + (l.price || 0) * itemQtys[i], 0);
+      const shuffled  = shuffle(hbListings);
+      const itemCount = Math.min(shuffled.length, Math.floor(Math.random() * 2) + 1);
+      const selected  = shuffled.slice(0, itemCount);
+      const itemQtys  = selected.map(() => Math.floor(Math.random() * 2) + 1);
 
-      // 4. Rastgele sipariş verisi
+      // Fiyat: listing fiyatı varsa kullan, yoksa local DB'den çek
+      const itemPrices = [];
+      for (let i = 0; i < selected.length; i++) {
+        const l = selected[i];
+        let price = l.price || 0;
+        if (price <= 0 && l.merchantSku) {
+          const mRes = await client.query(
+            `SELECT cost_price FROM products WHERE barcode=$1 OR barcode2=$1 LIMIT 1`,
+            [l.merchantSku]
+          );
+          price = parseFloat(mRes.rows[0]?.cost_price || 0) * 1.3;
+        }
+        itemPrices.push(Math.round(price * 100) / 100);
+      }
+      const totalPrice = selected.reduce((s, l, i) => s + itemPrices[i] * itemQtys[i], 0);
+
+      // 4. Müşteri bilgisi — HB yeni siparişi daima "OPEN/WAITING" olarak açar
+      // Kargo bilgisi yok, durum daima "bekliyor"
       const NAMES = ['Ayşe Yılmaz','Fatma Kaya','Zeynep Demir','Emine Çelik','Hatice Şahin',
                      'Meryem Arslan','Özlem Kurt','Gülsüm Öztürk','Sevim Aydın','Büşra Doğan'];
-      const CARGO = ['Yurtiçi Kargo','MNG Kargo','Aras Kargo','Sürat Kargo','PTT Kargo'];
-      const STATUSES = [
-        { status:'bekliyor',      status_tr:'Satıcıda Bekliyor',  raw:'WAITING_IN_MERCHANT' },
-        { status:'bekliyor',      status_tr:'Paketleme Bekliyor', raw:'PREPARING_FOR_SHIPMENT' },
-        { status:'kargoda',       status_tr:'Kargoya Verildi',    raw:'IN_CARGO' },
-        { status:'teslim_edildi', status_tr:'Teslim Edildi',      raw:'DELIVERED' },
-      ];
+      const cust = NAMES[Math.floor(Math.random() * NAMES.length)];
+      const st   = { status: 'bekliyor', status_tr: 'Bekliyor', raw: 'OPEN' };
 
-      const ts    = Date.now();
-      const rand  = Math.floor(Math.random() * 9000 + 1000);
-      const st    = STATUSES[Math.floor(Math.random() * STATUSES.length)];
-      const cust  = NAMES[Math.floor(Math.random() * NAMES.length)];
-      const cargo = CARGO[Math.floor(Math.random() * CARGO.length)];
-
-      const hbOrderNumber = `${ts}${rand}`;  // HB rakam-only formatı
+      const ts   = Date.now();
+      const rand = Math.floor(Math.random() * 9000 + 1000);
+      const hbOrderNumber = `${ts}${rand}`;       // HB'ye gönderilen rakam-only format
+      const bagstockOrderNumber = `HBTEST-${ts}${rand}`;  // BagStock DB'de saklanan, filtrelenebilir format
 
       // 5. HB SIT stub API'ye gönder — seçilen listing'lerin gerçek ID/SKU'larıyla
       const hbBody = {
@@ -646,18 +654,18 @@ router.post('/create-test-hb-order', async (req, res) => {
         return res.status(502).json({ error: `Hepsiburada SIT API hatası: ${hbErr.message}` });
       }
 
-      // HB'nin atadığı order ID'yi al (yoksa fallback)
+      // HB'nin atadığı order ID'yi al — tüm olası field adlarını dene
+      console.log('[HB Test Order] Tam API yanıtı:', JSON.stringify(hbApiResponse));
       const hbAssignedId =
-        hbApiResponse?.orderId     || hbApiResponse?.OrderId     ||
-        hbApiResponse?.orderNumber || hbApiResponse?.OrderNumber ||
-        hbApiResponse?.id          || null;
+        hbApiResponse?.orderId        || hbApiResponse?.OrderId        ||
+        hbApiResponse?.orderNumber    || hbApiResponse?.OrderNumber    ||
+        hbApiResponse?.order_id       || hbApiResponse?.order_number   ||
+        hbApiResponse?.id             || hbApiResponse?.Id             ||
+        (typeof hbApiResponse === 'string' ? hbApiResponse : null)     ||
+        null;
       const orderId = hbAssignedId ? String(hbAssignedId) : `HB-TEST-${ts}-${rand}`;
 
-      const tracking = st.status === 'kargoda' || st.status === 'teslim_edildi'
-        ? `TRK${rand}${Math.floor(Math.random() * 100000)}`
-        : null;
-
-      // 6. Local DB'ye kaydet — HB listing verisiyle
+      // 6. Local DB'ye kaydet — HB listing verisiyle, gerçek durumla (daima bekliyor)
       await client.query('BEGIN');
 
       const orderResult = await client.query(
@@ -669,15 +677,16 @@ router.post('/create-test-hb-order', async (req, res) => {
          VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8,'TRY',$9,$10,$11,$12,$13,false,$14)
          RETURNING id`,
         [
-          'hepsiburada', orderId, hbOrderNumber,
+          'hepsiburada', orderId, bagstockOrderNumber,
           st.status, st.status_tr, st.raw,
-          cust, Math.round(totalPrice * 100) / 100,
-          st.raw,
-          st.status === 'kargoda' || st.status === 'teslim_edildi' ? cargo : null,
-          tracking,
+          cust,
+          Math.round(totalPrice * 100) / 100,
+          st.raw,  // cargo_status = raw_status (OPEN)
+          null,    // cargo_company — yeni sipariş, kargo yok
+          null,    // cargo_tracking_number — yok
           Math.round(totalPrice * 0.215 * 100) / 100,
           21.5,
-          st.status === 'kargoda' ? new Date().toISOString() : null
+          null     // kargoda_at — yok
         ]
       );
 
@@ -702,30 +711,15 @@ router.post('/create-test-hb-order', async (req, res) => {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false)`,
           [
             moId, itemId, localProductId,
-            l.merchantSku || l.sku || '',    // HB'deki barkod/SKU
-            l.name || l.merchantSku || '',   // HB'deki ürün adı
+            l.merchantSku || l.sku || '',
+            l.name || l.merchantSku || '',
             qty,
-            l.price || 0,
+            itemPrices[i],
             st.raw, st.status
           ]
         );
 
-        // Stok düşme: sadece eşleşen local ürün varsa
-        if (localProductId && (st.status === 'kargoda' || st.status === 'teslim_edildi')) {
-          await client.query(
-            `UPDATE products SET stock_quantity = GREATEST(0, stock_quantity - $1), updated_at = NOW()
-             WHERE id = $2`, [qty, localProductId]
-          );
-          await client.query(
-            `UPDATE marketplace_order_items SET stock_deducted = true
-             WHERE marketplace_order_id = $1 AND product_id = $2`, [moId, localProductId]
-          );
-          await client.query(
-            `INSERT INTO sales (product_id, quantity_change, sale_date, marketplace, note)
-             VALUES ($1, $2, NOW(), 'hepsiburada', $3)`,
-            [localProductId, -qty, `Marketplace #${orderId}`]
-          );
-        }
+        // Stok düşme yok — yeni siparişler daima "bekliyor" statüsünde
       }
 
       await client.query('COMMIT');
@@ -734,8 +728,12 @@ router.post('/create-test-hb-order', async (req, res) => {
         ok: true,
         hbApiResponse,
         order: {
-          id: moId, order_id: orderId, status: st.status, status_tr: st.status_tr,
-          customer_name: cust, cargo_company: cargo, tracking,
+          id: moId,
+          order_id: orderId,
+          order_number: bagstockOrderNumber,
+          hb_order_number: hbOrderNumber,
+          status: st.status, status_tr: st.status_tr,
+          customer_name: cust,
           total_price: Math.round(totalPrice * 100) / 100,
           items: selected.map(l => l.name || l.merchantSku)
         }
@@ -769,7 +767,7 @@ router.get('/test-hb-orders', async (req, res) => {
        LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
        LEFT JOIN products p ON p.id = moi.product_id
        WHERE mo.platform = 'hepsiburada'
-         AND (mo.order_number LIKE 'TEST-%' OR mo.order_id LIKE 'HB-TEST-%')
+         AND (mo.order_number LIKE 'TEST-%' OR mo.order_number LIKE 'HBTEST-%' OR mo.order_id LIKE 'HB-TEST-%')
        GROUP BY mo.id
        ORDER BY mo.order_date DESC
        LIMIT 50`
@@ -785,7 +783,7 @@ router.delete('/test-hb-orders', async (req, res) => {
   try {
     await pool.query(
       `DELETE FROM marketplace_orders WHERE platform='hepsiburada'
-       AND (order_number LIKE 'TEST-%' OR order_id LIKE 'HB-TEST-%')`
+       AND (order_number LIKE 'TEST-%' OR order_number LIKE 'HBTEST-%' OR order_id LIKE 'HB-TEST-%')`
     );
     res.json({ ok: true });
   } catch (err) {
@@ -830,15 +828,20 @@ router.post('/hb-catalog-submit', async (req, res) => {
     const p = prodRes.rows[0];
     const price = parseFloat(p.cost_price || 0) * 1.3;
 
-    // HB katalog ürün formatı (Hızlı Ürün Yükleme)
+    // HB katalog ürün formatı (integrator.json / Hızlı Ürün Yükleme)
+    // Kaynak: https://developers.hepsiburada.com → product/api/products/import
     const catalogProduct = [{
-      merchantSku:  p.barcode,
-      VatRate:      20,
-      price:        Math.round(price * 100) / 100,
-      stock:        p.stock_quantity || 1,
-      productName:  p.name,
-      images:       [],
-      attributes:   []
+      merchantSku:   p.barcode,
+      VatRate:       20,
+      price:         Math.round(price * 100) / 100,
+      stock:         p.stock_quantity || 1,
+      productName:   p.name,
+      description:   p.name,
+      barcode:       p.barcode,
+      images:        [],
+      attributes:    [],
+      categoryId:    '',
+      brand:         'BagStock'
     }];
 
     const result = await submitHBCatalogProduct(creds, catalogProduct);

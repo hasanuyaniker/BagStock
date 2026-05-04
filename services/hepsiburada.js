@@ -443,7 +443,8 @@ async function createHBTestOrder(creds, orderData) {
 
 /**
  * 1. KATALOG: HB'ye ürün gönder, trackingId al
- * POST https://mpop-sit.hepsiburada.com/products/api/products/import/list
+ * POST https://mpop-sit.hepsiburada.com/product/api/products/import
+ * Body: multipart/form-data — "file" alanında integrator.json
  */
 async function submitHBCatalogProduct(creds, products) {
   const { merchantId, username, apiKey, environment } = creds;
@@ -451,15 +452,30 @@ async function submitHBCatalogProduct(creds, products) {
     ? 'https://mpop.hepsiburada.com'
     : 'https://mpop-sit.hepsiburada.com';
 
-  const headers = makeHBHeaders(merchantId, apiKey, username);
-  const url = `${base}/products/api/products`;
+  // Basic Auth header — Content-Type FormData tarafından otomatik set edilecek
+  const credentials = Buffer.from(`${merchantId}:${apiKey}`).toString('base64');
+  const authHeaders = {
+    'Authorization': `Basic ${credentials}`,
+    'User-Agent':    username || 'BagStock',
+    'Accept':        'application/json'
+    // Content-Type YOK — fetch FormData için boundary'li multipart/form-data'yı kendi set eder
+  };
 
-  console.log(`[HepsiB Katalog] POST ${url}`);
+  // Multipart form: JSON içeriği 'file' alanına 'integrator.json' adıyla eklenir
+  const jsonContent = JSON.stringify(products);
+  const blob = new Blob([jsonContent], { type: 'application/json' });
+  const form = new FormData();
+  form.append('file', blob, 'integrator.json');
+
+  const url = `${base}/product/api/products/import`;
+  console.log(`[HepsiB Katalog] POST ${url} | Ürün sayısı: ${products.length}`);
+  console.log(`[HepsiB Katalog] İçerik: ${jsonContent.substring(0, 300)}`);
+
   const res = await fetch(url, {
     method:  'POST',
-    headers,
-    body:    JSON.stringify(products),
-    signal:  AbortSignal.timeout(20000)
+    headers: authHeaders,
+    body:    form,
+    signal:  AbortSignal.timeout(30000)
   });
   const rawText = await res.text();
   console.log(`[HepsiB Katalog] HTTP ${res.status} | ${rawText.substring(0, 500)}`);
@@ -493,6 +509,10 @@ async function getHBTrackingStatus(creds, trackingId) {
 /**
  * 2. LİSTELEME: Stok ve fiyat güncelle
  * POST https://listing-external-sit.hepsiburada.com/listings/merchantid/{merchantId}
+ *
+ * NOT: HB listing güncelleme endpoint'i PUT değil POST kullanır.
+ * Her listing için ayrı bir PATCH isteği de deneyebilirsiniz:
+ *   PATCH /listings/merchantid/{merchantId}/listing/{listingId}
  */
 async function updateHBListingStockPrice(creds, updates) {
   const { merchantId, username, apiKey, environment } = creds;
@@ -501,20 +521,53 @@ async function updateHBListingStockPrice(creds, updates) {
     : 'https://listing-external-sit.hepsiburada.com';
 
   const headers = makeHBHeaders(merchantId, apiKey, username);
-  const url = `${base}/listings/merchantid/${merchantId}`;
 
-  console.log(`[HepsiB Listeleme] PUT ${url} — ${updates.length} ürün`);
-  const res = await fetch(url, {
-    method:  'PUT',
+  // Toplu güncelleme: POST /listings/merchantid/{merchantId}
+  const bulkUrl = `${base}/listings/merchantid/${merchantId}`;
+  console.log(`[HepsiB Listeleme] POST ${bulkUrl} — ${updates.length} ürün`);
+  console.log(`[HepsiB Listeleme] Body: ${JSON.stringify(updates).substring(0, 400)}`);
+
+  const bulkRes = await fetch(bulkUrl, {
+    method:  'POST',
     headers,
     body:    JSON.stringify(updates),
     signal:  AbortSignal.timeout(20000)
   });
-  const rawText = await res.text();
-  console.log(`[HepsiB Listeleme] HTTP ${res.status} | ${rawText.substring(0, 500)}`);
+  const bulkText = await bulkRes.text();
+  console.log(`[HepsiB Listeleme POST] HTTP ${bulkRes.status} | ${bulkText.substring(0, 500)}`);
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 400)}`);
-  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+  if (bulkRes.ok) {
+    try { return JSON.parse(bulkText); } catch { return { raw: bulkText }; }
+  }
+
+  // POST de başarısız olursa, tek tek PATCH dene
+  console.warn(`[HepsiB Listeleme] POST başarısız (${bulkRes.status}), tek tek PATCH deneniyor...`);
+  const results = [];
+  for (const u of updates) {
+    if (!u.listingId) continue;
+    const patchUrl = `${base}/listings/merchantid/${merchantId}/listing/${u.listingId}`;
+    console.log(`[HepsiB Listeleme] PATCH ${patchUrl}`);
+    try {
+      const patchRes = await fetch(patchUrl, {
+        method:  'PATCH',
+        headers,
+        body:    JSON.stringify({ availableStock: u.availableStock, price: u.price, isSalable: u.isSalable }),
+        signal:  AbortSignal.timeout(10000)
+      });
+      const patchText = await patchRes.text();
+      console.log(`[HepsiB Listeleme PATCH] HTTP ${patchRes.status} | ${patchText.substring(0, 200)}`);
+      results.push({ listingId: u.listingId, status: patchRes.status, ok: patchRes.ok });
+    } catch (e) {
+      results.push({ listingId: u.listingId, status: 0, ok: false, error: e.message });
+    }
+  }
+
+  const successCount = results.filter(r => r.ok).length;
+  if (successCount === 0) {
+    // Her iki yöntem de başarısız — hatayı fırlat
+    throw new Error(`HTTP ${bulkRes.status}: ${bulkText.substring(0, 400)}`);
+  }
+  return { updated: successCount, results };
 }
 
 /**
