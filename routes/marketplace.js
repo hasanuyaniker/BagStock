@@ -586,7 +586,7 @@ router.post('/create-test-hb-order', async (req, res) => {
       const selected  = shuffled.slice(0, itemCount);
       const itemQtys  = selected.map(() => Math.floor(Math.random() * 2) + 1);
 
-      // Fiyat: listing fiyatı varsa kullan, yoksa local DB'den çek
+      // Fiyat: 1) HB listing fiyatı → 2) Local DB cost_price×1.3 → 3) Minimum 150 TL
       const itemPrices = [];
       for (let i = 0; i < selected.length; i++) {
         const l = selected[i];
@@ -598,6 +598,8 @@ router.post('/create-test-hb-order', async (req, res) => {
           );
           price = parseFloat(mRes.rows[0]?.cost_price || 0) * 1.3;
         }
+        // Hâlâ 0 ise minimum fiyat — HB SIT'te fiyat boş olabilir
+        if (price <= 0) price = 150;
         itemPrices.push(Math.round(price * 100) / 100);
       }
       const totalPrice = selected.reduce((s, l, i) => s + itemPrices[i] * itemQtys[i], 0);
@@ -828,20 +830,28 @@ router.post('/hb-catalog-submit', async (req, res) => {
     const p = prodRes.rows[0];
     const price = parseFloat(p.cost_price || 0) * 1.3;
 
-    // HB katalog ürün formatı (integrator.json / Hızlı Ürün Yükleme)
-    // Kaynak: https://developers.hepsiburada.com → product/api/products/import
+    // HB katalog ürün formatı — integrator.json şeması (docs'tan doğrulandı)
+    // Kaynak: https://developers.hepsiburada.com/hepsiburada/reference/uploadproductviafile
+    // price: Türk formatı — virgüllü string ("130,50"), stock: string
+    // merchantSku: BÜYÜK harf, boşluksuz (HB zorunluluğu)
+    const sku = (p.barcode || '').toUpperCase().replace(/\s+/g, '');
+    const priceStr = String(Math.round(price * 100) / 100).replace('.', ',');
     const catalogProduct = [{
-      merchantSku:   p.barcode,
-      VatRate:       20,
-      price:         Math.round(price * 100) / 100,
-      stock:         p.stock_quantity || 1,
-      productName:   p.name,
-      description:   p.name,
-      barcode:       p.barcode,
-      images:        [],
-      attributes:    [],
-      categoryId:    '',
-      brand:         'BagStock'
+      categoryId: 18021982,           // Test kategori ID (HB SIT örnek kategorisi)
+      merchant:   creds.merchantId,   // merchantId string olarak
+      attributes: {
+        merchantSku:      sku,
+        VaryantGroupID:   sku,
+        Barcode:          p.barcode,
+        UrunAdi:          p.name,
+        UrunAciklamasi:   p.name,
+        Marka:            'BagStock',
+        GarantiSuresi:    24,
+        kg:               '1',
+        tax_vat_rate:     '20',
+        price:            priceStr,
+        stock:            String(p.stock_quantity || 1)
+      }
     }];
 
     const result = await submitHBCatalogProduct(creds, catalogProduct);
@@ -910,12 +920,12 @@ router.post('/hb-update-stock-price', async (req, res) => {
         }
       }
 
+      // HB docs field isimleri: hepsiburadaSku | merchantSku, price (double), availableStock (int32)
       updates.push({
-        listingId:        l.listingId,
-        merchantSku:      l.merchantSku,
-        availableStock:   stock,
-        price:            Math.round(price * 100) / 100,
-        isSalable:        true
+        hepsiburadaSku:  l.sku || l.listingId,
+        merchantSku:     l.merchantSku,
+        availableStock:  stock,
+        price:           Math.round(price * 100) / 100
       });
     }
 

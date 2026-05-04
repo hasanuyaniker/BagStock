@@ -508,11 +508,10 @@ async function getHBTrackingStatus(creds, trackingId) {
 
 /**
  * 2. LİSTELEME: Stok ve fiyat güncelle
- * POST https://listing-external-sit.hepsiburada.com/listings/merchantid/{merchantId}
+ * POST https://listing-external-sit.hepsiburada.com/listings/merchantid/{merchantId}/inventory-uploads
  *
- * NOT: HB listing güncelleme endpoint'i PUT değil POST kullanır.
- * Her listing için ayrı bir PATCH isteği de deneyebilirsiniz:
- *   PATCH /listings/merchantid/{merchantId}/listing/{listingId}
+ * Docs: https://developers.hepsiburada.com/hepsiburada/reference/listing-envanter-guncelleme
+ * Body alanları: hepsiburadaSku | merchantSku, price (double), availableStock (int32)
  */
 async function updateHBListingStockPrice(creds, updates) {
   const { merchantId, username, apiKey, environment } = creds;
@@ -522,52 +521,22 @@ async function updateHBListingStockPrice(creds, updates) {
 
   const headers = makeHBHeaders(merchantId, apiKey, username);
 
-  // Toplu güncelleme: POST /listings/merchantid/{merchantId}
-  const bulkUrl = `${base}/listings/merchantid/${merchantId}`;
-  console.log(`[HepsiB Listeleme] POST ${bulkUrl} — ${updates.length} ürün`);
-  console.log(`[HepsiB Listeleme] Body: ${JSON.stringify(updates).substring(0, 400)}`);
+  // Doğru endpoint: /inventory-uploads (docs'tan doğrulandı)
+  const url = `${base}/listings/merchantid/${merchantId}/inventory-uploads`;
+  console.log(`[HepsiB Listeleme] POST ${url} — ${updates.length} ürün`);
+  console.log(`[HepsiB Listeleme] Body[0]: ${JSON.stringify(updates[0]).substring(0, 300)}`);
 
-  const bulkRes = await fetch(bulkUrl, {
+  const res = await fetch(url, {
     method:  'POST',
     headers,
     body:    JSON.stringify(updates),
     signal:  AbortSignal.timeout(20000)
   });
-  const bulkText = await bulkRes.text();
-  console.log(`[HepsiB Listeleme POST] HTTP ${bulkRes.status} | ${bulkText.substring(0, 500)}`);
+  const rawText = await res.text();
+  console.log(`[HepsiB Listeleme] HTTP ${res.status} | ${rawText.substring(0, 500)}`);
 
-  if (bulkRes.ok) {
-    try { return JSON.parse(bulkText); } catch { return { raw: bulkText }; }
-  }
-
-  // POST de başarısız olursa, tek tek PATCH dene
-  console.warn(`[HepsiB Listeleme] POST başarısız (${bulkRes.status}), tek tek PATCH deneniyor...`);
-  const results = [];
-  for (const u of updates) {
-    if (!u.listingId) continue;
-    const patchUrl = `${base}/listings/merchantid/${merchantId}/listing/${u.listingId}`;
-    console.log(`[HepsiB Listeleme] PATCH ${patchUrl}`);
-    try {
-      const patchRes = await fetch(patchUrl, {
-        method:  'PATCH',
-        headers,
-        body:    JSON.stringify({ availableStock: u.availableStock, price: u.price, isSalable: u.isSalable }),
-        signal:  AbortSignal.timeout(10000)
-      });
-      const patchText = await patchRes.text();
-      console.log(`[HepsiB Listeleme PATCH] HTTP ${patchRes.status} | ${patchText.substring(0, 200)}`);
-      results.push({ listingId: u.listingId, status: patchRes.status, ok: patchRes.ok });
-    } catch (e) {
-      results.push({ listingId: u.listingId, status: 0, ok: false, error: e.message });
-    }
-  }
-
-  const successCount = results.filter(r => r.ok).length;
-  if (successCount === 0) {
-    // Her iki yöntem de başarısız — hatayı fırlat
-    throw new Error(`HTTP ${bulkRes.status}: ${bulkText.substring(0, 400)}`);
-  }
-  return { updated: successCount, results };
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 400)}`);
+  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
 }
 
 /**
