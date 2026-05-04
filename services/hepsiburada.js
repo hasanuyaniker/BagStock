@@ -387,6 +387,7 @@ async function fetchHBListings(creds, limit = 10) {
     listingId:   String(l.id || l.listingId || l.ListingId || ''),
     merchantSku: String(l.merchantSku || l.MerchantSku || l.sku || ''),
     sku:         String(l.hepsiburadaSku || l.sku || l.Sku || l.merchantSku || ''),
+    name:        String(l.productName || l.name || l.title || l.merchantSku || l.sku || ''),
     price:       parseFloat(l.price || l.salePrice || 0),
   })).filter(l => l.listingId);
 }

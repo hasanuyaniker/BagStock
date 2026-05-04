@@ -699,16 +699,23 @@ router.post('/create-test-hb-order', async (req, res) => {
       const moId = orderResult.rows[0].id;
 
       for (let i = 0; i < items.length; i++) {
-        const p   = items[i];
-        const qty = itemQtys[i];
-        const itemId = `TEST-${orderId}-${p.id}-${Date.now()}`;
+        const p       = items[i];                              // local ürün (stok düşme için)
+        const listing = hbListings[i % hbListings.length];    // HB listing (görüntü için)
+        const qty     = itemQtys[i];
+        const itemId  = `TEST-${orderId}-${i}-${Date.now()}`;
+
+        // Ürün adı ve barkod: HB listing verisi kullanılıyor (BagStock ↔ HB tutarlılığı)
+        const displayName    = listing.name || listing.merchantSku || listing.sku || p.name || '';
+        const displayBarcode = listing.merchantSku || listing.sku || p.barcode || '';
+        const displayPrice   = listing.price > 0
+          ? listing.price
+          : Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100;
+
         await client.query(
           `INSERT INTO marketplace_order_items
              (marketplace_order_id, item_id, product_id, barcode, product_name, quantity, price, raw_status, status, stock_deducted)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false)`,
-          [moId, itemId, p.id, p.barcode || '', p.name || '', qty,
-           Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100,
-           st.raw, st.status]
+          [moId, itemId, p.id, displayBarcode, displayName, qty, displayPrice, st.raw, st.status]
         );
 
         // Kargoda/teslim ise stok düş
