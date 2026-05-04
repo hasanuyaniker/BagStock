@@ -2722,8 +2722,11 @@ async function createTestHBOrder() {
     const data = await res.json();
     if (res.ok && data.ok) {
       const o = data.order;
-      msg.innerHTML = `<span style="color:#16a34a;font-weight:600;">✓ ${o.order_id} oluşturuldu — ${o.status_tr}</span>
-        &nbsp;<a href="#" onclick="goToOrders();return false;" style="font-size:11px;color:#5b3de8;">Siparişlerde Gör →</a>`;
+      // hb_order_number = HB portaldaki "Satıcı Sipariş No" ile eşleşen numara
+      const displayNum = o.hb_order_number || (o.order_number||'').replace('HBTEST-','') || o.order_id;
+      msg.innerHTML = `<span style="color:#16a34a;font-weight:600;">✓ HB Sipariş No: <code style="background:#f0fdf4;padding:1px 6px;border-radius:3px;">${displayNum}</code> — ${o.status_tr}</span>
+        &nbsp;<a href="#" onclick="goToOrders();return false;" style="font-size:11px;color:#5b3de8;">Siparişlerde Gör →</a>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px;">Bu numara HB test portalında "Satıcı Sipariş No" olarak görünür.</div>`;
       await loadTestHBOrders();
     } else {
       msg.innerHTML = `<span style="color:#dc2626;">${data.error || 'Hata'}</span>`;
@@ -2785,7 +2788,9 @@ async function loadTestHBOrders() {
         <tr style="border-bottom:1px solid #f3f4f6;">
           <td style="padding:8px 6px;font-family:monospace;font-size:11px;color:#374151;">
             <span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-size:10px;">HB</span>
-            ${escHtml(String(o.order_id).substring(0,14))}
+            <span title="HB Satıcı Sipariş No — portaldaki numara ile eşleştirin">
+              ${escHtml(String(o.order_number||'').replace('HBTEST-','').replace('TEST-','') || String(o.order_id).replace('HB-TEST-',''))}
+            </span>
           </td>
           <td style="padding:8px 6px;">
             <span style="background:${st.bg};color:${st.color};border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap;">
@@ -2840,21 +2845,30 @@ async function hbCatalogSubmit() {
     const r    = await apiFetch('/api/marketplace/hb-catalog-submit', { method: 'POST' });
     const data = await r.json();
     if (r.ok && data.ok) {
-      const tid = data.trackingId || '(yanıtta bulunamadı — logları kontrol edin)';
+      const tid = data.trackingId || null;
       res.innerHTML = `
         <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:10px;">
           <div style="font-weight:600;color:#047857;margin-bottom:6px;">✓ Ürün kataloğa gönderildi</div>
-          <div style="font-size:12px;">Ürün: <b>${data.product?.name || ''}</b> (${data.product?.sku || ''})</div>
+          <div style="font-size:12px;">Ürün: <b>${escHtml(data.product?.name || '')}</b> (${escHtml(data.product?.sku || '')})</div>
+          ${tid ? `
           <div style="font-size:12px;margin-top:6px;">
             <b>TrackingId:</b>
-            <code style="background:#f0fdf4;padding:2px 8px;border-radius:4px;font-size:13px;color:#065f46;user-select:all;">${tid}</code>
-            <button onclick="navigator.clipboard.writeText('${tid}');this.textContent='✓ Kopyalandı'"
+            <code id="hbTrackingIdCode" style="background:#f0fdf4;padding:2px 8px;border-radius:4px;font-size:13px;color:#065f46;user-select:all;">${escHtml(tid)}</code>
+            <button onclick="navigator.clipboard.writeText('${escHtml(tid)}');this.textContent='✓ Kopyalandı'"
               style="margin-left:8px;font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff;">
               Kopyala
             </button>
+            <button onclick="hbCheckCatalogStatus('${escHtml(tid)}')"
+              style="margin-left:4px;font-size:11px;padding:2px 8px;border:1px solid #6366f1;border-radius:4px;cursor:pointer;background:#eef2ff;color:#4338ca;">
+              🔍 Durumu Sorgula
+            </button>
           </div>
+          <div id="hbTrackingStatus" style="margin-top:8px;font-size:12px;"></div>
+          ` : `<div style="color:#dc2626;font-size:12px;margin-top:6px;">⚠️ TrackingId alınamadı — Railway loglarını kontrol edin: ${escHtml(JSON.stringify(data.rawResponse||{}).substring(0,200))}</div>`}
           <div style="font-size:11px;color:#6b7280;margin-top:8px;">Bu trackingId'yi HB'ye e-posta ile iletin.</div>
         </div>`;
+      // TrackingId varsa 3 saniye sonra otomatik durum sorgula
+      if (tid) setTimeout(() => hbCheckCatalogStatus(tid), 3000);
     } else {
       res.innerHTML = `<span style="color:#dc2626;">Hata: ${data.error || JSON.stringify(data)}</span>`;
     }
@@ -2862,6 +2876,48 @@ async function hbCatalogSubmit() {
     res.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`;
   } finally {
     btn.disabled = false; btn.textContent = '📤 Kataloğa Ürün Gönder';
+  }
+}
+
+async function hbCheckCatalogStatus(trackingId) {
+  const statusEl = document.getElementById('hbTrackingStatus');
+  if (!statusEl) return;
+  statusEl.innerHTML = '<span style="color:#6b7280;">⏳ Durum sorgulanıyor...</span>';
+  try {
+    const r = await apiFetch(`/api/marketplace/hb-catalog-tracking/${encodeURIComponent(trackingId)}`);
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      const result = data.result;
+      // Farklı response formatlarını dene
+      const items = result?.data || result?.items || (Array.isArray(result) ? result : null);
+      const importStatus = result?.importStatus || result?.status || '';
+      const products = Array.isArray(items) ? items : [];
+
+      let statusHtml = '';
+      if (products.length > 0) {
+        products.forEach((p, i) => {
+          const ps = p.productStatus || p.status || importStatus || '-';
+          const msg = p.importMessages?.map(m => m.message).join('; ') || p.message || '';
+          const color = ps === 'Satışa Hazır' ? '#16a34a' : ps === 'İncelenecek' ? '#d97706' : ps === 'Ürün bilgileri eksik' ? '#dc2626' : '#374151';
+          statusHtml += `<div style="margin-bottom:4px;"><b>${escHtml(p.merchantSku || p.productName || `Ürün ${i+1}`)}</b>:
+            <span style="color:${color};font-weight:600;">${escHtml(ps)}</span>
+            ${msg ? `<br><span style="color:#6b7280;font-size:11px;">${escHtml(msg)}</span>` : ''}
+          </div>`;
+        });
+      } else if (importStatus) {
+        const color = importStatus === 'SUCCESS' ? '#16a34a' : importStatus === 'PROCESSING' ? '#d97706' : '#dc2626';
+        statusHtml = `<span style="color:${color};font-weight:600;">${escHtml(importStatus)}</span>`;
+      } else {
+        statusHtml = `<pre style="font-size:10px;overflow:auto;max-height:120px;">${escHtml(JSON.stringify(result, null, 2).substring(0, 600))}</pre>`;
+      }
+
+      statusEl.innerHTML = `<div style="border-top:1px solid #e5e7eb;padding-top:8px;margin-top:4px;">
+        <b style="font-size:11px;color:#374151;">📊 Katalog Durumu:</b><br>${statusHtml}</div>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:#dc2626;font-size:11px;">Durum sorgulanamadı: ${escHtml(data.error || '')}</span>`;
+    }
+  } catch (err) {
+    statusEl.innerHTML = `<span style="color:#dc2626;font-size:11px;">${escHtml(err.message)}</span>`;
   }
 }
 
