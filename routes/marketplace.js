@@ -610,7 +610,7 @@ router.post('/create-test-hb-order', async (req, res) => {
       // LineItems alan adları docs'tan doğrulandı:
       //   CargoCompanyId, DeliveryOptionId, ListingId, MerchantId, MerchantSku,
       //   Quantity, Sku, Vat, isBnplMP
-      const hbOrderNumber = `TEST-${ts}-${rand}`;
+      const hbOrderNumber = `${ts}${rand}`;   // HB sadece rakam kabul ediyor
 
       // Her ürün için bir HB listing eşleştir (döngüsel olarak)
       const hbBody = {
