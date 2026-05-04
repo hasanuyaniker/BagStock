@@ -820,7 +820,7 @@ router.post('/hb-catalog-submit', async (req, res) => {
 
     // BagStock'tan bir ürün al (barcode, fiyat, isim)
     const prodRes = await client.query(
-      `SELECT id, name, barcode, sale_price, cost_price, stock_quantity
+      `SELECT id, name, barcode, cost_price, stock_quantity
        FROM products WHERE is_active = true AND barcode IS NOT NULL AND barcode != ''
        ORDER BY updated_at DESC LIMIT 1`
     );
@@ -828,7 +828,7 @@ router.post('/hb-catalog-submit', async (req, res) => {
       return res.status(400).json({ error: 'Gönderilebilecek ürün bulunamadı (barcode gerekli)' });
     }
     const p = prodRes.rows[0];
-    const price = parseFloat(p.sale_price || p.cost_price || 0) * 1.3;
+    const price = parseFloat(p.cost_price || 0) * 1.3;
 
     // HB katalog ürün formatı (Hızlı Ürün Yükleme)
     const catalogProduct = [{
@@ -896,14 +896,14 @@ router.post('/hb-update-stock-price', async (req, res) => {
 
       if (l.merchantSku) {
         const match = await client.query(
-          `SELECT stock_quantity, sale_price, cost_price
+          `SELECT stock_quantity, cost_price
            FROM products WHERE barcode = $1 OR barcode2 = $1 LIMIT 1`,
           [l.merchantSku]
         );
         if (match.rows.length) {
           const mp = match.rows[0];
           stock = mp.stock_quantity || 10;
-          price = parseFloat(mp.sale_price || mp.cost_price || 0) * 1.3 || price;
+          price = parseFloat(mp.cost_price || 0) * 1.3 || price;
         }
       }
 
