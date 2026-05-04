@@ -532,6 +532,7 @@ router.post('/test-hb-connection', async (req, res) => {
 });
 
 // ── POST /api/marketplace/create-test-hb-order — HB SIT test siparişi ────────
+// Akış: HB envanterini çek → rastgele listing seç → HB stub API'ye gönder → DB'ye kaydet
 router.post('/create-test-hb-order', async (req, res) => {
   try {
     const client = await pool.connect();
@@ -555,18 +556,34 @@ router.post('/create-test-hb-order', async (req, res) => {
         });
       }
 
-      // 2. DB'den rastgele ürün al
-      const prodRes = await client.query(
-        `SELECT id, name, barcode, barcode2, cost_price FROM products
-         WHERE stock_quantity > 0 AND is_active = true
-         ORDER BY RANDOM() LIMIT 3`
-      );
-      const products = prodRes.rows;
-      if (products.length === 0) {
-        return res.status(400).json({ error: 'Stokta aktif ürün bulunamadı' });
+      // 2. HB SIT envanterini çek (asıl kaynak — local products tablosu kullanılmıyor)
+      let hbListings = [];
+      try {
+        const result = await fetchHBListings(hbCreds, 50);
+        hbListings = result.listings || result; // fetchHBListings { listings, raw } döndürüyor
+      } catch (listErr) {
+        console.error('[HB Test Order] Listing çekme hatası:', listErr.message);
+        return res.status(502).json({
+          error: `Hepsiburada envanteri çekilemedi: ${listErr.message}`
+        });
       }
 
-      // 3. Rastgele veri üret
+      if (hbListings.length === 0) {
+        return res.status(400).json({
+          error: 'Hepsiburada SIT hesabında aktif listing bulunamadı. ' +
+                 'Önce Hepsiburada SIT portalında ürün listeleyin.'
+        });
+      }
+
+      // 3. Rastgele listing seç (HB envanterinden)
+      const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+      const shuffled   = shuffle(hbListings);
+      const itemCount  = Math.min(shuffled.length, Math.floor(Math.random() * 2) + 1);
+      const selected   = shuffled.slice(0, itemCount);   // seçilen HB listing'leri
+      const itemQtys   = selected.map(() => Math.floor(Math.random() * 2) + 1);
+      const totalPrice = selected.reduce((s, l, i) => s + (l.price || 0) * itemQtys[i], 0);
+
+      // 4. Rastgele sipariş verisi
       const NAMES = ['Ayşe Yılmaz','Fatma Kaya','Zeynep Demir','Emine Çelik','Hatice Şahin',
                      'Meryem Arslan','Özlem Kurt','Gülsüm Öztürk','Sevim Aydın','Büşra Doğan'];
       const CARGO = ['Yurtiçi Kargo','MNG Kargo','Aras Kargo','Sürat Kargo','PTT Kargo'];
@@ -577,42 +594,15 @@ router.post('/create-test-hb-order', async (req, res) => {
         { status:'teslim_edildi', status_tr:'Teslim Edildi',      raw:'DELIVERED' },
       ];
 
-      const ts        = Date.now();
-      const rand      = Math.floor(Math.random() * 9000 + 1000);
-      const st        = STATUSES[Math.floor(Math.random() * STATUSES.length)];
-      const cust      = NAMES[Math.floor(Math.random() * NAMES.length)];
-      const cargo     = CARGO[Math.floor(Math.random() * CARGO.length)];
+      const ts    = Date.now();
+      const rand  = Math.floor(Math.random() * 9000 + 1000);
+      const st    = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+      const cust  = NAMES[Math.floor(Math.random() * NAMES.length)];
+      const cargo = CARGO[Math.floor(Math.random() * CARGO.length)];
 
-      // 1-3 ürün seç
-      const itemCount   = Math.min(products.length, Math.floor(Math.random() * 2) + 1);
-      const items       = products.slice(0, itemCount);
-      const itemQtys    = items.map(() => Math.floor(Math.random() * 2) + 1);
-      const totalPrice  = items.reduce((s, p, i) =>
-        s + parseFloat(p.cost_price || 0) * 1.3 * itemQtys[i], 0);
+      const hbOrderNumber = `${ts}${rand}`;  // HB rakam-only formatı
 
-      // 4. HB SIT listing'lerinden geçerli ListingId'leri al
-      let hbListings = [];
-      try {
-        hbListings = await fetchHBListings(hbCreds, 20);
-        console.log(`[HB Test Order] ${hbListings.length} listing bulundu`);
-      } catch (listErr) {
-        console.warn('[HB Test Order] Listing çekme hatası (devam edilecek):', listErr.message);
-      }
-
-      if (hbListings.length === 0) {
-        return res.status(400).json({
-          error: 'Hepsiburada SIT hesabınızda kayıtlı listing bulunamadı. ' +
-                 'Test siparişi oluşturmak için önce Hepsiburada SIT portalında ürün listeleyin.'
-        });
-      }
-
-      // 5. HB SIT stub API'ye test siparişi gönder
-      // LineItems alan adları docs'tan doğrulandı:
-      //   CargoCompanyId, DeliveryOptionId, ListingId, MerchantId, MerchantSku,
-      //   Quantity, Sku, Vat, isBnplMP
-      const hbOrderNumber = `${ts}${rand}`;   // HB sadece rakam kabul ediyor
-
-      // Her ürün için bir HB listing eşleştir (döngüsel olarak)
+      // 5. HB SIT stub API'ye gönder — seçilen listing'lerin gerçek ID/SKU'larıyla
       const hbBody = {
         Customer: {
           CustomerId: 'dfc8a27f-faae-4cb2-859c-8a7d50ee77be',
@@ -629,52 +619,43 @@ router.post('/create-test-hb-order', async (req, res) => {
           Name:                 'Hepsiburada Office',
           PhoneNumber:          '902822613231'
         },
-        LineItems: items.map((p, i) => {
-          const listing = hbListings[i % hbListings.length];
-          return {
-            CargoCompanyId:   1,
-            DeliveryOptionId: 1,
-            ListingId:        listing.listingId,
-            MerchantId:       hbCreds.merchantId,
-            MerchantSku:      listing.merchantSku || p.barcode || String(p.id),
-            Quantity:         itemQtys[i],
-            Sku:              listing.sku || listing.listingId,
-            Vat:              20,
-            isBnplMP:         false
-          };
-        }),
+        LineItems: selected.map((l, i) => ({
+          CargoCompanyId:   l.cargoId   || 1,
+          DeliveryOptionId: l.deliveryId || 1,
+          ListingId:        l.listingId,
+          MerchantId:       hbCreds.merchantId,
+          MerchantSku:      l.merchantSku,
+          Quantity:         itemQtys[i],
+          Sku:              l.sku || l.listingId,
+          Vat:              l.vat || 20,
+          isBnplMP:         false
+        })),
         OrderNumber: hbOrderNumber
       };
 
       let hbApiResponse;
       try {
         hbApiResponse = await createHBTestOrder(hbCreds, hbBody);
-        console.log('[HB Test Order] HB SIT API başarılı:', JSON.stringify(hbApiResponse).substring(0, 300));
+        console.log('[HB Test Order] HB SIT başarılı:', JSON.stringify(hbApiResponse).substring(0, 300));
       } catch (hbErr) {
         console.error('[HB Test Order] HB SIT API hatası:', hbErr.message);
-        return res.status(502).json({
-          error: `Hepsiburada SIT API hatası: ${hbErr.message}`
-        });
+        return res.status(502).json({ error: `Hepsiburada SIT API hatası: ${hbErr.message}` });
       }
 
-      // HB'nin döndürdüğü sipariş ID'sini kullan; yoksa kendi ürettiğimizi kullan
+      // HB'nin atadığı order ID'yi al (yoksa fallback)
       const hbAssignedId =
-        hbApiResponse?.orderId      ||
-        hbApiResponse?.OrderId      ||
-        hbApiResponse?.orderNumber  ||
-        hbApiResponse?.OrderNumber  ||
-        hbApiResponse?.id           ||
-        null;
+        hbApiResponse?.orderId     || hbApiResponse?.OrderId     ||
+        hbApiResponse?.orderNumber || hbApiResponse?.OrderNumber ||
+        hbApiResponse?.id          || null;
       const orderId = hbAssignedId ? String(hbAssignedId) : `HB-TEST-${ts}-${rand}`;
 
       const tracking = st.status === 'kargoda' || st.status === 'teslim_edildi'
-        ? `TRK${rand}${Math.floor(Math.random()*100000)}`
+        ? `TRK${rand}${Math.floor(Math.random() * 100000)}`
         : null;
 
-      // 5. Local DB'ye kaydet
+      // 6. Local DB'ye kaydet — HB listing verisiyle
       await client.query('BEGIN');
 
-      // order_id = HB'nin atadığı ID (portal'da görünür), order_number = bizim TEST-... numaramız (filtreleme için)
       const orderResult = await client.query(
         `INSERT INTO marketplace_orders
            (platform, order_id, order_number, status, status_tr, raw_status,
@@ -690,7 +671,7 @@ router.post('/create-test-hb-order', async (req, res) => {
           st.raw,
           st.status === 'kargoda' || st.status === 'teslim_edildi' ? cargo : null,
           tracking,
-          Math.round(totalPrice * 0.215 * 100) / 100,  // %21.5 komisyon
+          Math.round(totalPrice * 0.215 * 100) / 100,
           21.5,
           st.status === 'kargoda' ? new Date().toISOString() : null
         ]
@@ -698,40 +679,47 @@ router.post('/create-test-hb-order', async (req, res) => {
 
       const moId = orderResult.rows[0].id;
 
-      for (let i = 0; i < items.length; i++) {
-        const p       = items[i];                              // local ürün (stok düşme için)
-        const listing = hbListings[i % hbListings.length];    // HB listing (görüntü için)
-        const qty     = itemQtys[i];
-        const itemId  = `TEST-${orderId}-${i}-${Date.now()}`;
+      for (let i = 0; i < selected.length; i++) {
+        const l   = selected[i];   // HB listing verisi
+        const qty = itemQtys[i];
+        const itemId = `TEST-${orderId}-${i}-${Date.now()}`;
 
-        // Ürün adı ve barkod: HB listing verisi kullanılıyor (BagStock ↔ HB tutarlılığı)
-        const displayName    = listing.name || listing.merchantSku || listing.sku || p.name || '';
-        const displayBarcode = listing.merchantSku || listing.sku || p.barcode || '';
-        const displayPrice   = listing.price > 0
-          ? listing.price
-          : Math.round(parseFloat(p.cost_price || 0) * 1.3 * 100) / 100;
+        // Eşleşen local ürünü barkod üzerinden ara (stok düşme için, zorunlu değil)
+        const matchRes = await client.query(
+          `SELECT id FROM products WHERE barcode = $1 OR barcode2 = $1 LIMIT 1`,
+          [l.merchantSku]
+        );
+        const localProductId = matchRes.rows[0]?.id || null;
 
         await client.query(
           `INSERT INTO marketplace_order_items
-             (marketplace_order_id, item_id, product_id, barcode, product_name, quantity, price, raw_status, status, stock_deducted)
+             (marketplace_order_id, item_id, product_id, barcode, product_name,
+              quantity, price, raw_status, status, stock_deducted)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false)`,
-          [moId, itemId, p.id, displayBarcode, displayName, qty, displayPrice, st.raw, st.status]
+          [
+            moId, itemId, localProductId,
+            l.merchantSku || l.sku || '',    // HB'deki barkod/SKU
+            l.name || l.merchantSku || '',   // HB'deki ürün adı
+            qty,
+            l.price || 0,
+            st.raw, st.status
+          ]
         );
 
-        // Kargoda/teslim ise stok düş
-        if (st.status === 'kargoda' || st.status === 'teslim_edildi') {
+        // Stok düşme: sadece eşleşen local ürün varsa
+        if (localProductId && (st.status === 'kargoda' || st.status === 'teslim_edildi')) {
           await client.query(
             `UPDATE products SET stock_quantity = GREATEST(0, stock_quantity - $1), updated_at = NOW()
-             WHERE id = $2`, [qty, p.id]
+             WHERE id = $2`, [qty, localProductId]
           );
           await client.query(
             `UPDATE marketplace_order_items SET stock_deducted = true
-             WHERE marketplace_order_id = $1 AND product_id = $2`, [moId, p.id]
+             WHERE marketplace_order_id = $1 AND product_id = $2`, [moId, localProductId]
           );
           await client.query(
             `INSERT INTO sales (product_id, quantity_change, sale_date, marketplace, note)
              VALUES ($1, $2, NOW(), 'hepsiburada', $3)`,
-            [p.id, -qty, `Marketplace #${orderId}`]
+            [localProductId, -qty, `Marketplace #${orderId}`]
           );
         }
       }
@@ -744,8 +732,8 @@ router.post('/create-test-hb-order', async (req, res) => {
         order: {
           id: moId, order_id: orderId, status: st.status, status_tr: st.status_tr,
           customer_name: cust, cargo_company: cargo, tracking,
-          total_price: Math.round(totalPrice*100)/100,
-          items: items.map(p => p.name)
+          total_price: Math.round(totalPrice * 100) / 100,
+          items: selected.map(l => l.name || l.merchantSku)
         }
       });
     } catch (e) {
