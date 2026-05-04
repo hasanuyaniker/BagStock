@@ -452,7 +452,7 @@ async function submitHBCatalogProduct(creds, products) {
     : 'https://mpop-sit.hepsiburada.com';
 
   const headers = makeHBHeaders(merchantId, apiKey, username);
-  const url = `${base}/products/api/products/import/list`;
+  const url = `${base}/products/api/products`;
 
   console.log(`[HepsiB Katalog] POST ${url}`);
   const res = await fetch(url, {
@@ -503,9 +503,9 @@ async function updateHBListingStockPrice(creds, updates) {
   const headers = makeHBHeaders(merchantId, apiKey, username);
   const url = `${base}/listings/merchantid/${merchantId}`;
 
-  console.log(`[HepsiB Listeleme] POST ${url} — ${updates.length} ürün`);
+  console.log(`[HepsiB Listeleme] PUT ${url} — ${updates.length} ürün`);
   const res = await fetch(url, {
-    method:  'POST',
+    method:  'PUT',
     headers,
     body:    JSON.stringify(updates),
     signal:  AbortSignal.timeout(20000)
