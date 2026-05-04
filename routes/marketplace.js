@@ -11,7 +11,11 @@ const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
 const authMiddleware = require('../middleware/auth');
-const { createHBTestOrder, fetchHBListings } = require('../services/hepsiburada');
+const {
+  createHBTestOrder, fetchHBListings,
+  submitHBCatalogProduct, getHBTrackingStatus,
+  updateHBListingStockPrice, packHBOrder
+} = require('../services/hepsiburada');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -786,6 +790,169 @@ router.delete('/test-hb-orders', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HB ENTEGRASYON TEST ENDPOINTLERİ (Onay süreci için)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Yardımcı: HB credentials'ları DB'den al */
+async function getHBCreds(client) {
+  const row = await client.query(
+    "SELECT value FROM app_settings WHERE key = 'marketplace_credentials'"
+  );
+  if (!row.rows.length || !row.rows[0].value) return null;
+  try {
+    const parsed = JSON.parse(row.rows[0].value);
+    const hb = parsed.hepsiburada;
+    if (hb?.merchantId && hb?.apiKey) return hb;
+  } catch {}
+  return null;
+}
+
+// ── 1. KATALOG: BagStock'tan ürün al → HB kataloğuna gönder → trackingId döndür
+router.post('/hb-catalog-submit', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const creds = await getHBCreds(client);
+    if (!creds) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    // BagStock'tan bir ürün al (barcode, fiyat, isim)
+    const prodRes = await client.query(
+      `SELECT id, name, barcode, sale_price, cost_price, stock_quantity
+       FROM products WHERE is_active = true AND barcode IS NOT NULL AND barcode != ''
+       ORDER BY updated_at DESC LIMIT 1`
+    );
+    if (!prodRes.rows.length) {
+      return res.status(400).json({ error: 'Gönderilebilecek ürün bulunamadı (barcode gerekli)' });
+    }
+    const p = prodRes.rows[0];
+    const price = parseFloat(p.sale_price || p.cost_price || 0) * 1.3;
+
+    // HB katalog ürün formatı (Hızlı Ürün Yükleme)
+    const catalogProduct = [{
+      merchantSku:  p.barcode,
+      VatRate:      20,
+      price:        Math.round(price * 100) / 100,
+      stock:        p.stock_quantity || 1,
+      productName:  p.name,
+      images:       [],
+      attributes:   []
+    }];
+
+    const result = await submitHBCatalogProduct(creds, catalogProduct);
+    const trackingId = result?.trackingId || result?.data?.trackingId
+      || result?.id || result?.TrackingId || null;
+
+    res.json({
+      ok: true,
+      trackingId,
+      rawResponse: result,
+      product: { sku: p.barcode, name: p.name }
+    });
+  } catch (err) {
+    console.error('[HB Katalog] Hata:', err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── TrackingId durumunu sorgula
+router.get('/hb-catalog-tracking/:trackingId', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const creds = await getHBCreds(client);
+    if (!creds) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+    const result = await getHBTrackingStatus(creds, req.params.trackingId);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── 2. LİSTELEME: HB envanterindeki ürünlerin stok/fiyatını güncelle
+router.post('/hb-update-stock-price', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const creds = await getHBCreds(client);
+    if (!creds) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    // HB listing'lerini çek
+    const listingResult = await fetchHBListings(creds, 50);
+    const listings = listingResult.listings || listingResult;
+    if (!listings.length) {
+      return res.status(400).json({ error: 'HB SIT hesabında listing bulunamadı' });
+    }
+
+    // Her listing için yerel ürün eşleşmesi bul → stok/fiyat güncelle
+    const updates = [];
+    for (const l of listings) {
+      let stock = 10;  // varsayılan test stok
+      let price = l.price || 100;
+
+      if (l.merchantSku) {
+        const match = await client.query(
+          `SELECT stock_quantity, sale_price, cost_price
+           FROM products WHERE barcode = $1 OR barcode2 = $1 LIMIT 1`,
+          [l.merchantSku]
+        );
+        if (match.rows.length) {
+          const mp = match.rows[0];
+          stock = mp.stock_quantity || 10;
+          price = parseFloat(mp.sale_price || mp.cost_price || 0) * 1.3 || price;
+        }
+      }
+
+      updates.push({
+        listingId:        l.listingId,
+        merchantSku:      l.merchantSku,
+        availableStock:   stock,
+        price:            Math.round(price * 100) / 100,
+        isSalable:        true
+      });
+    }
+
+    const result = await updateHBListingStockPrice(creds, updates);
+    res.json({ ok: true, updatedCount: updates.length, result });
+  } catch (err) {
+    console.error('[HB Listeleme] Hata:', err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── 3. SİPARİŞ: Belirtilen paketi paketle (paketleme adımı)
+router.post('/hb-pack-order', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const creds = await getHBCreds(client);
+    if (!creds) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    const { packageNumber } = req.body;
+    if (!packageNumber) return res.status(400).json({ error: 'packageNumber gerekli' });
+
+    const result = await packHBOrder(creds, packageNumber);
+
+    // Local DB'de durumu güncelle
+    await client.query(
+      `UPDATE marketplace_orders
+       SET status='kargoda', status_tr='Kargoya Verildi', raw_status='Packed',
+           cargo_status='Packed', kargoda_at=NOW(), updated_at=NOW()
+       WHERE order_id=$1 AND platform='hepsiburada'`,
+      [String(packageNumber)]
+    );
+
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error('[HB Paketleme] Hata:', err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
   }
 });
 

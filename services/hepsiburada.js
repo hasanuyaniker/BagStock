@@ -441,10 +441,114 @@ async function createHBTestOrder(creds, orderData) {
   try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
 }
 
+/**
+ * 1. KATALOG: HB'ye ürün gönder, trackingId al
+ * POST https://mpop-sit.hepsiburada.com/products/api/products/import/list
+ */
+async function submitHBCatalogProduct(creds, products) {
+  const { merchantId, username, apiKey, environment } = creds;
+  const base = environment === 'production'
+    ? 'https://mpop.hepsiburada.com'
+    : 'https://mpop-sit.hepsiburada.com';
+
+  const headers = makeHBHeaders(merchantId, apiKey, username);
+  const url = `${base}/products/api/products/import/list`;
+
+  console.log(`[HepsiB Katalog] POST ${url}`);
+  const res = await fetch(url, {
+    method:  'POST',
+    headers,
+    body:    JSON.stringify(products),
+    signal:  AbortSignal.timeout(20000)
+  });
+  const rawText = await res.text();
+  console.log(`[HepsiB Katalog] HTTP ${res.status} | ${rawText.substring(0, 500)}`);
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 400)}`);
+  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+}
+
+/**
+ * TrackingId durumunu sorgula
+ * GET https://mpop-sit.hepsiburada.com/products/api/products/trackingId/{trackingId}
+ */
+async function getHBTrackingStatus(creds, trackingId) {
+  const { merchantId, username, apiKey, environment } = creds;
+  const base = environment === 'production'
+    ? 'https://mpop.hepsiburada.com'
+    : 'https://mpop-sit.hepsiburada.com';
+
+  const headers = makeHBHeaders(merchantId, apiKey, username);
+  const url = `${base}/products/api/products/trackingId/${trackingId}`;
+
+  console.log(`[HepsiB Katalog Tracking] GET ${url}`);
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  const rawText = await res.text();
+  console.log(`[HepsiB Katalog Tracking] HTTP ${res.status} | ${rawText.substring(0, 400)}`);
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 300)}`);
+  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+}
+
+/**
+ * 2. LİSTELEME: Stok ve fiyat güncelle
+ * POST https://listing-external-sit.hepsiburada.com/listings/merchantid/{merchantId}
+ */
+async function updateHBListingStockPrice(creds, updates) {
+  const { merchantId, username, apiKey, environment } = creds;
+  const base = environment === 'production'
+    ? 'https://listing-external.hepsiburada.com'
+    : 'https://listing-external-sit.hepsiburada.com';
+
+  const headers = makeHBHeaders(merchantId, apiKey, username);
+  const url = `${base}/listings/merchantid/${merchantId}`;
+
+  console.log(`[HepsiB Listeleme] POST ${url} — ${updates.length} ürün`);
+  const res = await fetch(url, {
+    method:  'POST',
+    headers,
+    body:    JSON.stringify(updates),
+    signal:  AbortSignal.timeout(20000)
+  });
+  const rawText = await res.text();
+  console.log(`[HepsiB Listeleme] HTTP ${res.status} | ${rawText.substring(0, 500)}`);
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 400)}`);
+  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+}
+
+/**
+ * 3. SİPARİŞ: Paketi onayla (paketleme tamamlandı işareti)
+ * POST https://oms-external-sit.hepsiburada.com/packages/merchantid/{merchantId}/{packageNumber}/pack
+ */
+async function packHBOrder(creds, packageNumber) {
+  const { merchantId, username, apiKey, environment } = creds;
+  const base = getHBBase(environment);
+  const headers = makeHBHeaders(merchantId, apiKey, username);
+  const url = `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`;
+
+  console.log(`[HepsiB Paketleme] POST ${url}`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body:   JSON.stringify({}),
+    signal: AbortSignal.timeout(15000)
+  });
+  const rawText = await res.text();
+  console.log(`[HepsiB Paketleme] HTTP ${res.status} | ${rawText.substring(0, 300)}`);
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 300)}`);
+  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+}
+
 module.exports = {
   fetchHepsiburadaOrders,
   fetchHBListings,
   createHBTestOrder,
+  submitHBCatalogProduct,
+  getHBTrackingStatus,
+  updateHBListingStockPrice,
+  packHBOrder,
   getHBBase,
   makeHBHeaders,
   HB_STATUS_MAP,

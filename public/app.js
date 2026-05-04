@@ -2770,6 +2770,7 @@ async function loadTestHBOrders() {
             <th style="padding:8px 6px;text-align:right;color:#6b7280;font-size:10px;">TUTAR</th>
             <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">KARGO</th>
             <th style="padding:8px 6px;text-align:left;color:#6b7280;font-size:10px;">TARİH</th>
+            <th style="padding:8px 6px;color:#6b7280;font-size:10px;"></th>
           </tr>
         </thead>
         <tbody>`;
@@ -2779,11 +2780,12 @@ async function loadTestHBOrders() {
       const items = Array.isArray(o.items) ? o.items.filter(i => i && i.name) : [];
       const itemStr = items.map(i => `${i.name||'?'} ×${i.quantity||1}${i.deducted?' ✓':''}`).join('<br>');
       const dateStr = o.order_date ? new Date(o.order_date).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+      const canPack = o.status === 'bekliyor';
       html += `
         <tr style="border-bottom:1px solid #f3f4f6;">
           <td style="padding:8px 6px;font-family:monospace;font-size:11px;color:#374151;">
             <span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-size:10px;">HB</span>
-            ${escHtml(o.order_id.replace('HB-TEST-','').substring(0,12))}
+            ${escHtml(String(o.order_id).substring(0,14))}
           </td>
           <td style="padding:8px 6px;">
             <span style="background:${st.bg};color:${st.color};border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700;white-space:nowrap;">
@@ -2798,6 +2800,11 @@ async function loadTestHBOrders() {
             ${o.cargo_tracking_number ? `<br><span style="font-family:monospace;">${o.cargo_tracking_number}</span>` : ''}
           </td>
           <td style="padding:8px 6px;color:#6b7280;white-space:nowrap;">${dateStr}</td>
+          <td style="padding:8px 6px;">
+            ${canPack ? `<button class="btn btn-sm" onclick="hbPackOrder('${escHtml(String(o.order_id))}',this)"
+              style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,0.1);color:#1d4ed8;border:1px solid rgba(59,130,246,0.3);border-radius:4px;">
+              📦 Paketle</button>` : ''}
+          </td>
         </tr>`;
     });
     html += '</tbody></table></div>';
@@ -2819,6 +2826,91 @@ async function deleteTestHBOrders() {
     await loadTestHBOrders();
   } catch (err) {
     showToast('Hata: ' + err.message, 'error');
+  }
+}
+
+// ==================== HB ENTEGRASYON ONAY TESTLERİ ====================
+
+async function hbCatalogSubmit() {
+  const btn = document.getElementById('hbCatalogBtn');
+  const res = document.getElementById('hbCatalogResult');
+  btn.disabled = true; btn.textContent = '⏳ Gönderiliyor...';
+  res.innerHTML = '';
+  try {
+    const r    = await apiFetch('/api/marketplace/hb-catalog-submit', { method: 'POST' });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      const tid = data.trackingId || '(yanıtta bulunamadı — logları kontrol edin)';
+      res.innerHTML = `
+        <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:10px;">
+          <div style="font-weight:600;color:#047857;margin-bottom:6px;">✓ Ürün kataloğa gönderildi</div>
+          <div style="font-size:12px;">Ürün: <b>${data.product?.name || ''}</b> (${data.product?.sku || ''})</div>
+          <div style="font-size:12px;margin-top:6px;">
+            <b>TrackingId:</b>
+            <code style="background:#f0fdf4;padding:2px 8px;border-radius:4px;font-size:13px;color:#065f46;user-select:all;">${tid}</code>
+            <button onclick="navigator.clipboard.writeText('${tid}');this.textContent='✓ Kopyalandı'"
+              style="margin-left:8px;font-size:11px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff;">
+              Kopyala
+            </button>
+          </div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px;">Bu trackingId'yi HB'ye e-posta ile iletin.</div>
+        </div>`;
+    } else {
+      res.innerHTML = `<span style="color:#dc2626;">Hata: ${data.error || JSON.stringify(data)}</span>`;
+    }
+  } catch (err) {
+    res.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '📤 Kataloğa Ürün Gönder';
+  }
+}
+
+async function hbUpdateStockPrice() {
+  const btn = document.getElementById('hbStockPriceBtn');
+  const res = document.getElementById('hbStockPriceResult');
+  btn.disabled = true; btn.textContent = '⏳ Güncelleniyor...';
+  res.innerHTML = '';
+  try {
+    const r    = await apiFetch('/api/marketplace/hb-update-stock-price', { method: 'POST' });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      res.innerHTML = `
+        <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:10px;">
+          <div style="font-weight:600;color:#047857;">✓ ${data.updatedCount} ürün için stok/fiyat güncellendi</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+            ${data.result?.raw ? 'HB yanıtı: ' + JSON.stringify(data.result.raw).substring(0,150) : ''}
+          </div>
+        </div>`;
+    } else {
+      res.innerHTML = `<span style="color:#dc2626;">Hata: ${data.error || JSON.stringify(data)}</span>`;
+    }
+  } catch (err) {
+    res.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '🔄 Stok/Fiyat Güncelle';
+  }
+}
+
+async function hbPackOrder(packageNumber, btn) {
+  if (!confirm(`${packageNumber} numaralı sipariş paketlenecek. Onaylıyor musunuz?`)) return;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const r    = await apiFetch('/api/marketplace/hb-pack-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageNumber })
+    });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      showToast('✓ Paket onaylandı: ' + packageNumber);
+      await loadTestHBOrders();
+    } else {
+      showToast('Hata: ' + (data.error || 'Bilinmeyen hata'), 'error');
+    }
+  } catch (err) {
+    showToast('Hata: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '📦 Paketle';
   }
 }
 
