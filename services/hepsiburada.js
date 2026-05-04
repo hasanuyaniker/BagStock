@@ -356,6 +356,42 @@ function normalizeHBPackage(pkg) {
 }
 
 /**
+ * HB SIT listing'lerini çek — test siparişi için geçerli ListingId almak amacıyla
+ * GET https://listing-external-sit.hepsiburada.com/listings/merchantid/{merchantId}
+ * Prod: https://listing-external.hepsiburada.com/listings/merchantid/{merchantId}
+ */
+async function fetchHBListings(creds, limit = 10) {
+  const { merchantId, username, apiKey, environment } = creds;
+  const listingBase = environment === 'production'
+    ? 'https://listing-external.hepsiburada.com'
+    : 'https://listing-external-sit.hepsiburada.com';
+
+  const headers = makeHBHeaders(merchantId, apiKey, username);
+  const url = `${listingBase}/listings/merchantid/${merchantId}?offset=0&limit=${limit}`;
+  console.log(`[HepsiB Listings] GET ${url}`);
+
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  const rawText = await res.text();
+  console.log(`[HepsiB Listings] HTTP ${res.status} | ${rawText.substring(0, 200)}`);
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 200)}`);
+  }
+
+  let data;
+  try { data = JSON.parse(rawText); } catch { return []; }
+
+  // HB listing API yanıt formatı: { listings: [...] } veya doğrudan dizi
+  const rows = Array.isArray(data) ? data : (data.listings || data.data || []);
+  return rows.map(l => ({
+    listingId:   String(l.id || l.listingId || l.ListingId || ''),
+    merchantSku: String(l.merchantSku || l.MerchantSku || l.sku || ''),
+    sku:         String(l.hepsiburadaSku || l.sku || l.Sku || l.merchantSku || ''),
+    price:       parseFloat(l.price || l.salePrice || 0),
+  })).filter(l => l.listingId);
+}
+
+/**
  * HB SIT test siparişi oluştur
  * POST https://oms-stub-external-sit.hepsiburada.com/orders/merchantId/{merchantId}
  */
@@ -385,6 +421,7 @@ async function createHBTestOrder(creds, orderData) {
 
 module.exports = {
   fetchHepsiburadaOrders,
+  fetchHBListings,
   createHBTestOrder,
   getHBBase,
   makeHBHeaders,

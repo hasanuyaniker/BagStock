@@ -11,7 +11,7 @@ const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
 const authMiddleware = require('../middleware/auth');
-const { createHBTestOrder } = require('../services/hepsiburada');
+const { createHBTestOrder, fetchHBListings } = require('../services/hepsiburada');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -590,11 +590,29 @@ router.post('/create-test-hb-order', async (req, res) => {
       const totalPrice  = items.reduce((s, p, i) =>
         s + parseFloat(p.cost_price || 0) * 1.3 * itemQtys[i], 0);
 
-      // 4. HB SIT stub API'ye test siparişi gönder
+      // 4. HB SIT listing'lerinden geçerli ListingId'leri al
+      let hbListings = [];
+      try {
+        hbListings = await fetchHBListings(hbCreds, 20);
+        console.log(`[HB Test Order] ${hbListings.length} listing bulundu`);
+      } catch (listErr) {
+        console.warn('[HB Test Order] Listing çekme hatası (devam edilecek):', listErr.message);
+      }
+
+      if (hbListings.length === 0) {
+        return res.status(400).json({
+          error: 'Hepsiburada SIT hesabınızda kayıtlı listing bulunamadı. ' +
+                 'Test siparişi oluşturmak için önce Hepsiburada SIT portalında ürün listeleyin.'
+        });
+      }
+
+      // 5. HB SIT stub API'ye test siparişi gönder
       // LineItems alan adları docs'tan doğrulandı:
       //   CargoCompanyId, DeliveryOptionId, ListingId, MerchantId, MerchantSku,
-      //   Quantity, Sku, Vat, isBnplMP, CustomizedProductValue
+      //   Quantity, Sku, Vat, isBnplMP
       const hbOrderNumber = `TEST-${ts}-${rand}`;
+
+      // Her ürün için bir HB listing eşleştir (döngüsel olarak)
       const hbBody = {
         Customer: {
           CustomerId: 'dfc8a27f-faae-4cb2-859c-8a7d50ee77be',
@@ -611,17 +629,20 @@ router.post('/create-test-hb-order', async (req, res) => {
           Name:                 'Hepsiburada Office',
           PhoneNumber:          '902822613231'
         },
-        LineItems: items.map((p, i) => ({
-          CargoCompanyId:  1,
-          DeliveryOptionId: 1,
-          ListingId:       p.barcode || String(p.id),
-          MerchantId:      hbCreds.merchantId,
-          MerchantSku:     p.barcode || String(p.id),
-          Quantity:        itemQtys[i],
-          Sku:             p.barcode || String(p.id),
-          Vat:             20,
-          isBnplMP:        false
-        })),
+        LineItems: items.map((p, i) => {
+          const listing = hbListings[i % hbListings.length];
+          return {
+            CargoCompanyId:   1,
+            DeliveryOptionId: 1,
+            ListingId:        listing.listingId,
+            MerchantId:       hbCreds.merchantId,
+            MerchantSku:      listing.merchantSku || p.barcode || String(p.id),
+            Quantity:         itemQtys[i],
+            Sku:              listing.sku || listing.listingId,
+            Vat:              20,
+            isBnplMP:         false
+          };
+        }),
         OrderNumber: hbOrderNumber
       };
 
