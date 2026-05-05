@@ -485,8 +485,12 @@ async function submitHBCatalogProduct(creds, products) {
 }
 
 /**
- * TrackingId durumunu sorgula
- * GET https://mpop-sit.hepsiburada.com/products/api/products/trackingId/{trackingId}
+ * TrackingId durumunu sorgula — fallback zinciri
+ * Deneme sırası (hepsi /product/ prefix ile):
+ *   1. GET /product/api/products/import/{trackingId}        (import path + id)
+ *   2. GET /product/api/products/imports/{trackingId}       (çoğul imports)
+ *   3. GET /product/api/products?trackingId={trackingId}    (query param)
+ *   4. GET /product/api/products/trackingId/{trackingId}    (eski deneme)
  */
 async function getHBTrackingStatus(creds, trackingId) {
   const { merchantId, username, apiKey, environment } = creds;
@@ -495,16 +499,32 @@ async function getHBTrackingStatus(creds, trackingId) {
     : 'https://mpop-sit.hepsiburada.com';
 
   const headers = makeHBHeaders(merchantId, apiKey, username);
-  // Not: katalog endpoint'leri /product/ (tekil) kullanır — /products/ değil
-  const url = `${base}/product/api/products/trackingId/${trackingId}`;
 
-  console.log(`[HepsiB Katalog Tracking] GET ${url}`);
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-  const rawText = await res.text();
-  console.log(`[HepsiB Katalog Tracking] HTTP ${res.status} | ${rawText.substring(0, 400)}`);
+  const candidates = [
+    `${base}/product/api/products/import/${trackingId}`,
+    `${base}/product/api/products/imports/${trackingId}`,
+    `${base}/product/api/products?trackingId=${trackingId}`,
+    `${base}/product/api/products/trackingId/${trackingId}`,
+  ];
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 300)}`);
-  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+  for (const url of candidates) {
+    console.log(`[HepsiB Katalog Tracking] GET ${url}`);
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+      const rawText = await res.text();
+      console.log(`[HepsiB Katalog Tracking] HTTP ${res.status} | ${rawText.substring(0, 400)}`);
+
+      if (res.status === 404) continue;   // bu URL yanlış, sıradakini dene
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 300)}`);
+
+      try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+    } catch (e) {
+      if (e.message.startsWith('HTTP')) throw e;   // gerçek hata, dur
+      console.warn(`[HepsiB Katalog Tracking] ${url} bağlanamadı: ${e.message}`);
+    }
+  }
+
+  throw new Error('Tracking URL bulunamadı — 4 farklı path denendi, hepsi 404 döndü');
 }
 
 /**
