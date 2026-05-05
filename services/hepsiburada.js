@@ -569,65 +569,90 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
   const { merchantId, username, apiKey, environment } = creds;
   const base    = getHBBase(environment);
   const headers = makeHBHeaders(merchantId, apiKey, username);
+  const ROOT    = `${base}/packages/merchantid/${merchantId}`;
 
-  // packageNumber = "5000121695" (numeric HB packageNumber)
-  // packageUuid   = "69f9041e-..." (internal id alanı — pack için bu gerekli olabilir)
-  const ids = packageUuid ? [packageNumber, packageUuid] : [packageNumber];
+  // ── 1. Adım: Paket detayını çek — lineItem ID'lerini al ──────────────────
+  // Denedığımız tüm paket detay endpoint'leri
+  const detailUrls = [
+    `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}`,
+    `${base}/packages/merchantid/${merchantId}/${packageNumber}`,
+    ...(packageUuid ? [`${base}/packages/merchantid/${merchantId}/${packageUuid}`] : []),
+  ];
 
-  const tracking = `BAGSTOCK-${packageNumber}`;
-  const ROOT = `${base}/packages/merchantid/${merchantId}`;
+  let lineItems = [];
+  for (const dUrl of detailUrls) {
+    try {
+      const dr = await fetch(dUrl, { headers, signal: AbortSignal.timeout(10000) });
+      const dt = await dr.text();
+      console.log(`[HepsiB Pack] Detay ${dUrl} → HTTP ${dr.status} | ${dt.substring(0, 300)}`);
+      if (dr.ok) {
+        let dj;
+        try { dj = JSON.parse(dt); } catch { break; }
+        // lineItems alanını bul
+        const li = dj?.lineItems || dj?.items || dj?.data?.lineItems || dj?.data?.items || [];
+        if (Array.isArray(li) && li.length > 0) {
+          lineItems = li.map(item => ({
+            lineItemId: item.lineItemId || item.id || item.lineId || item.itemId,
+            quantity:   item.quantity   || item.requestedQuantity || 1,
+          })).filter(i => i.lineItemId);
+          console.log(`[HepsiB Pack] ${lineItems.length} lineItem bulundu`);
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn('[HepsiB Pack] Detay endpoint hatası:', e.message);
+    }
+  }
 
+  // lineItem bulunamadıysa barcode/packageUuid ile dene
+  if (lineItems.length === 0) {
+    console.warn('[HepsiB Pack] lineItem bulunamadı — barcode veya uuid fallback');
+    // Paket listesindeki barcode'u kullan (route'dan geçirilmiş ise)
+    if (packageUuid) lineItems = [{ lineItemId: packageUuid, quantity: 1 }];
+  }
+
+  console.log(`[HepsiB Pack] Pack body lineItems: ${JSON.stringify(lineItems)}`);
+
+  // ── 2. Adım: Pack isteği — farklı body formatlarını dene ─────────────────
   const attempts = [
-    // ── HB'nin beklediği format (cargoTrackingNumber alanı) — array
-    { label: 'ROOT-cargoTracking-arr', method: 'POST', url: ROOT,
-      body: JSON.stringify([{ packageNumber, cargoCompany: 'Yurtiçi Kargo', cargoTrackingNumber: tracking }]) },
-    // ── cargoTrackingNumber — object
-    { label: 'ROOT-cargoTracking-obj', method: 'POST', url: ROOT,
-      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo', cargoTrackingNumber: tracking }) },
-    // ── Sadece packageNumber — array
-    { label: 'ROOT-pkgOnly-arr',       method: 'POST', url: ROOT,
-      body: JSON.stringify([{ packageNumber }]) },
-    // ── Sadece packageNumber — object
-    { label: 'ROOT-pkgOnly-obj',       method: 'POST', url: ROOT,
-      body: JSON.stringify({ packageNumber }) },
-    // ── lineItems içeren format
-    { label: 'ROOT-lineItems',         method: 'POST', url: ROOT,
-      body: JSON.stringify([{ packageNumber, lineItems: [] }]) },
-    // ── waybillNumber (alternatif field adı)
-    { label: 'ROOT-waybill',           method: 'POST', url: ROOT,
-      body: JSON.stringify([{ packageNumber, cargoCompany: 'Yurtiçi Kargo', waybillNumber: tracking }]) },
-    // ── Önceki denemeler (400 → body yanlış, 404 → path yanlış)
-    { label: 'ROOT-old-arr',           method: 'POST', url: ROOT,
-      body: JSON.stringify([{ packageNumber, cargoCompany: 'Yurtiçi Kargo', trackingNumber: tracking }]) },
-    { label: 'ROOT-old-obj',           method: 'POST', url: ROOT,
-      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo', trackingNumber: tracking }) },
+    // Object + lineItems (HB'nin "Line items empty or null" hatasına göre doğru format)
+    { label: 'obj+lineItems',
+      body: JSON.stringify({ packageNumber, lineItems }) },
+    // Object + lineItems + cargoCompany
+    { label: 'obj+lineItems+cargo',
+      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo',
+                             cargoTrackingNumber: `BAGSTOCK-${packageNumber}`, lineItems }) },
+    // Array of objects with lineItems
+    { label: 'arr+lineItems',
+      body: JSON.stringify([{ packageNumber, lineItems }]) },
+    // Sadece lineItems (packageNumber olmadan)
+    { label: 'lineItemsOnly',
+      body: JSON.stringify({ lineItems }) },
   ];
 
   const errors = [];
   for (const attempt of attempts) {
     try {
-      console.log(`[HepsiB Paketleme] ${attempt.label}: ${attempt.method} ${attempt.url}`);
-      const r = await fetch(attempt.url, {
-        method:  attempt.method,
+      console.log(`[HepsiB Pack] ${attempt.label}: POST ${ROOT} body=${attempt.body.substring(0,200)}`);
+      const r = await fetch(ROOT, {
+        method:  'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body:    attempt.body,
         signal:  AbortSignal.timeout(15000)
       });
       const t = await r.text();
-      console.log(`[HepsiB Paketleme] ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 200)}`);
+      console.log(`[HepsiB Pack] ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 300)}`);
       if (r.ok) {
-        try { return { method: attempt.label, url: attempt.url, data: JSON.parse(t) }; }
-        catch { return { method: attempt.label, url: attempt.url, raw: t }; }
+        try { return { method: attempt.label, data: JSON.parse(t) }; }
+        catch { return { method: attempt.label, raw: t }; }
       }
-      // 404 dışında farklı status varsa body ile kaydet (400 = endpoint var ama body yanlış!)
-      const snippet = t.substring(0, 300);
-      errors.push(`[${attempt.label}]=${r.status}:${snippet}`);
+      errors.push(`[${attempt.label}]=${r.status}:${t.substring(0, 250)}`);
     } catch (e) {
-      errors.push(`[${attempt.label}]=ERR:${e.message.substring(0,40)}`);
+      errors.push(`[${attempt.label}]=ERR:${e.message.substring(0, 60)}`);
     }
   }
 
-  throw new Error('Tüm yöntemler başarısız: ' + errors.join(' '));
+  throw new Error('Pack başarısız: ' + errors.join(' | '));
 }
 
 module.exports = {
