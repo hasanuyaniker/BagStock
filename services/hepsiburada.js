@@ -574,39 +574,33 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
   // packageUuid   = "69f9041e-..." (internal id alanı — pack için bu gerekli olabilir)
   const ids = packageUuid ? [packageNumber, packageUuid] : [packageNumber];
 
-  const cargoBody  = { cargoCompany: 'Yurtiçi Kargo', trackingNumber: `BAGSTOCK-${packageNumber}` };
-  const cargoArr   = [{ packageNumber, ...cargoBody }];
-  const cargoArrU  = packageUuid ? [{ packageNumber: packageUuid, ...cargoBody }] : null;
+  const tracking = `BAGSTOCK-${packageNumber}`;
+  const ROOT = `${base}/packages/merchantid/${merchantId}`;
 
   const attempts = [
-    // ── En olası: POST /packages/merchantid/{id}  body = array (HB docs ana format)
-    { label: 'ROOT-array',      method: 'POST', url: `${base}/packages/merchantid/${merchantId}`,
-      body: JSON.stringify(cargoArr) },
-    // ── ROOT + sadece packageNumber
-    { label: 'ROOT-obj',        method: 'POST', url: `${base}/packages/merchantid/${merchantId}`,
-      body: JSON.stringify({ packageNumber, ...cargoBody }) },
-    // ── /packagenumber/{num}/pack  (unpack gibi pattern)
-    { label: 'pkgnum-path/pack',method: 'POST', url: `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}/pack`,
-      body: JSON.stringify({}) },
-    { label: 'pkgnum-path/pack+cargo', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}/pack`,
-      body: JSON.stringify(cargoBody) },
-    // ── /packagenumber/{uuid}/pack
-    ...(packageUuid ? [
-      { label: 'uuid-path/pack', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/packagenumber/${packageUuid}/pack`,
-        body: JSON.stringify({}) },
-    ] : []),
-    // ── Eski denemeler (path direkt) — son çare
-    { label: 'direct/pack',     method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`,
-      body: JSON.stringify({}) },
-    { label: 'direct/pack+cargo', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`,
-      body: JSON.stringify(cargoBody) },
-    // ── /items/pack
-    { label: 'items/pack',      method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
-      body: JSON.stringify(cargoArr) },
-    ...(cargoArrU ? [
-      { label: 'items/pack-uuid', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
-        body: JSON.stringify(cargoArrU) },
-    ] : []),
+    // ── HB'nin beklediği format (cargoTrackingNumber alanı) — array
+    { label: 'ROOT-cargoTracking-arr', method: 'POST', url: ROOT,
+      body: JSON.stringify([{ packageNumber, cargoCompany: 'Yurtiçi Kargo', cargoTrackingNumber: tracking }]) },
+    // ── cargoTrackingNumber — object
+    { label: 'ROOT-cargoTracking-obj', method: 'POST', url: ROOT,
+      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo', cargoTrackingNumber: tracking }) },
+    // ── Sadece packageNumber — array
+    { label: 'ROOT-pkgOnly-arr',       method: 'POST', url: ROOT,
+      body: JSON.stringify([{ packageNumber }]) },
+    // ── Sadece packageNumber — object
+    { label: 'ROOT-pkgOnly-obj',       method: 'POST', url: ROOT,
+      body: JSON.stringify({ packageNumber }) },
+    // ── lineItems içeren format
+    { label: 'ROOT-lineItems',         method: 'POST', url: ROOT,
+      body: JSON.stringify([{ packageNumber, lineItems: [] }]) },
+    // ── waybillNumber (alternatif field adı)
+    { label: 'ROOT-waybill',           method: 'POST', url: ROOT,
+      body: JSON.stringify([{ packageNumber, cargoCompany: 'Yurtiçi Kargo', waybillNumber: tracking }]) },
+    // ── Önceki denemeler (400 → body yanlış, 404 → path yanlış)
+    { label: 'ROOT-old-arr',           method: 'POST', url: ROOT,
+      body: JSON.stringify([{ packageNumber, cargoCompany: 'Yurtiçi Kargo', trackingNumber: tracking }]) },
+    { label: 'ROOT-old-obj',           method: 'POST', url: ROOT,
+      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo', trackingNumber: tracking }) },
   ];
 
   const errors = [];
@@ -625,8 +619,9 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
         try { return { method: attempt.label, url: attempt.url, data: JSON.parse(t) }; }
         catch { return { method: attempt.label, url: attempt.url, raw: t }; }
       }
-      // 404 dışında farklı status varsa kaydet (400 = endpoint var ama body yanlış!)
-      errors.push(`[${attempt.label}]=${r.status}`);
+      // 404 dışında farklı status varsa body ile kaydet (400 = endpoint var ama body yanlış!)
+      const snippet = t.substring(0, 300);
+      errors.push(`[${attempt.label}]=${r.status}:${snippet}`);
     } catch (e) {
       errors.push(`[${attempt.label}]=ERR:${e.message.substring(0,40)}`);
     }
