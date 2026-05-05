@@ -570,41 +570,43 @@ async function packHBOrder(creds, packageNumber) {
   const base    = getHBBase(environment);
   const headers = makeHBHeaders(merchantId, apiKey, username);
 
-  // ── Yöntem A: /{packageNumber}/pack ──────────────────────────────────────
-  const urlA = `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`;
-  console.log(`[HepsiB Paketleme] Yöntem A: POST ${urlA}`);
-  try {
-    const resA = await fetch(urlA, {
-      method: 'POST',
-      headers,
-      body:   JSON.stringify({}),
-      signal: AbortSignal.timeout(15000)
-    });
-    const textA = await resA.text();
-    console.log(`[HepsiB Paketleme] Yöntem A → HTTP ${resA.status} | ${textA.substring(0, 300)}`);
-    if (resA.ok) {
-      try { return JSON.parse(textA); } catch { return { raw: textA }; }
+  const attempts = [
+    // A: POST /{packageNumber}/pack  (en yaygın format)
+    { label: 'A', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`, body: JSON.stringify({}) },
+    // B: PUT  /{packageNumber}/pack
+    { label: 'B', method: 'PUT',  url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`, body: JSON.stringify({}) },
+    // C: POST /items/pack  (body array)
+    { label: 'C', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
+      body: JSON.stringify([{ packageNumber, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }]) },
+    // D: PUT  /{packageNumber}  (status güncelle)
+    { label: 'D', method: 'PUT',  url: `${base}/packages/merchantid/${merchantId}/${packageNumber}`,
+      body: JSON.stringify({ status: 'Packed', cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }) },
+  ];
+
+  let lastErr = null;
+  for (const attempt of attempts) {
+    try {
+      console.log(`[HepsiB Paketleme] Yöntem ${attempt.label}: ${attempt.method} ${attempt.url}`);
+      const r = await fetch(attempt.url, {
+        method:  attempt.method,
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body:    attempt.body,
+        signal:  AbortSignal.timeout(15000)
+      });
+      const t = await r.text();
+      console.log(`[HepsiB Paketleme] Yöntem ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 300)}`);
+      if (r.ok) {
+        try { return { method: attempt.label, url: attempt.url, data: JSON.parse(t) }; }
+        catch { return { method: attempt.label, url: attempt.url, raw: t }; }
+      }
+      lastErr = `[${attempt.label}] HTTP ${r.status} (${attempt.method} ${attempt.url}): ${t.substring(0, 200)}`;
+    } catch (e) {
+      lastErr = `[${attempt.label}] Hata: ${e.message}`;
+      console.warn(`[HepsiB Paketleme] Yöntem ${attempt.label} exception:`, e.message);
     }
-    console.warn(`[HepsiB Paketleme] Yöntem A başarısız (${resA.status}), Yöntem B deneniyor...`);
-  } catch (eA) {
-    console.warn('[HepsiB Paketleme] Yöntem A exception:', eA.message);
   }
 
-  // ── Yöntem B: /items/pack  (body array) ──────────────────────────────────
-  const urlB = `${base}/packages/merchantid/${merchantId}/items/pack`;
-  const bodyB = [{ packageNumber, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }];
-  console.log(`[HepsiB Paketleme] Yöntem B: POST ${urlB} body=${JSON.stringify(bodyB)}`);
-  const resB = await fetch(urlB, {
-    method:  'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body:    JSON.stringify(bodyB),
-    signal:  AbortSignal.timeout(15000)
-  });
-  const textB = await resB.text();
-  console.log(`[HepsiB Paketleme] Yöntem B → HTTP ${resB.status} | ${textB.substring(0, 300)}`);
-
-  if (!resB.ok) throw new Error(`HTTP ${resB.status}: ${textB.substring(0, 300)}`);
-  try { return JSON.parse(textB); } catch { return { raw: textB }; }
+  throw new Error(lastErr || 'Tüm pack yöntemleri başarısız');
 }
 
 module.exports = {

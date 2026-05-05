@@ -2983,6 +2983,9 @@ async function hbShowRawOrders() {
         const status = item.status        || item.packageStatus || '-';
         html += `&nbsp;&nbsp;[${i}] <b>packageNumber=${pNum}</b> orderNumber=${oNum} status=${status}<br>`;
       });
+      if (data.first_full) {
+        html += `&nbsp;&nbsp;<details><summary style="cursor:pointer;color:#6b7280;font-size:10px;">İlk paketin tam JSON'ı</summary><pre style="font-size:9px;background:#f1f5f9;padding:4px;overflow:auto;max-height:120px;">${JSON.stringify(data.first_full, null, 2)}</pre></details>`;
+      }
       if (!count && data.sample) {
         html += `&nbsp;&nbsp;<span style="color:#9ca3af">Ham: ${JSON.stringify(data.sample).substring(0,150)}</span><br>`;
       }

@@ -522,7 +522,12 @@ router.get('/hb-raw-orders', async (req, res) => {
         const items = Array.isArray(body) ? body
           : body?.data?.items || body?.items || body?.packages || body?.orders || body?.data || null;
         const count = Array.isArray(items) ? items.length : (items ? 1 : 0);
-        results[q.label] = { status: r.status, count, sample: Array.isArray(items) ? items.slice(0,2) : body };
+        results[q.label] = {
+          status: r.status, count,
+          sample: Array.isArray(items) ? items.slice(0, 2) : body,
+          // İlk paketin tam JSON'ı (alan adlarını görmek için)
+          first_full: Array.isArray(items) && items.length > 0 ? items[0] : null
+        };
         console.log(`[HB Raw] ${q.label} → HTTP ${r.status} count=${count}`);
       } catch (e) {
         results[q.label] = { error: e.message };
@@ -1161,7 +1166,7 @@ router.post('/hb-pack-order', async (req, res) => {
     res.json({ ok: true, hbPackageNumber, result });
   } catch (err) {
     console.error('[HB Paketleme] Hata:', err.message);
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(502).json({ ok: false, error: err.message, attempted_packageNumber: err._pkgNum });
   } finally {
     client.release();
   }
