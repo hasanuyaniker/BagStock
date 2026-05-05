@@ -562,26 +562,49 @@ async function updateHBListingStockPrice(creds, updates) {
 
 /**
  * 3. SİPARİŞ: Paketi onayla (paketleme tamamlandı işareti)
- * POST https://oms-external-sit.hepsiburada.com/packages/merchantid/{merchantId}/{packageNumber}/pack
+ * Yöntem A: POST /packages/merchantid/{merchantId}/{packageNumber}/pack  (path-param)
+ * Yöntem B: POST /packages/merchantid/{merchantId}/items/pack            (body JSON array)
  */
 async function packHBOrder(creds, packageNumber) {
   const { merchantId, username, apiKey, environment } = creds;
-  const base = getHBBase(environment);
+  const base    = getHBBase(environment);
   const headers = makeHBHeaders(merchantId, apiKey, username);
-  const url = `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`;
 
-  console.log(`[HepsiB Paketleme] POST ${url}`);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body:   JSON.stringify({}),
-    signal: AbortSignal.timeout(15000)
+  // ── Yöntem A: /{packageNumber}/pack ──────────────────────────────────────
+  const urlA = `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`;
+  console.log(`[HepsiB Paketleme] Yöntem A: POST ${urlA}`);
+  try {
+    const resA = await fetch(urlA, {
+      method: 'POST',
+      headers,
+      body:   JSON.stringify({}),
+      signal: AbortSignal.timeout(15000)
+    });
+    const textA = await resA.text();
+    console.log(`[HepsiB Paketleme] Yöntem A → HTTP ${resA.status} | ${textA.substring(0, 300)}`);
+    if (resA.ok) {
+      try { return JSON.parse(textA); } catch { return { raw: textA }; }
+    }
+    console.warn(`[HepsiB Paketleme] Yöntem A başarısız (${resA.status}), Yöntem B deneniyor...`);
+  } catch (eA) {
+    console.warn('[HepsiB Paketleme] Yöntem A exception:', eA.message);
+  }
+
+  // ── Yöntem B: /items/pack  (body array) ──────────────────────────────────
+  const urlB = `${base}/packages/merchantid/${merchantId}/items/pack`;
+  const bodyB = [{ packageNumber, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }];
+  console.log(`[HepsiB Paketleme] Yöntem B: POST ${urlB} body=${JSON.stringify(bodyB)}`);
+  const resB = await fetch(urlB, {
+    method:  'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body:    JSON.stringify(bodyB),
+    signal:  AbortSignal.timeout(15000)
   });
-  const rawText = await res.text();
-  console.log(`[HepsiB Paketleme] HTTP ${res.status} | ${rawText.substring(0, 300)}`);
+  const textB = await resB.text();
+  console.log(`[HepsiB Paketleme] Yöntem B → HTTP ${resB.status} | ${textB.substring(0, 300)}`);
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawText.substring(0, 300)}`);
-  try { return JSON.parse(rawText); } catch { return { raw: rawText }; }
+  if (!resB.ok) throw new Error(`HTTP ${resB.status}: ${textB.substring(0, 300)}`);
+  try { return JSON.parse(textB); } catch { return { raw: textB }; }
 }
 
 module.exports = {

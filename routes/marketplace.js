@@ -491,15 +491,37 @@ router.get('/hb-raw-orders', async (req, res) => {
     const today   = formatHBDate(new Date());
     const start   = formatHBDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
+    // Farklı package sorgu stratejileri — hangisi veri döndürür bul
+    const queries = [
+      // Paketler: tarih filtresi yok
+      { label: 'packages_no_filter',   url: `${base}/packages/merchantid/${creds.merchantId}?limit=20&offset=0` },
+      // Paketler: geniş tarih aralığı (1 yıl)
+      { label: 'packages_wide',        url: `${base}/packages/merchantid/${creds.merchantId}?begindate=${formatHBDate(new Date(Date.now() - 365*24*3600*1000))}&enddate=${today}&limit=20&offset=0` },
+      // Paketler: dar tarih aralığı (30 gün) — orijinal sorgu
+      { label: 'packages_30d',         url: `${base}/packages/merchantid/${creds.merchantId}?begindate=${start}&enddate=${today}&limit=20&offset=0` },
+      // Paketler: status filtresiyle
+      { label: 'packages_created',     url: `${base}/packages/merchantid/${creds.merchantId}?status=Created&limit=20&offset=0` },
+      { label: 'packages_open',        url: `${base}/packages/merchantid/${creds.merchantId}?status=OPEN&limit=20&offset=0` },
+      // Siparişler: ISO tarih formatı
+      { label: 'orders_iso',           url: `${base}/orders/merchantid/${creds.merchantId}?begindate=${today}T00%3A00%3A00%2B03%3A00&enddate=${today}T23%3A59%3A59%2B03%3A00&limit=20&offset=0` },
+      // Siparişler: geniş aralık, düz tarih
+      { label: 'orders_wide',          url: `${base}/orders/merchantid/${creds.merchantId}?begindate=${start}&enddate=${today}&limit=20&offset=0` },
+    ];
+
     const results = {};
-    for (const path of ['orders', 'packages']) {
-      const url = `${base}/${path}/merchantid/${creds.merchantId}?begindate=${start}&enddate=${today}&limit=20&offset=0`;
+    for (const q of queries) {
       try {
-        const r  = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
-        const t  = await r.text();
-        results[path] = { status: r.status, body: JSON.parse(t) };
+        const r = await fetch(q.url, { headers, signal: AbortSignal.timeout(10000) });
+        const t = await r.text();
+        let body;
+        try { body = JSON.parse(t); } catch { body = t; }
+        const items = Array.isArray(body) ? body
+          : body?.data?.items || body?.items || body?.packages || body?.orders || body?.data || null;
+        const count = Array.isArray(items) ? items.length : (items ? 1 : 0);
+        results[q.label] = { status: r.status, count, sample: Array.isArray(items) ? items.slice(0,2) : body };
+        console.log(`[HB Raw] ${q.label} → HTTP ${r.status} count=${count}`);
       } catch (e) {
-        results[path] = { error: e.message };
+        results[q.label] = { error: e.message };
       }
     }
     res.json(results);
@@ -702,9 +724,13 @@ router.post('/create-test-hb-order', async (req, res) => {
       // HB'nin atadığı packageNumber — pack işlemi için gerekli
       // cargo_tracking_number alanına saklıyoruz (test siparişlerinde bu alan boş)
       const hbPackageNum =
-        hbApiResponse?.packageNumber  || hbApiResponse?.PackageNumber  ||
-        hbApiResponse?.packageId      || hbApiResponse?.PackageId      ||
-        hbApiResponse?.data?.packageNumber || hbApiResponse?.data?.id  ||
+        hbApiResponse?.packageNumber          || hbApiResponse?.PackageNumber          ||
+        hbApiResponse?.packageId             || hbApiResponse?.PackageId             ||
+        hbApiResponse?.data?.packageNumber   || hbApiResponse?.data?.packageId       ||
+        hbApiResponse?.data?.id              ||
+        hbApiResponse?.packageInfo?.packageNumber || hbApiResponse?.packageInfo?.id   ||
+        hbApiResponse?.package?.packageNumber || hbApiResponse?.package?.id          ||
+        hbApiResponse?.packages?.[0]?.packageNumber || hbApiResponse?.packages?.[0]?.id ||
         null;
       console.log('[HB Test Order] hbPackageNum:', hbPackageNum, '| orderId:', orderId);
 

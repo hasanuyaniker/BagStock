@@ -2724,9 +2724,18 @@ async function createTestHBOrder() {
       const o = data.order;
       // hb_order_number = HB portaldaki "Satıcı Sipariş No" ile eşleşen numara
       const displayNum = o.hb_order_number || (o.order_number||'').replace('HBTEST-','') || o.order_id;
+      // Stub yanıtından packageNumber var mı?
+      const rawResp = data.hbApiResponse;
+      const pkgNumDebug = rawResp?.packageNumber || rawResp?.PackageNumber || rawResp?.packageId
+        || rawResp?.packages?.[0]?.packageNumber || rawResp?.packages?.[0]?.id || null;
+      const debugInfo = pkgNumDebug
+        ? `<div style="font-size:10px;color:#16a34a;margin-top:2px;">📦 Stub packageNumber: <code>${pkgNumDebug}</code></div>`
+        : `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">ℹ️ Stub yanıtında packageNumber yok — HB paket listesinden bulunacak</div>
+           <details style="font-size:10px;margin-top:2px;"><summary style="cursor:pointer;color:#6b7280;">Stub ham yanıtı gör</summary><pre style="background:#f8fafc;padding:4px;border-radius:3px;overflow:auto;max-height:120px;font-size:9px;">${JSON.stringify(rawResp, null, 2)}</pre></details>`;
       msg.innerHTML = `<span style="color:#16a34a;font-weight:600;">✓ HB Sipariş No: <code style="background:#f0fdf4;padding:1px 6px;border-radius:3px;">${displayNum}</code> — ${o.status_tr}</span>
         &nbsp;<a href="#" onclick="goToOrders();return false;" style="font-size:11px;color:#5b3de8;">Siparişlerde Gör →</a>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px;">Bu numara HB test portalında "Satıcı Sipariş No" olarak görünür.</div>`;
+        <div style="font-size:10px;color:#6b7280;margin-top:4px;">Bu numara HB test portalında "Satıcı Sipariş No" olarak görünür.</div>
+        ${debugInfo}`;
       await loadTestHBOrders();
     } else {
       msg.innerHTML = `<span style="color:#dc2626;">${data.error || 'Hata'}</span>`;
@@ -2952,28 +2961,33 @@ async function hbUpdateStockPrice() {
 async function hbShowRawOrders() {
   const el = document.getElementById('hbRawOrdersDebug');
   if (!el) return;
-  el.innerHTML = '⏳ HB\'den veriler çekiliyor...';
+  el.innerHTML = '⏳ HB\'den çoklu sorgu çekiliyor (7 farklı endpoint)...';
   try {
     const r = await apiFetch('/api/marketplace/hb-raw-orders');
     const d = await r.json();
     if (d.error) { el.innerHTML = `<span style="color:red">${d.error}</span>`; return; }
 
     let html = '';
-    for (const [section, data] of Object.entries(d)) {
-      const items = data?.body?.data?.items || data?.body?.items || data?.body?.packages
-        || data?.body?.orders || (Array.isArray(data?.body) ? data.body : []);
-      html += `<b>${section.toUpperCase()}</b> (HTTP ${data.status}): ${items.length} kayıt<br>`;
-      items.slice(0, 5).forEach((item, i) => {
-        const pNum = item.packageNumber || item.id || '-';
-        const oNum = item.orderNumber   || item.orderId || '-';
-        const status = item.status || '-';
-        html += `&nbsp;[${i}] packageNumber=<b>${pNum}</b> orderNumber=<b>${oNum}</b> status=${status}<br>`;
+    for (const [label, data] of Object.entries(d)) {
+      if (data.error) {
+        html += `<span style="color:#dc2626">[${label}] HATA: ${data.error}</span><br>`;
+        continue;
+      }
+      const count = data.count ?? 0;
+      const statusColor = data.status === 200 ? '#16a34a' : '#dc2626';
+      html += `<span style="color:${statusColor}">[${label}]</span> HTTP ${data.status} — ${count} kayıt<br>`;
+      const samples = Array.isArray(data.sample) ? data.sample : (data.sample ? [data.sample] : []);
+      samples.slice(0, 3).forEach((item, i) => {
+        const pNum   = item.packageNumber || item.packageId || item.id || '-';
+        const oNum   = item.orderNumber   || item.orderId   || '-';
+        const status = item.status        || item.packageStatus || '-';
+        html += `&nbsp;&nbsp;[${i}] <b>packageNumber=${pNum}</b> orderNumber=${oNum} status=${status}<br>`;
       });
-      if (!items.length) {
-        html += `&nbsp;<span style="color:#999">Kayıt yok — ham yanıt: ${JSON.stringify(data?.body).substring(0,200)}</span><br>`;
+      if (!count && data.sample) {
+        html += `&nbsp;&nbsp;<span style="color:#9ca3af">Ham: ${JSON.stringify(data.sample).substring(0,150)}</span><br>`;
       }
     }
-    el.innerHTML = `<pre style="font-size:11px;background:#f8fafc;padding:8px;border-radius:4px;overflow:auto;max-height:250px;">${html}</pre>`;
+    el.innerHTML = `<pre style="font-size:11px;background:#f8fafc;padding:8px;border-radius:4px;overflow:auto;max-height:300px;white-space:pre-wrap;">${html}</pre>`;
   } catch (err) {
     el.innerHTML = `<span style="color:red">${err.message}</span>`;
   }
