@@ -495,7 +495,8 @@ async function getHBTrackingStatus(creds, trackingId) {
     : 'https://mpop-sit.hepsiburada.com';
 
   const headers = makeHBHeaders(merchantId, apiKey, username);
-  const url = `${base}/products/api/products/trackingId/${trackingId}`;
+  // Not: katalog endpoint'leri /product/ (tekil) kullanır — /products/ değil
+  const url = `${base}/product/api/products/trackingId/${trackingId}`;
 
   console.log(`[HepsiB Katalog Tracking] GET ${url}`);
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
