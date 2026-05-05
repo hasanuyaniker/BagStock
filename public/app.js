@@ -2948,6 +2948,37 @@ async function hbUpdateStockPrice() {
   }
 }
 
+// Debug: HB'deki raw orders + packages listesini göster
+async function hbShowRawOrders() {
+  const el = document.getElementById('hbRawOrdersDebug');
+  if (!el) return;
+  el.innerHTML = '⏳ HB\'den veriler çekiliyor...';
+  try {
+    const r = await apiFetch('/api/marketplace/hb-raw-orders');
+    const d = await r.json();
+    if (d.error) { el.innerHTML = `<span style="color:red">${d.error}</span>`; return; }
+
+    let html = '';
+    for (const [section, data] of Object.entries(d)) {
+      const items = data?.body?.data?.items || data?.body?.items || data?.body?.packages
+        || data?.body?.orders || (Array.isArray(data?.body) ? data.body : []);
+      html += `<b>${section.toUpperCase()}</b> (HTTP ${data.status}): ${items.length} kayıt<br>`;
+      items.slice(0, 5).forEach((item, i) => {
+        const pNum = item.packageNumber || item.id || '-';
+        const oNum = item.orderNumber   || item.orderId || '-';
+        const status = item.status || '-';
+        html += `&nbsp;[${i}] packageNumber=<b>${pNum}</b> orderNumber=<b>${oNum}</b> status=${status}<br>`;
+      });
+      if (!items.length) {
+        html += `&nbsp;<span style="color:#999">Kayıt yok — ham yanıt: ${JSON.stringify(data?.body).substring(0,200)}</span><br>`;
+      }
+    }
+    el.innerHTML = `<pre style="font-size:11px;background:#f8fafc;padding:8px;border-radius:4px;overflow:auto;max-height:250px;">${html}</pre>`;
+  } catch (err) {
+    el.innerHTML = `<span style="color:red">${err.message}</span>`;
+  }
+}
+
 async function hbPackOrder(packageNumber, btn) {
   if (!confirm(`${packageNumber} numaralı sipariş paketlenecek. Onaylıyor musunuz?`)) return;
   btn.disabled = true; btn.textContent = '⏳';

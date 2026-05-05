@@ -686,8 +686,10 @@ router.post('/create-test-hb-order', async (req, res) => {
         return res.status(502).json({ error: `Hepsiburada SIT API hatası: ${hbErr.message}` });
       }
 
-      // HB'nin atadığı order ID'yi al — tüm olası field adlarını dene
+      // HB stub tam yanıtını logla — packageNumber dahil TÜM alanlar
       console.log('[HB Test Order] Tam API yanıtı:', JSON.stringify(hbApiResponse));
+
+      // HB'nin atadığı order ID — tüm olası field adlarını dene
       const hbAssignedId =
         hbApiResponse?.orderId        || hbApiResponse?.OrderId        ||
         hbApiResponse?.orderNumber    || hbApiResponse?.OrderNumber    ||
@@ -696,6 +698,15 @@ router.post('/create-test-hb-order', async (req, res) => {
         (typeof hbApiResponse === 'string' ? hbApiResponse : null)     ||
         null;
       const orderId = hbAssignedId ? String(hbAssignedId) : `HB-TEST-${ts}-${rand}`;
+
+      // HB'nin atadığı packageNumber — pack işlemi için gerekli
+      // cargo_tracking_number alanına saklıyoruz (test siparişlerinde bu alan boş)
+      const hbPackageNum =
+        hbApiResponse?.packageNumber  || hbApiResponse?.PackageNumber  ||
+        hbApiResponse?.packageId      || hbApiResponse?.PackageId      ||
+        hbApiResponse?.data?.packageNumber || hbApiResponse?.data?.id  ||
+        null;
+      console.log('[HB Test Order] hbPackageNum:', hbPackageNum, '| orderId:', orderId);
 
       // 6. Local DB'ye kaydet — HB listing verisiyle, gerçek durumla (daima bekliyor)
       await client.query('BEGIN');
@@ -713,9 +724,9 @@ router.post('/create-test-hb-order', async (req, res) => {
           st.status, st.status_tr, st.raw,
           cust,
           Math.round(totalPrice * 100) / 100,
-          st.raw,  // cargo_status = raw_status (OPEN)
-          null,    // cargo_company — yeni sipariş, kargo yok
-          null,    // cargo_tracking_number — yok
+          st.raw,       // cargo_status = raw_status (OPEN)
+          null,         // cargo_company — yeni sipariş, kargo yok
+          hbPackageNum, // cargo_tracking_number — HB packageNumber (pack için kullanılacak)
           Math.round(totalPrice * 0.215 * 100) / 100,
           21.5,
           null     // kargoda_at — yok
@@ -985,20 +996,26 @@ router.post('/hb-pack-order', async (req, res) => {
     const { packageNumber: bagstockOrderId } = req.body;
     if (!bagstockOrderId) return res.status(400).json({ error: 'packageNumber gerekli' });
 
-    // DB'den bu siparişin kayıtlı bilgilerini al (merchant order number = biz HB'ye gönderdiğimiz numara)
+    // DB'den bu siparişin tüm bilgilerini al
+    // cargo_tracking_number = stub'ın döndürdüğü HB packageNumber (varsa)
     const dbRow = await client.query(
-      `SELECT order_id, order_number FROM marketplace_orders
+      `SELECT order_id, order_number, cargo_tracking_number FROM marketplace_orders
        WHERE platform='hepsiburada' AND (order_id=$1 OR order_number=$1 OR order_number=$2)
        LIMIT 1`,
       [String(bagstockOrderId), `HBTEST-${String(bagstockOrderId).replace('HB-TEST-','').replace('HBTEST-','')}`]
     );
-    // merchantOrderNumber = HB'ye OrderNumber olarak gönderdiğimiz saf rakam
     const row = dbRow.rows[0];
+    console.log('[HB Pack] DB row:', JSON.stringify(row));
+
+    // merchantOrderNumber = HB'ye OrderNumber olarak gönderdiğimiz saf rakam
     const merchantOrderNumber = row
       ? String(row.order_number || '').replace('HBTEST-', '').replace('TEST-', '')
       : String(bagstockOrderId).replace('HB-TEST-', '').replace('HBTEST-', '');
 
-    console.log(`[HB Pack] bagstockOrderId=${bagstockOrderId} merchantOrderNumber=${merchantOrderNumber}`);
+    // DB'de saklı HB packageNumber varsa direkt kullan
+    const storedPackageNum = row?.cargo_tracking_number || null;
+
+    console.log(`[HB Pack] bagstockOrderId=${bagstockOrderId} merchantOrderNumber=${merchantOrderNumber} storedPackageNum=${storedPackageNum}`);
 
     // ── HB Paket Listesinden gerçek packageNumber'ı bul ──────────────────────
     const { getHBBase, makeHBHeaders, formatHBDate } = require('../services/hepsiburada');
@@ -1051,10 +1068,10 @@ router.post('/hb-pack-order', async (req, res) => {
       console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
     }
 
-    // Paket bulunamadıysa merchant order number'ı dene
+    // Paket bulunamadıysa: DB'deki saklı packageNum → merchantOrderNumber → bagstockOrderId
     if (!hbPackageNumber) {
-      hbPackageNumber = merchantOrderNumber || bagstockOrderId;
-      console.log(`[HB Pack] Fallback packageNumber: ${hbPackageNumber}`);
+      hbPackageNumber = storedPackageNum || merchantOrderNumber || bagstockOrderId;
+      console.log(`[HB Pack] Fallback packageNumber: ${hbPackageNumber} (stored=${storedPackageNum})`);
     }
 
     // ── Pack isteği gönder ────────────────────────────────────────────────────
