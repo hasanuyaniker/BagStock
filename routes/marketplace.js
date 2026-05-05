@@ -513,6 +513,9 @@ router.get('/hb-raw-orders', async (req, res) => {
     ];
 
     const results = {};
+    let firstPackageNumber = null;
+    let firstPackageUuid   = null;
+
     for (const q of queries) {
       try {
         const r = await fetch(q.url, { headers, signal: AbortSignal.timeout(10000) });
@@ -522,17 +525,52 @@ router.get('/hb-raw-orders', async (req, res) => {
         const items = Array.isArray(body) ? body
           : body?.data?.items || body?.items || body?.packages || body?.orders || body?.data || null;
         const count = Array.isArray(items) ? items.length : (items ? 1 : 0);
+        const firstItem = Array.isArray(items) && items.length > 0 ? items[0] : null;
+        if (firstItem && !firstPackageNumber) {
+          firstPackageNumber = firstItem.packageNumber || firstItem.id;
+          firstPackageUuid   = firstItem.id;
+        }
         results[q.label] = {
           status: r.status, count,
           sample: Array.isArray(items) ? items.slice(0, 2) : body,
-          // İlk paketin tam JSON'ı (alan adlarını görmek için)
-          first_full: Array.isArray(items) && items.length > 0 ? items[0] : null
+          first_full: firstItem
         };
         console.log(`[HB Raw] ${q.label} → HTTP ${r.status} count=${count}`);
       } catch (e) {
         results[q.label] = { error: e.message };
       }
     }
+
+    // İlk paketin detayını çek — lineItems yapısını gör
+    if (firstPackageNumber) {
+      const detailAttempts = [
+        `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${firstPackageNumber}`,
+        `${base}/packages/merchantid/${creds.merchantId}/${firstPackageNumber}`,
+        `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${firstPackageNumber}/items`,
+        `${base}/packages/merchantid/${creds.merchantId}/${firstPackageNumber}/items`,
+        `${base}/packages/merchantid/${creds.merchantId}/${firstPackageNumber}/lineItems`,
+        ...(firstPackageUuid ? [
+          `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${firstPackageUuid}`,
+          `${base}/packages/merchantid/${creds.merchantId}/${firstPackageUuid}`,
+        ] : []),
+      ];
+      for (const dUrl of detailAttempts) {
+        try {
+          const dr = await fetch(dUrl, { headers, signal: AbortSignal.timeout(8000) });
+          const dt = await dr.text();
+          let dbody;
+          try { dbody = JSON.parse(dt); } catch { dbody = dt; }
+          results[`DETAIL:${dUrl.split('/').slice(-2).join('/')}`] = {
+            status: dr.status,
+            body: dbody
+          };
+          if (dr.ok) break; // İlk başarılı olanı al
+        } catch (e) {
+          results[`DETAIL:${dUrl.split('/').slice(-2).join('/')}`] = { error: e.message };
+        }
+      }
+    }
+
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: err.message });
