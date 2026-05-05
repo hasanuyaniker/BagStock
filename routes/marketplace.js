@@ -939,28 +939,108 @@ router.post('/hb-update-stock-price', async (req, res) => {
   }
 });
 
-// ── 3. SİPARİŞ: Belirtilen paketi paketle (paketleme adımı)
+// ── 3. SİPARİŞ: Paketi paketle
+// Akış:
+//   1. BagStock DB'den siparişin HB merchant order number'ını al
+//   2. HB packages listesinden eşleşen HB packageNumber'ı bul
+//   3. Bulunan packageNumber ile pack endpoint'ini çağır
+//   4. Local DB'yi güncelle
 router.post('/hb-pack-order', async (req, res) => {
   const client = await pool.connect();
   try {
     const creds = await getHBCreds(client);
     if (!creds) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
 
-    const { packageNumber } = req.body;
-    if (!packageNumber) return res.status(400).json({ error: 'packageNumber gerekli' });
+    // bagstockOrderId = BagStock DB'deki order_id (HB-TEST-* veya gerçek HB id)
+    const { packageNumber: bagstockOrderId } = req.body;
+    if (!bagstockOrderId) return res.status(400).json({ error: 'packageNumber gerekli' });
 
-    const result = await packHBOrder(creds, packageNumber);
+    // DB'den bu siparişin kayıtlı bilgilerini al (merchant order number = biz HB'ye gönderdiğimiz numara)
+    const dbRow = await client.query(
+      `SELECT order_id, order_number FROM marketplace_orders
+       WHERE platform='hepsiburada' AND (order_id=$1 OR order_number=$1 OR order_number=$2)
+       LIMIT 1`,
+      [String(bagstockOrderId), `HBTEST-${String(bagstockOrderId).replace('HB-TEST-','').replace('HBTEST-','')}`]
+    );
+    // merchantOrderNumber = HB'ye OrderNumber olarak gönderdiğimiz saf rakam
+    const row = dbRow.rows[0];
+    const merchantOrderNumber = row
+      ? String(row.order_number || '').replace('HBTEST-', '').replace('TEST-', '')
+      : String(bagstockOrderId).replace('HB-TEST-', '').replace('HBTEST-', '');
 
-    // Local DB'de durumu güncelle
+    console.log(`[HB Pack] bagstockOrderId=${bagstockOrderId} merchantOrderNumber=${merchantOrderNumber}`);
+
+    // ── HB Paket Listesinden gerçek packageNumber'ı bul ──────────────────────
+    const { getHBBase, makeHBHeaders, formatHBDate } = require('../services/hepsiburada');
+    const base    = getHBBase(creds.environment);
+    const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
+
+    const endDate   = new Date();
+    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const pkgUrl = `${base}/packages/merchantid/${creds.merchantId}?begindate=${formatHBDate(startDate)}&enddate=${formatHBDate(endDate)}&limit=100&offset=0`;
+
+    console.log(`[HB Pack] Paket listesi çekiliyor: ${pkgUrl}`);
+    let hbPackageNumber = null;
+
+    try {
+      const pkgRes  = await fetch(pkgUrl, { headers, signal: AbortSignal.timeout(12000) });
+      const pkgText = await pkgRes.text();
+      console.log(`[HB Pack] Paket listesi HTTP ${pkgRes.status} | ${pkgText.substring(0, 500)}`);
+
+      if (pkgRes.ok) {
+        let pkgData;
+        try { pkgData = JSON.parse(pkgText); } catch {}
+        const items = pkgData?.data?.items || pkgData?.items || pkgData?.packages
+          || pkgData?.data?.packages || (Array.isArray(pkgData) ? pkgData : []);
+
+        console.log(`[HB Pack] ${items.length} paket bulundu. İlk paket:`, JSON.stringify(items[0] || {}).substring(0,300));
+
+        // Eşleştirme: orderNumber veya packageNumber ile merchant order number karşılaştır
+        const match = items.find(p => {
+          const pNum = String(p.packageNumber || p.id || '');
+          const oNum = String(p.orderNumber || p.orderId || p.OrderNumber || '');
+          return pNum === merchantOrderNumber
+              || oNum === merchantOrderNumber
+              || pNum === bagstockOrderId
+              || oNum === bagstockOrderId;
+        });
+
+        if (match) {
+          hbPackageNumber = String(match.packageNumber || match.id);
+          console.log(`[HB Pack] ✓ Eşleşen paket: ${hbPackageNumber}`);
+        } else {
+          // Eşleşme yok ise ilk açık (Packed değil) paketi al
+          const openPkg = items.find(p => !p.status || p.status === 'OPEN' || p.status === 'Created');
+          if (openPkg) {
+            hbPackageNumber = String(openPkg.packageNumber || openPkg.id);
+            console.log(`[HB Pack] ⚠️ Eşleşme yok, ilk açık paket kullanılıyor: ${hbPackageNumber}`);
+          }
+        }
+      }
+    } catch (listErr) {
+      console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
+    }
+
+    // Paket bulunamadıysa merchant order number'ı dene
+    if (!hbPackageNumber) {
+      hbPackageNumber = merchantOrderNumber || bagstockOrderId;
+      console.log(`[HB Pack] Fallback packageNumber: ${hbPackageNumber}`);
+    }
+
+    // ── Pack isteği gönder ────────────────────────────────────────────────────
+    const result = await packHBOrder(creds, hbPackageNumber);
+
+    // Local DB'de durumu güncelle (her iki id ile dene)
     await client.query(
       `UPDATE marketplace_orders
        SET status='kargoda', status_tr='Kargoya Verildi', raw_status='Packed',
            cargo_status='Packed', kargoda_at=NOW(), updated_at=NOW()
-       WHERE order_id=$1 AND platform='hepsiburada'`,
-      [String(packageNumber)]
+       WHERE platform='hepsiburada'
+         AND (order_id=$1 OR order_number=$2 OR order_number=$3)`,
+      [String(bagstockOrderId), String(bagstockOrderId), `HBTEST-${merchantOrderNumber}`]
     );
 
-    res.json({ ok: true, result });
+    res.json({ ok: true, hbPackageNumber, result });
   } catch (err) {
     console.error('[HB Paketleme] Hata:', err.message);
     res.status(502).json({ ok: false, error: err.message });

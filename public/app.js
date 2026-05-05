@@ -2807,7 +2807,8 @@ async function loadTestHBOrders() {
           <td style="padding:8px 6px;color:#6b7280;white-space:nowrap;">${dateStr}</td>
           <td style="padding:8px 6px;">
             ${canPack ? `<button class="btn btn-sm" onclick="hbPackOrder('${escHtml(String(o.order_id))}',this)"
-              style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,0.1);color:#1d4ed8;border:1px solid rgba(59,130,246,0.3);border-radius:4px;">
+              style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,0.1);color:#1d4ed8;border:1px solid rgba(59,130,246,0.3);border-radius:4px;"
+              title="HB packageNumber otomatik aranır: ${escHtml(String(o.order_number||'').replace('HBTEST-',''))}">
               📦 Paketle</button>` : ''}
           </td>
         </tr>`;
