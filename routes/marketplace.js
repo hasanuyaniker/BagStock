@@ -478,6 +478,36 @@ router.post('/sync', async (req, res) => {
   }
 });
 
+// ── GET /api/marketplace/hb-raw-orders — HB orders + packages ham verisi (debug) ──
+router.get('/hb-raw-orders', async (req, res) => {
+  try {
+    const credRow = await pool.query("SELECT value FROM app_settings WHERE key = 'marketplace_credentials'");
+    const creds = credRow.rows[0] ? JSON.parse(credRow.rows[0].value).hepsiburada : null;
+    if (!creds?.merchantId) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    const { getHBBase, makeHBHeaders, formatHBDate } = require('../services/hepsiburada');
+    const base    = getHBBase(creds.environment);
+    const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
+    const today   = formatHBDate(new Date());
+    const start   = formatHBDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+
+    const results = {};
+    for (const path of ['orders', 'packages']) {
+      const url = `${base}/${path}/merchantid/${creds.merchantId}?begindate=${start}&enddate=${today}&limit=20&offset=0`;
+      try {
+        const r  = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
+        const t  = await r.text();
+        results[path] = { status: r.status, body: JSON.parse(t) };
+      } catch (e) {
+        results[path] = { error: e.message };
+      }
+    }
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/marketplace/test-shipping-email ─────────────────────────────────
 // Bugün kargoya verilen tüm siparişleri tek mail ile gönderir
 // ── POST /api/marketplace/test-hb-connection — HB API bağlantı testi ────────
