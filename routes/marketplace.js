@@ -745,7 +745,7 @@ router.post('/create-test-hb-order', async (req, res) => {
           const { getHBBase, makeHBHeaders, formatHBDate } = require('../services/hepsiburada');
           const pkgBase    = getHBBase(hbCreds.environment);
           const pkgHeaders = makeHBHeaders(hbCreds.merchantId, hbCreds.apiKey, hbCreds.username || hbCreds.username);
-          // Tarih filtresi yok — tüm paketleri al
+          // Tarih filtresi KESİNLİKLE YOK — begindate/enddate geçince HB SIT boş dönüyor!
           const pkgUrl = `${pkgBase}/packages/merchantid/${hbCreds.merchantId}?limit=50&offset=0`;
           const pkgRes  = await fetch(pkgUrl, { headers: pkgHeaders, signal: AbortSignal.timeout(10000) });
           const pkgText = await pkgRes.text();
@@ -1085,11 +1085,10 @@ router.post('/hb-pack-order', async (req, res) => {
     const base    = getHBBase(creds.environment);
     const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
 
-    const endDate   = new Date();
-    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const pkgUrl = `${base}/packages/merchantid/${creds.merchantId}?begindate=${formatHBDate(startDate)}&enddate=${formatHBDate(endDate)}&limit=100&offset=0`;
+    // TARİH FİLTRESİ YOK — begindate/enddate geçince HB SIT boş dönüyor!
+    const pkgUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
 
-    console.log(`[HB Pack] Paket listesi çekiliyor: ${pkgUrl}`);
+    console.log(`[HB Pack] Paket listesi çekiliyor (tarihsiz): ${pkgUrl}`);
     let hbPackageNumber = null;
 
     try {
@@ -1105,10 +1104,10 @@ router.post('/hb-pack-order', async (req, res) => {
 
         console.log(`[HB Pack] ${items.length} paket bulundu. İlk paket:`, JSON.stringify(items[0] || {}).substring(0,300));
 
-        // Eşleştirme: orderNumber veya packageNumber ile merchant order number karşılaştır
+        // Eşleştirme: önce orderNumber/merchantOrderNumber ile tam eşleşme ara
         const match = items.find(p => {
           const pNum = String(p.packageNumber || p.id || '');
-          const oNum = String(p.orderNumber || p.orderId || p.OrderNumber || '');
+          const oNum = String(p.orderNumber || p.orderId || p.OrderNumber || p.merchantOrderNumber || '');
           return pNum === merchantOrderNumber
               || oNum === merchantOrderNumber
               || pNum === bagstockOrderId
@@ -1119,11 +1118,20 @@ router.post('/hb-pack-order', async (req, res) => {
           hbPackageNumber = String(match.packageNumber || match.id);
           console.log(`[HB Pack] ✓ Eşleşen paket: ${hbPackageNumber}`);
         } else {
-          // Eşleşme yok ise ilk açık (Packed değil) paketi al
-          const openPkg = items.find(p => !p.status || p.status === 'OPEN' || p.status === 'Created');
+          // Eşleşme yok → Open/Created statüsündeki ilk paketi kullan (SIT testi için geçerli)
+          const openPkg = items.find(p =>
+            !p.status
+            || String(p.status).toLowerCase() === 'open'
+            || String(p.status).toLowerCase() === 'created'
+            || String(p.status).toLowerCase() === 'new'
+          );
           if (openPkg) {
             hbPackageNumber = String(openPkg.packageNumber || openPkg.id);
-            console.log(`[HB Pack] ⚠️ Eşleşme yok, ilk açık paket kullanılıyor: ${hbPackageNumber}`);
+            console.log(`[HB Pack] ⚠️ Eşleşme yok — ilk Open paket: ${hbPackageNumber}`);
+          } else if (items.length > 0) {
+            // Status ne olursa olsun ilk paketi al
+            hbPackageNumber = String(items[0].packageNumber || items[0].id);
+            console.log(`[HB Pack] ⚠️ Eşleşme yok — herhangi ilk paket: ${hbPackageNumber}`);
           }
         }
       }
