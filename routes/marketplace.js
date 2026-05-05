@@ -560,13 +560,16 @@ router.get('/hb-raw-orders', async (req, res) => {
           const dt = await dr.text();
           let dbody;
           try { dbody = JSON.parse(dt); } catch { dbody = dt; }
-          results[`DETAIL:${dUrl.split('/').slice(-2).join('/')}`] = {
+          // Break yok — tüm URL'leri dene, hepsinin body'sini göster
+          results[`DETAIL:${dUrl.split('/').slice(-3).join('/')}`] = {
             status: dr.status,
-            body: dbody
+            body: dbody,
+            // UI için sample/count alanları
+            sample: dbody,
+            count: 0
           };
-          if (dr.ok) break; // İlk başarılı olanı al
         } catch (e) {
-          results[`DETAIL:${dUrl.split('/').slice(-2).join('/')}`] = { error: e.message };
+          results[`DETAIL:${dUrl.split('/').slice(-3).join('/')}`] = { error: e.message };
         }
       }
     }

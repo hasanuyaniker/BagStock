@@ -2986,7 +2986,11 @@ async function hbShowRawOrders() {
       if (data.first_full) {
         html += `&nbsp;&nbsp;<details><summary style="cursor:pointer;color:#6b7280;font-size:10px;">İlk paketin tam JSON'ı</summary><pre style="font-size:9px;background:#f1f5f9;padding:4px;overflow:auto;max-height:120px;">${JSON.stringify(data.first_full, null, 2)}</pre></details>`;
       }
-      if (!count && data.sample) {
+      // DETAIL satırları için body'yi göster
+      if (label.startsWith('DETAIL:') && data.body !== undefined) {
+        const bodyStr = JSON.stringify(data.body, null, 2);
+        html += `&nbsp;&nbsp;<details><summary style="cursor:pointer;color:#7c3aed;font-size:10px;">Detay yanıtı (tam JSON)</summary><pre style="font-size:9px;background:#faf5ff;padding:4px;overflow:auto;max-height:150px;">${bodyStr}</pre></details><br>`;
+      } else if (!count && data.sample) {
         html += `&nbsp;&nbsp;<span style="color:#9ca3af">Ham: ${JSON.stringify(data.sample).substring(0,150)}</span><br>`;
       }
     }
