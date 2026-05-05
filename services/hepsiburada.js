@@ -574,31 +574,40 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
   // packageUuid   = "69f9041e-..." (internal id alanı — pack için bu gerekli olabilir)
   const ids = packageUuid ? [packageNumber, packageUuid] : [packageNumber];
 
-  const attempts = [];
-  for (const id of ids) {
-    attempts.push(
-      // POST /{id}/pack
-      { label: `POST/${id}/pack`, method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${id}/pack`,
+  const cargoBody  = { cargoCompany: 'Yurtiçi Kargo', trackingNumber: `BAGSTOCK-${packageNumber}` };
+  const cargoArr   = [{ packageNumber, ...cargoBody }];
+  const cargoArrU  = packageUuid ? [{ packageNumber: packageUuid, ...cargoBody }] : null;
+
+  const attempts = [
+    // ── En olası: POST /packages/merchantid/{id}  body = array (HB docs ana format)
+    { label: 'ROOT-array',      method: 'POST', url: `${base}/packages/merchantid/${merchantId}`,
+      body: JSON.stringify(cargoArr) },
+    // ── ROOT + sadece packageNumber
+    { label: 'ROOT-obj',        method: 'POST', url: `${base}/packages/merchantid/${merchantId}`,
+      body: JSON.stringify({ packageNumber, ...cargoBody }) },
+    // ── /packagenumber/{num}/pack  (unpack gibi pattern)
+    { label: 'pkgnum-path/pack',method: 'POST', url: `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}/pack`,
+      body: JSON.stringify({}) },
+    { label: 'pkgnum-path/pack+cargo', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}/pack`,
+      body: JSON.stringify(cargoBody) },
+    // ── /packagenumber/{uuid}/pack
+    ...(packageUuid ? [
+      { label: 'uuid-path/pack', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/packagenumber/${packageUuid}/pack`,
         body: JSON.stringify({}) },
-      // PUT /{id}/pack
-      { label: `PUT/${id}/pack`,  method: 'PUT',  url: `${base}/packages/merchantid/${merchantId}/${id}/pack`,
-        body: JSON.stringify({}) },
-      // POST /{id}/pack + cargo body
-      { label: `POST/${id}/pack+body`, method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${id}/pack`,
-        body: JSON.stringify({ cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }) },
-    );
-  }
-  // POST /items/pack  (body array — her iki id ile)
-  attempts.push(
-    { label: 'POST/items/pack-num', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
-      body: JSON.stringify([{ packageNumber, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }]) },
-  );
-  if (packageUuid) {
-    attempts.push(
-      { label: 'POST/items/pack-uuid', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
-        body: JSON.stringify([{ packageNumber: packageUuid, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }]) },
-    );
-  }
+    ] : []),
+    // ── Eski denemeler (path direkt) — son çare
+    { label: 'direct/pack',     method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`,
+      body: JSON.stringify({}) },
+    { label: 'direct/pack+cargo', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`,
+      body: JSON.stringify(cargoBody) },
+    // ── /items/pack
+    { label: 'items/pack',      method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
+      body: JSON.stringify(cargoArr) },
+    ...(cargoArrU ? [
+      { label: 'items/pack-uuid', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
+        body: JSON.stringify(cargoArrU) },
+    ] : []),
+  ];
 
   let lastErr = null;
   for (const attempt of attempts) {
