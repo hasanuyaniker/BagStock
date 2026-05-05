@@ -1095,6 +1095,7 @@ router.post('/hb-pack-order', async (req, res) => {
 
     console.log(`[HB Pack] Paket listesi çekiliyor (tarihsiz): ${pkgUrl}`);
     let hbPackageNumber = null;
+    let hbPackageUuid   = null;
 
     try {
       const pkgRes  = await fetch(pkgUrl, { headers, signal: AbortSignal.timeout(12000) });
@@ -1119,26 +1120,27 @@ router.post('/hb-pack-order', async (req, res) => {
               || oNum === bagstockOrderId;
         });
 
+        let chosenPkg = null;
         if (match) {
+          chosenPkg = match;
           hbPackageNumber = String(match.packageNumber || match.id);
           console.log(`[HB Pack] ✓ Eşleşen paket: ${hbPackageNumber}`);
         } else {
-          // Eşleşme yok → Open/Created statüsündeki ilk paketi kullan (SIT testi için geçerli)
-          const openPkg = items.find(p =>
+          // Eşleşme yok → Open/Created statüsündeki ilk paketi kullan
+          chosenPkg = items.find(p =>
             !p.status
             || String(p.status).toLowerCase() === 'open'
             || String(p.status).toLowerCase() === 'created'
             || String(p.status).toLowerCase() === 'new'
-          );
-          if (openPkg) {
-            hbPackageNumber = String(openPkg.packageNumber || openPkg.id);
-            console.log(`[HB Pack] ⚠️ Eşleşme yok — ilk Open paket: ${hbPackageNumber}`);
-          } else if (items.length > 0) {
-            // Status ne olursa olsun ilk paketi al
-            hbPackageNumber = String(items[0].packageNumber || items[0].id);
-            console.log(`[HB Pack] ⚠️ Eşleşme yok — herhangi ilk paket: ${hbPackageNumber}`);
+          ) || items[0] || null;
+          if (chosenPkg) {
+            hbPackageNumber = String(chosenPkg.packageNumber || chosenPkg.id);
+            console.log(`[HB Pack] ⚠️ Eşleşme yok — ilk uygun paket: ${hbPackageNumber}`);
           }
         }
+        // Pack için hem packageNumber hem UUID id'yi sakla
+        hbPackageUuid = chosenPkg?.id || null;
+        console.log(`[HB Pack] packageNumber=${hbPackageNumber} uuid=${hbPackageUuid}`);
       }
     } catch (listErr) {
       console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
@@ -1151,7 +1153,8 @@ router.post('/hb-pack-order', async (req, res) => {
     }
 
     // ── Pack isteği gönder ────────────────────────────────────────────────────
-    const result = await packHBOrder(creds, hbPackageNumber);
+    // Hem packageNumber hem UUID id geçiyoruz — hangisi çalışır bilinmiyor
+    const result = await packHBOrder(creds, hbPackageNumber, hbPackageUuid);
 
     // Local DB'de durumu güncelle (her iki id ile dene)
     await client.query(

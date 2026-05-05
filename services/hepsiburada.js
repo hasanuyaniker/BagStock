@@ -565,23 +565,40 @@ async function updateHBListingStockPrice(creds, updates) {
  * Yöntem A: POST /packages/merchantid/{merchantId}/{packageNumber}/pack  (path-param)
  * Yöntem B: POST /packages/merchantid/{merchantId}/items/pack            (body JSON array)
  */
-async function packHBOrder(creds, packageNumber) {
+async function packHBOrder(creds, packageNumber, packageUuid) {
   const { merchantId, username, apiKey, environment } = creds;
   const base    = getHBBase(environment);
   const headers = makeHBHeaders(merchantId, apiKey, username);
 
-  const attempts = [
-    // A: POST /{packageNumber}/pack  (en yaygın format)
-    { label: 'A', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`, body: JSON.stringify({}) },
-    // B: PUT  /{packageNumber}/pack
-    { label: 'B', method: 'PUT',  url: `${base}/packages/merchantid/${merchantId}/${packageNumber}/pack`, body: JSON.stringify({}) },
-    // C: POST /items/pack  (body array)
-    { label: 'C', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
+  // packageNumber = "5000121695" (numeric HB packageNumber)
+  // packageUuid   = "69f9041e-..." (internal id alanı — pack için bu gerekli olabilir)
+  const ids = packageUuid ? [packageNumber, packageUuid] : [packageNumber];
+
+  const attempts = [];
+  for (const id of ids) {
+    attempts.push(
+      // POST /{id}/pack
+      { label: `POST/${id}/pack`, method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${id}/pack`,
+        body: JSON.stringify({}) },
+      // PUT /{id}/pack
+      { label: `PUT/${id}/pack`,  method: 'PUT',  url: `${base}/packages/merchantid/${merchantId}/${id}/pack`,
+        body: JSON.stringify({}) },
+      // POST /{id}/pack + cargo body
+      { label: `POST/${id}/pack+body`, method: 'POST', url: `${base}/packages/merchantid/${merchantId}/${id}/pack`,
+        body: JSON.stringify({ cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }) },
+    );
+  }
+  // POST /items/pack  (body array — her iki id ile)
+  attempts.push(
+    { label: 'POST/items/pack-num', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
       body: JSON.stringify([{ packageNumber, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }]) },
-    // D: PUT  /{packageNumber}  (status güncelle)
-    { label: 'D', method: 'PUT',  url: `${base}/packages/merchantid/${merchantId}/${packageNumber}`,
-      body: JSON.stringify({ status: 'Packed', cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }) },
-  ];
+  );
+  if (packageUuid) {
+    attempts.push(
+      { label: 'POST/items/pack-uuid', method: 'POST', url: `${base}/packages/merchantid/${merchantId}/items/pack`,
+        body: JSON.stringify([{ packageNumber: packageUuid, cargoCompany: 'mng', trackingNumber: `BAGSTOCK-${packageNumber}` }]) },
+    );
+  }
 
   let lastErr = null;
   for (const attempt of attempts) {
