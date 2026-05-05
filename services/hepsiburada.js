@@ -609,10 +609,10 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
     ] : []),
   ];
 
-  let lastErr = null;
+  const errors = [];
   for (const attempt of attempts) {
     try {
-      console.log(`[HepsiB Paketleme] Yöntem ${attempt.label}: ${attempt.method} ${attempt.url}`);
+      console.log(`[HepsiB Paketleme] ${attempt.label}: ${attempt.method} ${attempt.url}`);
       const r = await fetch(attempt.url, {
         method:  attempt.method,
         headers: { ...headers, 'Content-Type': 'application/json' },
@@ -620,19 +620,19 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
         signal:  AbortSignal.timeout(15000)
       });
       const t = await r.text();
-      console.log(`[HepsiB Paketleme] Yöntem ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 300)}`);
+      console.log(`[HepsiB Paketleme] ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 200)}`);
       if (r.ok) {
         try { return { method: attempt.label, url: attempt.url, data: JSON.parse(t) }; }
         catch { return { method: attempt.label, url: attempt.url, raw: t }; }
       }
-      lastErr = `[${attempt.label}] HTTP ${r.status} (${attempt.method} ${attempt.url}): ${t.substring(0, 200)}`;
+      // 404 dışında farklı status varsa kaydet (400 = endpoint var ama body yanlış!)
+      errors.push(`[${attempt.label}]=${r.status}`);
     } catch (e) {
-      lastErr = `[${attempt.label}] Hata: ${e.message}`;
-      console.warn(`[HepsiB Paketleme] Yöntem ${attempt.label} exception:`, e.message);
+      errors.push(`[${attempt.label}]=ERR:${e.message.substring(0,40)}`);
     }
   }
 
-  throw new Error(lastErr || 'Tüm pack yöntemleri başarısız');
+  throw new Error('Tüm yöntemler başarısız: ' + errors.join(' '));
 }
 
 module.exports = {
