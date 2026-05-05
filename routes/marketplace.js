@@ -722,8 +722,8 @@ router.post('/create-test-hb-order', async (req, res) => {
       const orderId = hbAssignedId ? String(hbAssignedId) : `HB-TEST-${ts}-${rand}`;
 
       // HB'nin atadığı packageNumber — pack işlemi için gerekli
-      // cargo_tracking_number alanına saklıyoruz (test siparişlerinde bu alan boş)
-      const hbPackageNum =
+      // Stub {} dönerse, birkaç sn bekleyip packages listesinden sorgula
+      let hbPackageNum =
         hbApiResponse?.packageNumber          || hbApiResponse?.PackageNumber          ||
         hbApiResponse?.packageId             || hbApiResponse?.PackageId             ||
         hbApiResponse?.data?.packageNumber   || hbApiResponse?.data?.packageId       ||
@@ -732,6 +732,39 @@ router.post('/create-test-hb-order', async (req, res) => {
         hbApiResponse?.package?.packageNumber || hbApiResponse?.package?.id          ||
         hbApiResponse?.packages?.[0]?.packageNumber || hbApiResponse?.packages?.[0]?.id ||
         null;
+
+      // Stub {} döndü → 5 saniye bekle, paket listesini sorgula
+      if (!hbPackageNum) {
+        console.log('[HB Test Order] Stub {} döndü — 5s bekleyip paket listesi sorgulanıyor...');
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const { getHBBase, makeHBHeaders, formatHBDate } = require('../services/hepsiburada');
+          const pkgBase    = getHBBase(hbCreds.environment);
+          const pkgHeaders = makeHBHeaders(hbCreds.merchantId, hbCreds.apiKey, hbCreds.username || hbCreds.username);
+          // Tarih filtresi yok — tüm paketleri al
+          const pkgUrl = `${pkgBase}/packages/merchantid/${hbCreds.merchantId}?limit=50&offset=0`;
+          const pkgRes  = await fetch(pkgUrl, { headers: pkgHeaders, signal: AbortSignal.timeout(10000) });
+          const pkgText = await pkgRes.text();
+          console.log(`[HB Test Order] Paket listesi HTTP ${pkgRes.status}: ${pkgText.substring(0, 400)}`);
+          if (pkgRes.ok) {
+            let pkgData;
+            try { pkgData = JSON.parse(pkgText); } catch {}
+            const pkgItems = pkgData?.data?.items || pkgData?.items || pkgData?.packages
+              || (Array.isArray(pkgData) ? pkgData : []);
+            // En son oluşturulan paketi al (bizim siparişle eşleşebilir)
+            const latestPkg = pkgItems.find(p =>
+              String(p.orderNumber || p.merchantOrderNumber || '').includes(hbOrderNumber)
+            ) || pkgItems[0] || null;
+            if (latestPkg) {
+              hbPackageNum = String(latestPkg.packageNumber || latestPkg.id || '');
+              console.log(`[HB Test Order] ✓ Paket bulundu: ${hbPackageNum}`);
+            }
+          }
+        } catch (pkgErr) {
+          console.warn('[HB Test Order] Paket sorgulanamadı:', pkgErr.message);
+        }
+      }
+
       console.log('[HB Test Order] hbPackageNum:', hbPackageNum, '| orderId:', orderId);
 
       // 6. Local DB'ye kaydet — HB listing verisiyle, gerçek durumla (daima bekliyor)
