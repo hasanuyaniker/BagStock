@@ -1182,6 +1182,8 @@ router.post('/hb-pack-order', async (req, res) => {
         // Pack için hem packageNumber hem UUID id'yi sakla
         hbPackageUuid = chosenPkg?.id || null;
         console.log(`[HB Pack] packageNumber=${hbPackageNumber} uuid=${hbPackageUuid}`);
+        // Paket listesinden doğrudan lineItems çek (detail endpoint'e fallback)
+        console.log(`[HB Pack] chosenPkg TAM: ${JSON.stringify(chosenPkg || {}).substring(0, 800)}`);
       }
     } catch (listErr) {
       console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
@@ -1193,9 +1195,36 @@ router.post('/hb-pack-order', async (req, res) => {
       console.log(`[HB Pack] Fallback packageNumber: ${hbPackageNumber} (stored=${storedPackageNum})`);
     }
 
+    // ── Route'da detail'i biz çek — packHBOrder'a hazır lineItems gönder ──────
+    // packHBOrder içindeki detail fetch bazen timeout olabiliyor; burada da deneyelim
+    let routeLineItems = [];
+    if (hbPackageNumber) {
+      try {
+        const detailUrl2 = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${hbPackageNumber}`;
+        console.log(`[HB Pack Route] Detail çekiliyor: ${detailUrl2}`);
+        const dr2 = await fetch(detailUrl2, { headers, signal: AbortSignal.timeout(10000) });
+        const dt2 = await dr2.text();
+        console.log(`[HB Pack Route] Detail HTTP ${dr2.status} | ${dt2.substring(0, 800)}`);
+        if (dr2.ok) {
+          let dj2;
+          try { dj2 = JSON.parse(dt2); } catch {}
+          if (dj2) {
+            const li2 = dj2?.items || dj2?.lineItems || dj2?.data?.items || dj2?.data?.lineItems || [];
+            console.log(`[HB Pack Route] Raw items: ${JSON.stringify(li2).substring(0, 500)}`);
+            routeLineItems = li2.map(i => ({
+              lineItemId: i.lineItemId || i.id || i.lineId || i.itemId,
+              quantity:   i.quantity || 1,
+            })).filter(i => i.lineItemId);
+            console.log(`[HB Pack Route] Hazır lineItems: ${JSON.stringify(routeLineItems)}`);
+          }
+        }
+      } catch (de) {
+        console.warn('[HB Pack Route] Detail fetch hatası:', de.message);
+      }
+    }
+
     // ── Pack isteği gönder ────────────────────────────────────────────────────
-    // Hem packageNumber hem UUID id geçiyoruz — hangisi çalışır bilinmiyor
-    const result = await packHBOrder(creds, hbPackageNumber, hbPackageUuid);
+    const result = await packHBOrder(creds, hbPackageNumber, hbPackageUuid, routeLineItems);
 
     // Local DB'de durumu güncelle (her iki id ile dene)
     await client.query(

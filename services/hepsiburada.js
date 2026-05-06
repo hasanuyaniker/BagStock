@@ -565,70 +565,83 @@ async function updateHBListingStockPrice(creds, updates) {
  * Yöntem A: POST /packages/merchantid/{merchantId}/{packageNumber}/pack  (path-param)
  * Yöntem B: POST /packages/merchantid/{merchantId}/items/pack            (body JSON array)
  */
-async function packHBOrder(creds, packageNumber, packageUuid) {
+async function packHBOrder(creds, packageNumber, packageUuid, fallbackItems = []) {
   const { merchantId, username, apiKey, environment } = creds;
   const base    = getHBBase(environment);
   const headers = makeHBHeaders(merchantId, apiKey, username);
   const ROOT    = `${base}/packages/merchantid/${merchantId}`;
 
+  console.log(`[HepsiB Pack] START packageNumber=${packageNumber} uuid=${packageUuid} fallbackItems=${fallbackItems.length}`);
+
   // ── 1. Adım: Paket detayını çek — items[] → lineItemId'leri al ───────────
-  // Doğru URL: GET /packages/merchantid/{merchantId}/packagenumber/{packageNumber}
-  // Yanıt yapısı: { id, status, items: [{ lineItemId, quantity, ... }], ... }
   const detailUrl = `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}`;
   let rawLineItems = [];
 
   try {
-    const dr = await fetch(detailUrl, { headers, signal: AbortSignal.timeout(12000) });
+    console.log(`[HepsiB Pack] Detail fetch: ${detailUrl}`);
+    const dr = await fetch(detailUrl, { headers, signal: AbortSignal.timeout(10000) });
     const dt = await dr.text();
-    console.log(`[HepsiB Pack] Detail HTTP ${dr.status} | ${dt.substring(0, 600)}`);
+    console.log(`[HepsiB Pack] Detail HTTP ${dr.status} | ${dt.substring(0, 800)}`);
     if (dr.ok) {
       let dj;
       try { dj = JSON.parse(dt); } catch (pe) {
         console.warn('[HepsiB Pack] Detail JSON parse hatası:', pe.message);
       }
       if (dj) {
-        // Yanıt yapısı: { items: [{ lineItemId, quantity }] }
         const li = dj?.items || dj?.lineItems || dj?.data?.items || dj?.data?.lineItems || [];
+        console.log(`[HepsiB Pack] Detail raw items: ${JSON.stringify(li).substring(0, 500)}`);
         if (Array.isArray(li) && li.length > 0) {
           rawLineItems = li;
-          console.log(`[HepsiB Pack] ✓ ${li.length} lineItem bulundu. [0]: ${JSON.stringify(li[0]).substring(0, 200)}`);
+          console.log(`[HepsiB Pack] ✓ Detail'den ${li.length} item. [0]: ${JSON.stringify(li[0]).substring(0, 300)}`);
         } else {
-          console.warn('[HepsiB Pack] Detail yanıtında items boş:', JSON.stringify(dj).substring(0, 300));
+          console.warn('[HepsiB Pack] Detail items boş. Tam yanıt:', JSON.stringify(dj).substring(0, 500));
         }
       }
     }
   } catch (e) {
-    console.warn('[HepsiB Pack] Detail fetch hatası:', e.message);
+    console.warn('[HepsiB Pack] Detail fetch EXCEPTION:', e.message);
   }
 
-  if (rawLineItems.length === 0) {
-    console.warn('[HepsiB Pack] lineItem bulunamadı — paket paketi yapılamayabilir');
+  // Fallback: route'dan gelen hazır lineItems'ı kullan
+  if (rawLineItems.length === 0 && fallbackItems.length > 0) {
+    console.log(`[HepsiB Pack] Fallback lineItems kullanılıyor (${fallbackItems.length} adet)`);
+    rawLineItems = fallbackItems;
   }
 
-  // lineItems pack body'si: { lineItemId, quantity }
+  // lineItemId için tüm olası field adlarını dene
   const lineItemsForPack = rawLineItems.map(i => ({
-    lineItemId: i.lineItemId,   // HB'nin döndürdüğü alan adı 'lineItemId'
+    lineItemId: i.lineItemId || i.id || i.lineId || i.itemId || i.lineItemsId,
     quantity:   i.quantity || 1,
   })).filter(i => i.lineItemId);
 
-  console.log(`[HepsiB Pack] Pack lineItems: ${JSON.stringify(lineItemsForPack)}`);
+  console.log(`[HepsiB Pack] lineItemsForPack (${lineItemsForPack.length}): ${JSON.stringify(lineItemsForPack)}`);
 
-  // ── 2. Adım: Pack isteği — doğru format: POST ROOT + { packageNumber, lineItems } ──
+  // ── 2. Adım: Pack denemesi ────────────────────────────────────────────────
+  // UUID fallback: packageUuid lineItemId olarak kullan (son çare)
+  const uuidFallbackItems = packageUuid
+    ? [{ lineItemId: packageUuid, quantity: 1 }]
+    : [];
+
   const attempts = [
-    // Ana format: { packageNumber, lineItems: [{lineItemId, quantity}] }
-    { label: 'lineItemId',
-      body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack }) },
-    // Kargo bilgisiyle
-    { label: 'lineItemId+cargo',
-      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo',
-                             cargoTrackingNumber: `BAGSTOCK-${packageNumber}`,
-                             lineItems: lineItemsForPack }) },
-    // quantity olmadan (sadece lineItemId)
-    { label: 'lineItemId-noQty',
-      body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack.map(i => ({ lineItemId: i.lineItemId })) }) },
-    // Sadece lineItems (packageNumber olmadan)
-    { label: 'noPackageNum',
-      body: JSON.stringify({ lineItems: lineItemsForPack }) },
+    // Ana format — detail/fallback'ten gelen gerçek lineItemId
+    ...(lineItemsForPack.length > 0 ? [
+      { label: 'lineItemId',
+        body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack }) },
+      { label: 'lineItemId+cargo',
+        body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo',
+                               cargoTrackingNumber: `BAGSTOCK-${packageNumber}`,
+                               lineItems: lineItemsForPack }) },
+      { label: 'lineItemId-noQty',
+        body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack.map(i => ({ lineItemId: i.lineItemId })) }) },
+    ] : []),
+    // UUID'yi lineItemId olarak gönder
+    ...(uuidFallbackItems.length > 0 ? [
+      { label: 'uuid-as-lineItemId',
+        body: JSON.stringify({ packageNumber, lineItems: uuidFallbackItems }) },
+    ] : []),
+    // lineItems null/boş — bazı API'ler bu şekilde "tümünü paketle" kabul eder
+    { label: 'noLineItems',
+      body: JSON.stringify({ packageNumber }) },
   ];
 
   const errors = [];
