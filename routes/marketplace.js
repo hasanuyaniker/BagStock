@@ -580,6 +580,30 @@ router.get('/hb-raw-orders', async (req, res) => {
       }
     }
 
+    // ── Paket tam JSON'ını döndür (truncate yok) ─────────────────────────────
+    // packages_no_filter'daki ilk paketin TÜM field'larını göster
+    if (firstPackageNumber) {
+      try {
+        const fullPkgUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=2&offset=0`;
+        const fpr = await fetch(fullPkgUrl, { headers, signal: AbortSignal.timeout(10000) });
+        const fpt = await fpr.text();
+        let fpBody;
+        try { fpBody = JSON.parse(fpt); } catch { fpBody = fpt; }
+        const fpItems = Array.isArray(fpBody) ? fpBody : (fpBody?.data?.items || fpBody?.items || []);
+        results['FULL_PACKAGE_JSON'] = {
+          status: fpr.status,
+          count: fpItems.length,
+          // TAM JSON — truncate yok
+          first_full: fpItems[0] || null,
+          first_keys: fpItems[0] ? Object.keys(fpItems[0]) : [],
+          body: fpBody,
+          sample: fpItems[0] ? JSON.stringify(fpItems[0]) : null
+        };
+      } catch (fe) {
+        results['FULL_PACKAGE_JSON'] = { error: fe.message };
+      }
+    }
+
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: err.message });
