@@ -1188,8 +1188,54 @@ router.post('/hb-pack-order', async (req, res) => {
         // Pack için hem packageNumber hem UUID id'yi sakla
         hbPackageUuid = chosenPkg?.id || null;
         console.log(`[HB Pack] packageNumber=${hbPackageNumber} uuid=${hbPackageUuid}`);
-        // Paket listesinden doğrudan lineItems çek (detail endpoint'e fallback)
-        console.log(`[HB Pack] chosenPkg TAM: ${JSON.stringify(chosenPkg || {}).substring(0, 800)}`);
+        console.log(`[HB Pack] chosenPkg KEYS: ${Object.keys(chosenPkg || {}).join(', ')}`);
+
+        // ── TÜM paketleri tara: detail'de lineItemId olan ilkini bul ────────────
+        // Eski paketlerde (daha önce oluşturulmuş) lineItemId dolu olabilir
+        const allPackages = items.slice(0, 50); // en fazla 50 paketi tara
+        console.log(`[HB Pack] ${allPackages.length} paketi detail için taranıyor...`);
+        let scanFoundItems = [];
+        let scanPackageNumber = null;
+        let scanPackageUuid   = null;
+
+        for (const pkg of allPackages) {
+          const pNum = String(pkg.packageNumber || pkg.id || '');
+          const pUuid = pkg.id || null;
+          if (!pNum) continue;
+          try {
+            const dUrl = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${pNum}`;
+            const dr = await fetch(dUrl, { headers, signal: AbortSignal.timeout(6000) });
+            const dt = await dr.text();
+            if (!dr.ok) continue;
+            let dj;
+            try { dj = JSON.parse(dt); } catch { continue; }
+            // Yanıt bir obje veya array olabilir
+            const itemsArr = Array.isArray(dj)
+              ? dj  // array döndü — her eleman bir lineItem mı?
+              : (dj?.items || dj?.lineItems || dj?.data?.items || []);
+            // lineItemId olan eleman ara
+            const withLineItemId = itemsArr.filter(i =>
+              i.lineItemId || (i.id && String(i.id).includes('-') && i.id !== pUuid)
+            );
+            console.log(`[HB Pack Scan] ${pNum} → detail items=${itemsArr.length} withLineItemId=${withLineItemId.length} | body[100]: ${dt.substring(0, 100)}`);
+            if (withLineItemId.length > 0) {
+              scanFoundItems    = withLineItemId;
+              scanPackageNumber = pNum;
+              scanPackageUuid   = pUuid;
+              console.log(`[HB Pack Scan] ✓ lineItemId BULUNDU! pkg=${pNum} items: ${JSON.stringify(withLineItemId)}`);
+              break;
+            }
+          } catch (scanErr) {
+            // timeout veya ağ hatası — devam et
+          }
+        }
+
+        // lineItemId bulunduysa, seçilen paketi güncelle
+        if (scanFoundItems.length > 0) {
+          hbPackageNumber = scanPackageNumber;
+          hbPackageUuid   = scanPackageUuid;
+          console.log(`[HB Pack] Scan sonucu — paketle: ${hbPackageNumber}`);
+        }
       }
     } catch (listErr) {
       console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
@@ -1202,7 +1248,6 @@ router.post('/hb-pack-order', async (req, res) => {
     }
 
     // ── Route'da detail'i biz çek — packHBOrder'a hazır lineItems gönder ──────
-    // packHBOrder içindeki detail fetch bazen timeout olabiliyor; burada da deneyelim
     let routeLineItems = [];
     if (hbPackageNumber) {
       try {
@@ -1215,10 +1260,11 @@ router.post('/hb-pack-order', async (req, res) => {
           let dj2;
           try { dj2 = JSON.parse(dt2); } catch {}
           if (dj2) {
-            const li2 = dj2?.items || dj2?.lineItems || dj2?.data?.items || dj2?.data?.lineItems || [];
-            console.log(`[HB Pack Route] Raw items: ${JSON.stringify(li2).substring(0, 500)}`);
+            const rawArr = Array.isArray(dj2) ? dj2 : (dj2?.items || dj2?.lineItems || dj2?.data?.items || []);
+            const li2 = rawArr.filter(i => i.lineItemId || (i.id && String(i.id).includes('-') && i.id !== hbPackageUuid));
+            console.log(`[HB Pack Route] Raw items: ${JSON.stringify(rawArr).substring(0, 500)}`);
             routeLineItems = li2.map(i => ({
-              lineItemId: i.lineItemId || i.id || i.lineId || i.itemId,
+              lineItemId: i.lineItemId || i.id,
               quantity:   i.quantity || 1,
             })).filter(i => i.lineItemId);
             console.log(`[HB Pack Route] Hazır lineItems: ${JSON.stringify(routeLineItems)}`);
@@ -1226,6 +1272,39 @@ router.post('/hb-pack-order', async (req, res) => {
         }
       } catch (de) {
         console.warn('[HB Pack Route] Detail fetch hatası:', de.message);
+      }
+    }
+
+    // ── Lineitems endpoint dene — doğrudan line item listesi ──────────────────
+    if (routeLineItems.length === 0) {
+      const liUrls = [
+        `${base}/lineitems/merchantid/${creds.merchantId}?limit=100&offset=0`,
+        `${base}/lineitems/merchantid/${creds.merchantId}?packageNumber=${hbPackageNumber}&limit=100`,
+        `${base}/lineitems/merchantid/${creds.merchantId}?status=Open&limit=100`,
+      ];
+      for (const liUrl of liUrls) {
+        try {
+          console.log(`[HB Pack Route] Lineitems: ${liUrl}`);
+          const lr = await fetch(liUrl, { headers, signal: AbortSignal.timeout(8000) });
+          const lt = await lr.text();
+          console.log(`[HB Pack Route] Lineitems HTTP ${lr.status} | ${lt.substring(0, 400)}`);
+          if (!lr.ok) continue;
+          let lj;
+          try { lj = JSON.parse(lt); } catch { continue; }
+          const liArr = lj?.items || lj?.lineItems || (Array.isArray(lj) ? lj : []);
+          if (liArr.length > 0) {
+            routeLineItems = liArr.map(i => ({
+              lineItemId: i.id || i.lineItemId,
+              quantity:   i.quantity || 1,
+            })).filter(i => i.lineItemId);
+            if (routeLineItems.length > 0) {
+              console.log(`[HB Pack Route] Lineitems'dan geldi: ${JSON.stringify(routeLineItems)}`);
+              break;
+            }
+          }
+        } catch (le) {
+          console.warn('[HB Pack Route] Lineitems hatası:', le.message);
+        }
       }
     }
 
