@@ -561,17 +561,18 @@ async function updateHBListingStockPrice(creds, updates) {
 }
 
 /**
- * 3. SİPARİŞ: Paketi onayla (paketleme tamamlandı işareti)
+ * 3. SİPARİŞ: Kalem veya Kalemleri Paketleme
  *
  * DOĞRU FORMAT (developers.hepsiburada.com'dan doğrulandı):
  *   POST /packages/merchantid/{merchantId}
  *   Body: { lineItemRequests: [{ id: <lineItemId>, quantity: <n> }] }
+ *   Başarı: HTTP 201 Created
  *
  * ÖNEMLİ:
  *   - Alan adı "lineItemRequests" (lineItems DEĞİL)
  *   - Her item'da "id" kullan (lineItemId DEĞİL)
- *   - Body'de "packageNumber" YOK — sadece lineItemRequests
- *   - lineItemId kaynağı: packages LIST endpoint'inden chosenPkg.items[i].lineItemId
+ *   - lineItemId'ler MUTLAKA orders endpoint'inden (ödemesi tamamlanmış) alınmalı
+ *   - packages list endpoint'indeki lineItemId'ler "zaten pakette" 409 verir — kullanma!
  */
 async function packHBOrder(creds, packageNumber, packageUuid, fallbackItems = []) {
   const { merchantId, username, apiKey, environment } = creds;
@@ -579,81 +580,50 @@ async function packHBOrder(creds, packageNumber, packageUuid, fallbackItems = []
   const headers = makeHBHeaders(merchantId, apiKey, username);
   const ROOT    = `${base}/packages/merchantid/${merchantId}`;
 
-  console.log(`[HepsiB Pack] START packageNumber=${packageNumber} uuid=${packageUuid} fallbackItems=${fallbackItems.length}`);
-  console.log(`[HepsiB Pack] fallbackItems detail: ${JSON.stringify(fallbackItems)}`);
+  console.log(`[HepsiB Pack] START packageNumber=${packageNumber} fallbackItems=${fallbackItems.length}`);
+  console.log(`[HepsiB Pack] fallbackItems: ${JSON.stringify(fallbackItems)}`);
 
-  // fallbackItems: route'dan gelen { lineItemId, quantity } array'i
-  // HB API beklediği: { id, quantity } — "id" = lineItemId değeri
+  if (fallbackItems.length === 0) {
+    throw new Error('Pack için lineItem listesi boş — orders endpoint\'inden lineItemId alınamadı');
+  }
+
+  // HB API beklediği format: { lineItemRequests: [{ id, quantity }] }
   const lineItemRequests = fallbackItems.map(i => ({
-    id:       i.lineItemId || i.id,
+    id:       String(i.lineItemId || i.id || ''),
     quantity: i.quantity || 1,
   })).filter(i => i.id);
 
   console.log(`[HepsiB Pack] lineItemRequests (${lineItemRequests.length}): ${JSON.stringify(lineItemRequests)}`);
 
-  // ── Pack denemesi: doğru format = lineItemRequests[{id, quantity}], packageNumber YOK ──
-  const attempts = [
-    // ✅ Doğru format (doc'tan doğrulandı): lineItemRequests + id
-    ...(lineItemRequests.length > 0 ? [
-      { label: 'lineItemRequests',
-        body: JSON.stringify({ lineItemRequests }) },
-      { label: 'lineItemRequests+cargo',
-        body: JSON.stringify({ lineItemRequests, cargoCompany: 'Yurtiçi Kargo', carrier: 'YURTICI' }) },
-      { label: 'lineItemRequests-noQty',
-        body: JSON.stringify({ lineItemRequests: lineItemRequests.map(i => ({ id: i.id })) }) },
-    ] : []),
-    // Eski format denemeleri (geriye dönük uyumluluk / farklı versiyon ihtimali)
-    ...(lineItemRequests.length > 0 ? [
-      { label: 'lineItems-id',
-        body: JSON.stringify({ lineItems: lineItemRequests }) },
-      { label: 'lineItems-lineItemId',
-        body: JSON.stringify({ lineItems: lineItemRequests.map(i => ({ lineItemId: i.id, quantity: i.quantity })) }) },
-    ] : []),
-    // UUID fallback (son çare)
-    ...(packageUuid ? [
-      { label: 'uuid-lineItemRequests',
-        body: JSON.stringify({ lineItemRequests: [{ id: packageUuid, quantity: 1 }] }) },
-    ] : []),
-  ];
+  // Doğru format ile tek deneme — 201 bekleniyor
+  // 409: lineItems zaten başka bir pakette → unpack gerekiyor (route tarafında yapılmalı)
+  const body = JSON.stringify({ lineItemRequests });
+  console.log(`[HepsiB Pack] POST ${ROOT} | Body: ${body}`);
 
-  const errors = [];
-  for (const attempt of attempts) {
-    try {
-      console.log(`[HepsiB Pack] ${attempt.label}: POST ${ROOT} body=${attempt.body.substring(0,300)}`);
-      const r = await fetch(ROOT, {
-        method:  'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body:    attempt.body,
-        signal:  AbortSignal.timeout(15000)
-      });
-      const t = await r.text();
-      console.log(`[HepsiB Pack] ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 300)}`);
+  const r = await fetch(ROOT, {
+    method:  'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body,
+    signal:  AbortSignal.timeout(15000)
+  });
+  const t = await r.text();
+  console.log(`[HepsiB Pack] HTTP ${r.status} | ${t.substring(0, 500)}`);
 
-      // ✅ 2xx = açık başarı
-      if (r.ok) {
-        try { return { method: attempt.label, data: JSON.parse(t) }; }
-        catch { return { method: attempt.label, raw: t }; }
-      }
-
-      // ✅ 409 Conflict + body'de packageNumber var:
-      //    HB SIT stub paketi zaten oluşturuyor; pack endpoint "zaten pakette" conflict verir.
-      //    Yanıt body'si paket nesnesi → pack fiilen gerçekleşti, başarı say.
-      if (r.status === 409) {
-        let parsed409 = null;
-        try { parsed409 = JSON.parse(t); } catch {}
-        if (parsed409 && (parsed409.packageNumber || parsed409.barcode)) {
-          console.log(`[HepsiB Pack] ${attempt.label} → 409 ama body paket nesnesi içeriyor — BAŞARI sayılıyor`);
-          return { method: attempt.label, data: parsed409, note: '409-already-packed' };
-        }
-      }
-
-      errors.push(`[${attempt.label}]=${r.status}:${t.substring(0, 250)}`);
-    } catch (e) {
-      errors.push(`[${attempt.label}]=ERR:${e.message.substring(0, 60)}`);
-    }
+  // 201 Created = paket başarıyla oluşturuldu
+  if (r.status === 201 || r.ok) {
+    try { return { success: true, status: r.status, data: JSON.parse(t) }; }
+    catch { return { success: true, status: r.status, raw: t }; }
   }
 
-  throw new Error('Pack başarısız: ' + errors.join(' | '));
+  // 409 = lineItemler zaten bir pakette (unpack yapılmadan çağrıldı)
+  if (r.status === 409) {
+    let body409;
+    try { body409 = JSON.parse(t); } catch {}
+    throw new Error(`409 Conflict: lineItemler zaten pakette. Paket Bozma yapılıp tekrar deneyin. Detay: ${t.substring(0,200)}`);
+  }
+
+  // 400 = hatalı istek (lineItemId formatı yanlış, durum uyumsuz, vb.)
+  throw new Error(`Pack başarısız HTTP ${r.status}: ${t.substring(0, 300)}`);
 }
 
 module.exports = {

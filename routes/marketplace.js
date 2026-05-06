@@ -1179,156 +1179,217 @@ router.post('/hb-pack-order', async (req, res) => {
 
     console.log(`[HB Pack] bagstockOrderId=${bagstockOrderId} merchantOrderNumber=${merchantOrderNumber} storedPackageNum=${storedPackageNum}`);
 
-    // ── HB Paket Listesinden gerçek packageNumber'ı bul ──────────────────────
+    // ── HB API Yardımcı fonksiyonlar ─────────────────────────────────────────
     const { getHBBase, makeHBHeaders, formatHBDate } = require('../services/hepsiburada');
     const base    = getHBBase(creds.environment);
     const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
 
-    // TARİH FİLTRESİ YOK — begindate/enddate geçince HB SIT boş dönüyor!
-    const pkgUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
+    // ── YARDIMCI: Ödemesi Tamamlanmış Siparişler endpoint'inden lineItemId'leri al ──
+    // HB docs: GET /orders/merchantid/{merchantId}?limit=100&offset=0
+    // Response: { lineItems: [...] } veya { data: { lineItems: [...] } }
+    // Bu endpoint PAKETLENECEK durumundaki kalemleri döndürür — pack için doğru lineItemId kaynağı
+    async function fetchOrdersLineItems() {
+      const ordUrl = `${base}/orders/merchantid/${creds.merchantId}?limit=100&offset=0`;
+      console.log(`[HB Pack] Orders endpoint (ödemesi tamamlanmış): ${ordUrl}`);
+      const ordRes  = await fetch(ordUrl, { headers, signal: AbortSignal.timeout(12000) });
+      const ordText = await ordRes.text();
+      console.log(`[HB Pack] Orders HTTP ${ordRes.status} | ${ordText.substring(0, 600)}`);
+      if (!ordRes.ok) return [];
+      let ordBody;
+      try { ordBody = JSON.parse(ordText); } catch { return []; }
+      // Tüm olası response yapıları — HB lineItems veya items olarak döndürebilir
+      const all = ordBody?.lineItems         // { lineItems: [...] }
+               || ordBody?.data?.lineItems   // { data: { lineItems: [...] } }
+               || ordBody?.items             // { items: [...] }
+               || ordBody?.data?.items       // { data: { items: [...] } }
+               || ordBody?.orders            // { orders: [...] }
+               || (Array.isArray(ordBody) ? ordBody : []);
+      console.log(`[HB Pack] Orders endpoint toplam kalem: ${(all||[]).length} | İlk kalem: ${JSON.stringify((all||[])[0]||{}).substring(0,200)}`);
+      return (all || []).map(i => ({
+        lineItemId:  String(i.id || i.lineItemId || i.lineId || ''),
+        orderNumber: String(i.orderNumber || i.OrderNumber || i.merchantOrderNumber || ''),
+        quantity:    i.quantity || 1,
+      })).filter(i => i.lineItemId);
+    }
 
-    console.log(`[HB Pack] Paket listesi çekiliyor (tarihsiz): ${pkgUrl}`);
-    let hbPackageNumber  = null;
-    let hbPackageUuid    = null;
-    let pkgListLineItems = [];  // packages LIST'ten gelen items[].lineItemId — en güvenilir kaynak
-
-    try {
+    // ── YARDIMCI: Packages listesinden eşleşen paketi bul ───────────────────
+    async function fetchPackageInfo() {
+      const pkgUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
+      console.log(`[HB Pack] Packages listesi: ${pkgUrl}`);
       const pkgRes  = await fetch(pkgUrl, { headers, signal: AbortSignal.timeout(12000) });
       const pkgText = await pkgRes.text();
-      console.log(`[HB Pack] Paket listesi HTTP ${pkgRes.status} | ${pkgText.substring(0, 500)}`);
+      console.log(`[HB Pack] Packages HTTP ${pkgRes.status} | ${pkgText.substring(0, 400)}`);
+      if (!pkgRes.ok) return null;
+      let pkgData;
+      try { pkgData = JSON.parse(pkgText); } catch { return null; }
+      const items = pkgData?.data?.items || pkgData?.items || pkgData?.packages
+                 || pkgData?.data?.packages || (Array.isArray(pkgData) ? pkgData : []);
+      console.log(`[HB Pack] ${items.length} paket. İlk: ${JSON.stringify(items[0]||{}).substring(0,200)}`);
+      // Önce orderNumber ile tam eşleşme ara
+      const match = items.find(p => {
+        const oNum = String(p.orderNumber || p.orderId || p.OrderNumber || p.merchantOrderNumber || '');
+        const pNum = String(p.packageNumber || p.id || '');
+        return oNum === merchantOrderNumber || pNum === merchantOrderNumber
+            || oNum === bagstockOrderId    || pNum === bagstockOrderId
+            || oNum.includes(merchantOrderNumber) || merchantOrderNumber.includes(oNum);
+      });
+      return match || items.find(p =>
+        !p.status
+        || ['open','created','new'].includes(String(p.status).toLowerCase())
+      ) || items[0] || null;
+    }
 
-      if (pkgRes.ok) {
-        let pkgData;
-        try { pkgData = JSON.parse(pkgText); } catch {}
-        const items = pkgData?.data?.items || pkgData?.items || pkgData?.packages
-          || pkgData?.data?.packages || (Array.isArray(pkgData) ? pkgData : []);
+    // ── YARDIMCI: packageablewith ile paketlenebilir kalemleri al ────────────
+    async function fetchPackageableWith(lineItemId) {
+      const pwUrl = `${base}/lineitems/merchantid/${creds.merchantId}/packageablewith/lineitemid/${lineItemId}`;
+      console.log(`[HB Pack] packageablewith: ${pwUrl}`);
+      const pwr = await fetch(pwUrl, { headers, signal: AbortSignal.timeout(10000) });
+      const pwt = await pwr.text();
+      console.log(`[HB Pack] packageablewith HTTP ${pwr.status} | ${pwt.substring(0, 400)}`);
+      if (!pwr.ok) return [];
+      let pwj;
+      try { pwj = JSON.parse(pwt); } catch { return []; }
+      const pwItems = pwj?.lineItems || pwj?.items || (Array.isArray(pwj) ? pwj : []);
+      return pwItems.map(i => ({
+        lineItemId: String(i.lineItemId || i.id || ''),
+        quantity:   i.quantity || 1,
+      })).filter(i => i.lineItemId);
+    }
 
-        console.log(`[HB Pack] ${items.length} paket bulundu. İlk paket:`, JSON.stringify(items[0] || {}).substring(0,300));
+    // ── YARDIMCI: Paketi boz (unpack) ────────────────────────────────────────
+    async function unpackPackage(packageNumber) {
+      const upUrl = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${packageNumber}/unpack`;
+      console.log(`[HB Pack] Paket bozma (unpack): ${upUrl}`);
+      const upr = await fetch(upUrl, { method: 'POST', headers, signal: AbortSignal.timeout(12000) });
+      const upt = await upr.text();
+      console.log(`[HB Pack] Unpack HTTP ${upr.status} | ${upt.substring(0, 300)}`);
+      return upr.ok || upr.status === 200;
+    }
 
-        // Eşleştirme: önce orderNumber/merchantOrderNumber ile tam eşleşme ara
-        const match = items.find(p => {
-          const pNum = String(p.packageNumber || p.id || '');
-          const oNum = String(p.orderNumber || p.orderId || p.OrderNumber || p.merchantOrderNumber || '');
-          return pNum === merchantOrderNumber
-              || oNum === merchantOrderNumber
-              || pNum === bagstockOrderId
-              || oNum === bagstockOrderId;
-        });
+    // ──────────────────────────────────────────────────────────────────────────
+    // ANA PAKETLEME AKIŞI (HB docs: API üzerinden paketleme)
+    //
+    // ADIM 1: Ödemesi tamamlanmış siparişleri listele → lineItemId'leri al
+    // ADIM 2: packageablewith → aynı pakete girecek kalemleri bul
+    // ADIM 3: Kalem veya Kalemleri Paketleme → 201 Created bekleniyor
+    //
+    // Stub test siparişi direkt paket oluşturduğunda (orders endpoint boş dönerse):
+    // → Paket Bozma → Siparişleri tekrar listele → Paketleme
+    // ──────────────────────────────────────────────────────────────────────────
 
-        let chosenPkg = null;
-        if (match) {
-          chosenPkg = match;
-          hbPackageNumber = String(match.packageNumber || match.id);
-          console.log(`[HB Pack] ✓ Eşleşen paket: ${hbPackageNumber}`);
-        } else {
-          // Eşleşme yok → Open/Created statüsündeki ilk paketi kullan
-          chosenPkg = items.find(p =>
-            !p.status
-            || String(p.status).toLowerCase() === 'open'
-            || String(p.status).toLowerCase() === 'created'
-            || String(p.status).toLowerCase() === 'new'
-          ) || items[0] || null;
-          if (chosenPkg) {
-            hbPackageNumber = String(chosenPkg.packageNumber || chosenPkg.id);
-            console.log(`[HB Pack] ⚠️ Eşleşme yok — ilk uygun paket: ${hbPackageNumber}`);
-          }
-        }
-        // Pack için hem packageNumber hem UUID id'yi sakla
-        hbPackageUuid = chosenPkg?.id || null;
-        console.log(`[HB Pack] packageNumber=${hbPackageNumber} uuid=${hbPackageUuid}`);
-        console.log(`[HB Pack] chosenPkg KEYS: ${Object.keys(chosenPkg || {}).join(', ')}`);
+    let hbPackageNumber = storedPackageNum || null;
+    let routeLineItems  = [];
 
-        // ── Packages LIST zaten items[].lineItemId içeriyor — direkt çek ────
-        // Detail endpoint /packagenumber/{n} → kargo bilgisi (lineItemId YOK)
-        // Packages list /packages/merchantid/{m} → tam paket (items[].lineItemId VAR!)
-        const pkgListItems = chosenPkg?.items || chosenPkg?.lineItems || chosenPkg?.lines || [];
-        if (pkgListItems.length > 0) {
-          console.log(`[HB Pack] ✓ Package list items (${pkgListItems.length}): ${JSON.stringify(pkgListItems.map(i => ({ lineItemId: i.lineItemId, qty: i.quantity })))}`);
-          // packages listesindeki items'ı dışarıya taşı — routeLineItems için kullanılacak
-          pkgListLineItems = pkgListItems.map(i => ({
-            lineItemId: i.lineItemId || i.id,
-            quantity:   i.quantity || 1,
-          })).filter(i => i.lineItemId);
-          console.log(`[HB Pack] pkgListLineItems (${pkgListLineItems.length}): ${JSON.stringify(pkgListLineItems)}`);
-        }
-
-        // NOT: /packagenumber/{n} detail endpoint'i kargo bilgisi döndürür, lineItemId YOK.
-        // lineItemId kaynağı packages LISTEsindeki chosenPkg.items — yukarıda alındı.
+    // ── ADIM 1: Orders endpoint — Paketlenecek durumundaki lineItemId'leri al
+    let ordersItems = [];
+    try {
+      ordersItems = await fetchOrdersLineItems();
+      if (ordersItems.length > 0) {
+        // Eşleşen sipariş kalemlerini filtrele (orderNumber ile)
+        const matched = ordersItems.filter(i =>
+          i.orderNumber === merchantOrderNumber
+          || i.orderNumber.includes(merchantOrderNumber)
+          || merchantOrderNumber.includes(i.orderNumber)
+        );
+        routeLineItems = (matched.length > 0 ? matched : ordersItems).map(i => ({
+          lineItemId: i.lineItemId, quantity: i.quantity
+        }));
+        console.log(`[HB Pack] ✅ Orders endpoint'ten ${routeLineItems.length} kalem alındı`);
       }
-    } catch (listErr) {
-      console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
-    }
+    } catch (e) { console.warn('[HB Pack] Orders endpoint hatası:', e.message); }
 
-    // Paket bulunamadıysa: DB'deki saklı packageNum → merchantOrderNumber → bagstockOrderId
-    if (!hbPackageNumber) {
-      hbPackageNumber = storedPackageNum || merchantOrderNumber || bagstockOrderId;
-      console.log(`[HB Pack] Fallback packageNumber: ${hbPackageNumber} (stored=${storedPackageNum})`);
-    }
-
-    // ── routeLineItems: packages list'ten alınan items — lineItemId'ler burada ──
-    // packages LIST → chosenPkg.items[i].lineItemId  (doğrulandı ✅)
-    // /packagenumber/{n} detail → kargo bilgisi, lineItemId YOK (doğrulandı ✅)
-    // orders endpoint → stub siparişleri 0 döndürüyor (doğrulandı ✅)
-    let routeLineItems = pkgListLineItems;
-
-    // ── DOĞRU AKIŞ (HB docs): packageablewith endpoint → paketlenebilir kalemleri al ──
-    // GET /lineitems/merchantid/{merchantId}/packageablewith/lineitemid/{lineItemId}
-    // Response: { lineItems: [{ lineItemId, orderNumber, quantity }] }
-    // Bu endpoint "Open/Paketlenecek" durumundaki kalemleri döndürür.
-    // Dönen lineItemId'ler pack isteğinde kullanılmalı (packages LIST'tekinden farklı olabilir).
-    if (pkgListLineItems.length > 0) {
-      const firstLineItemId = pkgListLineItems[0].lineItemId;
-      const pwUrl = `${base}/lineitems/merchantid/${creds.merchantId}/packageablewith/lineitemid/${firstLineItemId}`;
-      console.log(`[HB Pack] packageablewith çağrılıyor: ${pwUrl}`);
+    // ── ADIM 1b: Orders endpoint boş → Paket Bozma yöntemi ──────────────────
+    if (routeLineItems.length === 0) {
+      console.log('[HB Pack] Orders endpoint boş — Paket Bozma yöntemi deneniyor...');
       try {
-        const pwr  = await fetch(pwUrl, { headers, signal: AbortSignal.timeout(10000) });
-        const pwt  = await pwr.text();
-        console.log(`[HB Pack] packageablewith HTTP ${pwr.status} | ${pwt.substring(0, 600)}`);
-        if (pwr.ok) {
-          let pwj;
-          try { pwj = JSON.parse(pwt); } catch {}
-          const pwItems = pwj?.lineItems || pwj?.items || (Array.isArray(pwj) ? pwj : []);
-          if (pwItems.length > 0) {
-            const pwLineItems = pwItems.map(i => ({
-              lineItemId: i.lineItemId || i.id,
-              quantity:   i.quantity || 1,
-            })).filter(i => i.lineItemId);
-            if (pwLineItems.length > 0) {
-              console.log(`[HB Pack] ✅ packageablewith'ten ${pwLineItems.length} kalem: ${JSON.stringify(pwLineItems)}`);
-              routeLineItems = pwLineItems;
+        const pkg = await fetchPackageInfo();
+        if (pkg) {
+          hbPackageNumber = hbPackageNumber || String(pkg.packageNumber || pkg.id || '');
+          console.log(`[HB Pack] Paket bulundu: ${hbPackageNumber} (status=${pkg.status})`);
+          console.log(`[HB Pack] Paket tam JSON: ${JSON.stringify(pkg).substring(0, 400)}`);
+
+          // Paketi boz → lineItemler ödemesi tamamlanmış (paketlenecek) durumuna döner
+          // Hem Open hem Packed paketler için gerekli
+          {
+            const unpacked = await unpackPackage(hbPackageNumber);
+            if (unpacked) {
+              console.log(`[HB Pack] ✅ Paket bozuldu. 3s bekleniyor...`);
+              await new Promise(r => setTimeout(r, 3000));
+              // Şimdi orders endpoint tekrar dene
+              ordersItems = await fetchOrdersLineItems();
+              if (ordersItems.length > 0) {
+                const matched = ordersItems.filter(i =>
+                  i.orderNumber === merchantOrderNumber
+                  || i.orderNumber.includes(merchantOrderNumber)
+                  || merchantOrderNumber.includes(i.orderNumber)
+                );
+                routeLineItems = (matched.length > 0 ? matched : ordersItems).map(i => ({
+                  lineItemId: i.lineItemId, quantity: i.quantity
+                }));
+                console.log(`[HB Pack] ✅ Unpack sonrası orders endpoint'ten ${routeLineItems.length} kalem`);
+              } else {
+                console.warn('[HB Pack] Unpack sonrası da orders endpoint boş');
+                // Son çare: packages list'teki items'ı dene (stub ID'leri)
+                const pkgItems = pkg?.items || pkg?.lineItems || pkg?.lines || [];
+                routeLineItems = pkgItems.map(i => ({
+                  lineItemId: String(i.lineItemId || i.id || ''),
+                  quantity:   i.quantity || 1,
+                })).filter(i => i.lineItemId);
+                console.log(`[HB Pack] Fallback — pkg.items'tan ${routeLineItems.length} kalem`);
+              }
             } else {
-              console.log('[HB Pack] packageablewith boş dizi döndü — pkgListLineItems kullanılıyor');
+              console.warn('[HB Pack] Paket bozma başarısız');
+              // Paket bozulamadı → pkg.items'tan dene
+              const pkgItems = pkg?.items || pkg?.lineItems || pkg?.lines || [];
+              routeLineItems = pkgItems.map(i => ({
+                lineItemId: String(i.lineItemId || i.id || ''),
+                quantity:   i.quantity || 1,
+              })).filter(i => i.lineItemId);
             }
-          } else {
-            console.log('[HB Pack] packageablewith items boş — pkgListLineItems kullanılıyor');
           }
+        } else {
+          console.warn('[HB Pack] Packages listesinde de paket bulunamadı');
         }
-      } catch (pwe) {
-        console.warn('[HB Pack] packageablewith hatası:', pwe.message);
-      }
+      } catch (e) { console.warn('[HB Pack] Paket Bozma hatası:', e.message); }
     }
 
+    // Paket bulunamadıysa fallback
+    if (!hbPackageNumber) {
+      hbPackageNumber = merchantOrderNumber || bagstockOrderId;
+    }
+
+    // ── ADIM 2: packageablewith — aynı pakete girecek kalemleri bul ──────────
     if (routeLineItems.length > 0) {
-      console.log(`[HB Pack] ✅ routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
-    } else {
-      // Son fallback: DB UUID item_id'leri (stub siparişi oluştururken randomUUID ile kaydedildi)
-      if (dbLineItems.length > 0) {
-        console.log(`[HB Pack] DB UUID fallback (${dbLineItems.length}): ${JSON.stringify(dbLineItems)}`);
-        routeLineItems = dbLineItems;
-      } else {
-        console.warn('[HB Pack] ⚠️ routeLineItems boş — packages listesinde items[] yok, DB\'de UUID yok');
-      }
+      try {
+        const pwItems = await fetchPackageableWith(routeLineItems[0].lineItemId);
+        if (pwItems.length > 0) {
+          console.log(`[HB Pack] ✅ packageablewith'ten ${pwItems.length} kalem`);
+          routeLineItems = pwItems;
+        } else {
+          console.log('[HB Pack] packageablewith boş — mevcut lineItems kullanılıyor');
+        }
+      } catch (e) { console.warn('[HB Pack] packageablewith hatası:', e.message); }
     }
 
-    // ── Pack isteği gönder ────────────────────────────────────────────────────
-    console.log(`[HB Pack] FINAL routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
-    const result = await packHBOrder(creds, hbPackageNumber, hbPackageUuid, routeLineItems);
+    // DB UUID fallback (son çare)
+    if (routeLineItems.length === 0 && dbLineItems.length > 0) {
+      console.log(`[HB Pack] DB UUID fallback (${dbLineItems.length} kalem)`);
+      routeLineItems = dbLineItems;
+    }
 
-    // Local DB'de durumu güncelle (her iki id ile dene)
+    if (routeLineItems.length === 0) {
+      throw new Error('Paketlenecek kalem bulunamadı. Siparişin ödemesi tamamlanmış durumda olduğundan emin olun.');
+    }
+
+    // ── ADIM 3: Pack isteği gönder ────────────────────────────────────────────
+    console.log(`[HB Pack] FINAL routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
+    const result = await packHBOrder(creds, hbPackageNumber, null, routeLineItems);
+
+    // Local DB'de durumu güncelle
     await client.query(
       `UPDATE marketplace_orders
-       SET status='kargoda', status_tr='Kargoya Verildi', raw_status='Packed',
-           cargo_status='Packed', kargoda_at=NOW(), updated_at=NOW()
+       SET status='bekliyor', status_tr='Paketlendi', raw_status='Packed',
+           cargo_status='Packed', updated_at=NOW()
        WHERE platform='hepsiburada'
          AND (order_id=$1 OR order_number=$2 OR order_number=$3)`,
       [String(bagstockOrderId), String(bagstockOrderId), `HBTEST-${merchantOrderNumber}`]
