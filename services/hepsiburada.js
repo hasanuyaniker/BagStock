@@ -571,68 +571,64 @@ async function packHBOrder(creds, packageNumber, packageUuid) {
   const headers = makeHBHeaders(merchantId, apiKey, username);
   const ROOT    = `${base}/packages/merchantid/${merchantId}`;
 
-  // ── 1. Adım: Paket detayını çek — lineItem yapısını anla ─────────────────
-  const detailUrls = [
-    `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}`,
-    `${base}/packages/merchantid/${merchantId}/${packageNumber}`,
-    ...(packageUuid ? [`${base}/packages/merchantid/${merchantId}/${packageUuid}`] : []),
-  ];
+  // ── 1. Adım: Paket detayını çek — items[] → lineItemId'leri al ───────────
+  // Doğru URL: GET /packages/merchantid/{merchantId}/packagenumber/{packageNumber}
+  // Yanıt yapısı: { id, status, items: [{ lineItemId, quantity, ... }], ... }
+  const detailUrl = `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}`;
+  let rawLineItems = [];
 
-  let rawLineItems = [];   // HB'nin döndürdüğü ham lineItems
-  let detailJson   = null;
-  for (const dUrl of detailUrls) {
-    try {
-      const dr = await fetch(dUrl, { headers, signal: AbortSignal.timeout(10000) });
-      const dt = await dr.text();
-      console.log(`[HepsiB Pack] Detay ${dUrl} → HTTP ${dr.status} | ${dt.substring(0, 500)}`);
-      if (dr.ok) {
-        try { detailJson = JSON.parse(dt); } catch { continue; }
-        const li = detailJson?.lineItems || detailJson?.items
-                 || detailJson?.data?.lineItems || detailJson?.data?.items || [];
+  try {
+    const dr = await fetch(detailUrl, { headers, signal: AbortSignal.timeout(12000) });
+    const dt = await dr.text();
+    console.log(`[HepsiB Pack] Detail HTTP ${dr.status} | ${dt.substring(0, 600)}`);
+    if (dr.ok) {
+      let dj;
+      try { dj = JSON.parse(dt); } catch (pe) {
+        console.warn('[HepsiB Pack] Detail JSON parse hatası:', pe.message);
+      }
+      if (dj) {
+        // Yanıt yapısı: { items: [{ lineItemId, quantity }] }
+        const li = dj?.items || dj?.lineItems || dj?.data?.items || dj?.data?.lineItems || [];
         if (Array.isArray(li) && li.length > 0) {
           rawLineItems = li;
-          console.log(`[HepsiB Pack] Ham lineItem[0]: ${JSON.stringify(li[0])}`);
-          break;
+          console.log(`[HepsiB Pack] ✓ ${li.length} lineItem bulundu. [0]: ${JSON.stringify(li[0]).substring(0, 200)}`);
+        } else {
+          console.warn('[HepsiB Pack] Detail yanıtında items boş:', JSON.stringify(dj).substring(0, 300));
         }
       }
-    } catch (e) { console.warn('[HepsiB Pack] Detay hatası:', e.message); }
+    }
+  } catch (e) {
+    console.warn('[HepsiB Pack] Detail fetch hatası:', e.message);
   }
 
-  if (rawLineItems.length === 0 && packageUuid) {
-    // UUID ile fallback — field adı bilinmiyor, hepsini dene
-    rawLineItems = [{ lineItemId: packageUuid, id: packageUuid, quantity: 1 }];
-    console.warn('[HepsiB Pack] lineItem yok — UUID fallback');
+  if (rawLineItems.length === 0) {
+    console.warn('[HepsiB Pack] lineItem bulunamadı — paket paketi yapılamayabilir');
   }
 
-  // lineItems'ı birden fazla field adıyla dene (hangisi doğru bilmiyoruz)
-  const mkLI = (fieldName) => rawLineItems.map(i => ({
-    [fieldName]: i.lineItemId || i.id || i.lineId || i.itemId || i[fieldName],
-    quantity: i.quantity || i.requestedQuantity || 1,
-  })).filter(i => i[fieldName]);
+  // lineItems pack body'si: { lineItemId, quantity }
+  const lineItemsForPack = rawLineItems.map(i => ({
+    lineItemId: i.lineItemId,   // HB'nin döndürdüğü alan adı 'lineItemId'
+    quantity:   i.quantity || 1,
+  })).filter(i => i.lineItemId);
 
-  const liById          = mkLI('id');
-  const liByLineItemId  = mkLI('lineItemId');
-  const liStrings       = rawLineItems
-    .map(i => i.lineItemId || i.id || i.lineId || i.itemId)
-    .filter(Boolean);
+  console.log(`[HepsiB Pack] Pack lineItems: ${JSON.stringify(lineItemsForPack)}`);
 
-  console.log(`[HepsiB Pack] lineItems denemesi: id=${JSON.stringify(liById)} lineItemId=${JSON.stringify(liByLineItemId)}`);
-
-  // ── 2. Adım: Pack isteği ─────────────────────────────────────────────────
+  // ── 2. Adım: Pack isteği — doğru format: POST ROOT + { packageNumber, lineItems } ──
   const attempts = [
-    // Field: "id"
-    { label: 'id-field',        body: JSON.stringify({ packageNumber, lineItems: liById }) },
-    // Field: "lineItemId"
-    { label: 'lineItemId-field',body: JSON.stringify({ packageNumber, lineItems: liByLineItemId }) },
-    // String array
-    { label: 'strings',         body: JSON.stringify({ packageNumber, lineItems: liStrings }) },
-    // id + cargo
-    { label: 'id+cargo',        body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo',
-                                   cargoTrackingNumber: `BAGSTOCK-${packageNumber}`, lineItems: liById }) },
-    // Array format ile id field
-    { label: 'arr-id',          body: JSON.stringify([{ packageNumber, lineItems: liById }]) },
-    // Sadece lineItems (packageNumber'sız)
-    { label: 'liOnly-id',       body: JSON.stringify({ lineItems: liById }) },
+    // Ana format: { packageNumber, lineItems: [{lineItemId, quantity}] }
+    { label: 'lineItemId',
+      body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack }) },
+    // Kargo bilgisiyle
+    { label: 'lineItemId+cargo',
+      body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo',
+                             cargoTrackingNumber: `BAGSTOCK-${packageNumber}`,
+                             lineItems: lineItemsForPack }) },
+    // quantity olmadan (sadece lineItemId)
+    { label: 'lineItemId-noQty',
+      body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack.map(i => ({ lineItemId: i.lineItemId })) }) },
+    // Sadece lineItems (packageNumber olmadan)
+    { label: 'noPackageNum',
+      body: JSON.stringify({ lineItems: lineItemsForPack }) },
   ];
 
   const errors = [];
