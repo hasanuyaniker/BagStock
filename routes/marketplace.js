@@ -1252,52 +1252,8 @@ router.post('/hb-pack-order', async (req, res) => {
           console.log(`[HB Pack] pkgListLineItems (${pkgListLineItems.length}): ${JSON.stringify(pkgListLineItems)}`);
         }
 
-        // ── TÜM paketleri tara: detail'de lineItemId olan ilkini bul ────────────
-        // Eski paketlerde (daha önce oluşturulmuş) lineItemId dolu olabilir
-        const allPackages = items.slice(0, 50); // en fazla 50 paketi tara
-        console.log(`[HB Pack] ${allPackages.length} paketi detail için taranıyor...`);
-        let scanFoundItems = [];
-        let scanPackageNumber = null;
-        let scanPackageUuid   = null;
-
-        for (const pkg of allPackages) {
-          const pNum = String(pkg.packageNumber || pkg.id || '');
-          const pUuid = pkg.id || null;
-          if (!pNum) continue;
-          try {
-            const dUrl = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${pNum}`;
-            const dr = await fetch(dUrl, { headers, signal: AbortSignal.timeout(6000) });
-            const dt = await dr.text();
-            if (!dr.ok) continue;
-            let dj;
-            try { dj = JSON.parse(dt); } catch { continue; }
-            // Yanıt bir obje veya array olabilir
-            const itemsArr = Array.isArray(dj)
-              ? dj  // array döndü — her eleman bir lineItem mı?
-              : (dj?.items || dj?.lineItems || dj?.data?.items || []);
-            // lineItemId olan eleman ara
-            const withLineItemId = itemsArr.filter(i =>
-              i.lineItemId || (i.id && String(i.id).includes('-') && i.id !== pUuid)
-            );
-            console.log(`[HB Pack Scan] ${pNum} → detail items=${itemsArr.length} withLineItemId=${withLineItemId.length} | body[100]: ${dt.substring(0, 100)}`);
-            if (withLineItemId.length > 0) {
-              scanFoundItems    = withLineItemId;
-              scanPackageNumber = pNum;
-              scanPackageUuid   = pUuid;
-              console.log(`[HB Pack Scan] ✓ lineItemId BULUNDU! pkg=${pNum} items: ${JSON.stringify(withLineItemId)}`);
-              break;
-            }
-          } catch (scanErr) {
-            // timeout veya ağ hatası — devam et
-          }
-        }
-
-        // lineItemId bulunduysa, seçilen paketi güncelle
-        if (scanFoundItems.length > 0) {
-          hbPackageNumber = scanPackageNumber;
-          hbPackageUuid   = scanPackageUuid;
-          console.log(`[HB Pack] Scan sonucu — paketle: ${hbPackageNumber}`);
-        }
+        // NOT: /packagenumber/{n} detail endpoint'i kargo bilgisi döndürür, lineItemId YOK.
+        // lineItemId kaynağı packages LISTEsindeki chosenPkg.items — yukarıda alındı.
       }
     } catch (listErr) {
       console.warn('[HB Pack] Paket listesi alınamadı:', listErr.message);
@@ -1309,119 +1265,21 @@ router.post('/hb-pack-order', async (req, res) => {
       console.log(`[HB Pack] Fallback packageNumber: ${hbPackageNumber} (stored=${storedPackageNum})`);
     }
 
-    // ── Route'da detail'i biz çek — packHBOrder'a hazır lineItems gönder ──────
-    // EN GÜVENILIR KAYNAK: packages listesindeki chosenPkg.items (lineItemId doğrudan var)
+    // ── routeLineItems: packages list'ten alınan items — lineItemId'ler burada ──
+    // packages LIST → chosenPkg.items[i].lineItemId  (doğrulandı ✅)
+    // /packagenumber/{n} detail → kargo bilgisi, lineItemId YOK (doğrulandı ✅)
+    // orders endpoint → stub siparişleri 0 döndürüyor (doğrulandı ✅)
     let routeLineItems = pkgListLineItems;
     if (routeLineItems.length > 0) {
-      console.log(`[HB Pack] ✅ routeLineItems packages list'ten alındı (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
-    }
-
-    if (hbPackageNumber && routeLineItems.length === 0) {
-      try {
-        const detailUrl2 = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${hbPackageNumber}`;
-        console.log(`[HB Pack Route] Detail çekiliyor: ${detailUrl2}`);
-        const dr2 = await fetch(detailUrl2, { headers, signal: AbortSignal.timeout(10000) });
-        const dt2 = await dr2.text();
-        console.log(`[HB Pack Route] Detail HTTP ${dr2.status} | ${dt2.substring(0, 800)}`);
-        if (dr2.ok) {
-          let dj2;
-          try { dj2 = JSON.parse(dt2); } catch {}
-          if (dj2) {
-            const rawArr = Array.isArray(dj2) ? dj2 : (dj2?.items || dj2?.lineItems || dj2?.data?.items || []);
-            const li2 = rawArr.filter(i => i.lineItemId || (i.id && String(i.id).includes('-') && i.id !== hbPackageUuid));
-            console.log(`[HB Pack Route] Raw items: ${JSON.stringify(rawArr).substring(0, 500)}`);
-            routeLineItems = li2.map(i => ({
-              lineItemId: i.lineItemId || i.id,
-              quantity:   i.quantity || 1,
-            })).filter(i => i.lineItemId);
-            console.log(`[HB Pack Route] Hazır lineItems: ${JSON.stringify(routeLineItems)}`);
-          }
-        }
-      } catch (de) {
-        console.warn('[HB Pack Route] Detail fetch hatası:', de.message);
+      console.log(`[HB Pack] ✅ routeLineItems packages list'ten (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
+    } else {
+      // Son fallback: DB UUID item_id'leri (stub siparişi oluştururken randomUUID ile kaydedildi)
+      if (dbLineItems.length > 0) {
+        console.log(`[HB Pack] DB UUID fallback (${dbLineItems.length}): ${JSON.stringify(dbLineItems)}`);
+        routeLineItems = dbLineItems;
+      } else {
+        console.warn('[HB Pack] ⚠️ routeLineItems boş — packages listesinde items[] yok, DB\'de UUID yok');
       }
-    }
-
-    // ── Lineitems endpoint dene — doğrudan line item listesi ──────────────────
-    if (routeLineItems.length === 0) {
-      const liUrls = [
-        `${base}/lineitems/merchantid/${creds.merchantId}?limit=100&offset=0`,
-        `${base}/lineitems/merchantid/${creds.merchantId}?packageNumber=${hbPackageNumber}&limit=100`,
-        `${base}/lineitems/merchantid/${creds.merchantId}?status=Open&limit=100`,
-      ];
-      for (const liUrl of liUrls) {
-        try {
-          console.log(`[HB Pack Route] Lineitems: ${liUrl}`);
-          const lr = await fetch(liUrl, { headers, signal: AbortSignal.timeout(8000) });
-          const lt = await lr.text();
-          console.log(`[HB Pack Route] Lineitems HTTP ${lr.status} | ${lt.substring(0, 400)}`);
-          if (!lr.ok) continue;
-          let lj;
-          try { lj = JSON.parse(lt); } catch { continue; }
-          const liArr = lj?.items || lj?.lineItems || (Array.isArray(lj) ? lj : []);
-          if (liArr.length > 0) {
-            routeLineItems = liArr.map(i => ({
-              lineItemId: i.id || i.lineItemId,
-              quantity:   i.quantity || 1,
-            })).filter(i => i.lineItemId);
-            if (routeLineItems.length > 0) {
-              console.log(`[HB Pack Route] Lineitems'dan geldi: ${JSON.stringify(routeLineItems)}`);
-              break;
-            }
-          }
-        } catch (le) {
-          console.warn('[HB Pack Route] Lineitems hatası:', le.message);
-        }
-      }
-    }
-
-    // ── Fallback: orders endpoint → items[i].id = lineItemId (HB docs doğruladı) ──
-    // Doğru HB datetime formatı: "yyyy-MM-dd HH:mm" (boşluklu, ISO değil)
-    if (routeLineItems.length === 0) {
-      const todayStr  = new Date().toISOString().split('T')[0];
-      const startStr  = new Date(Date.now() - 30*24*3600*1000).toISOString().split('T')[0];
-      const orderUrls = [
-        `${base}/orders/merchantid/${creds.merchantId}?limit=100&offset=0`,
-        `${base}/orders/merchantid/${creds.merchantId}?begindate=${encodeURIComponent(startStr + ' 00:00')}&enddate=${encodeURIComponent(todayStr + ' 23:59')}&limit=100&offset=0`,
-        `${base}/orders/merchantid/${creds.merchantId}/paymentawaiting?limit=100&offset=0`,
-      ];
-      for (const ordUrl of orderUrls) {
-        try {
-          console.log(`[HB Pack Route] Orders fallback: ${ordUrl}`);
-          const or = await fetch(ordUrl, { headers, signal: AbortSignal.timeout(12000) });
-          const ot = await or.text();
-          console.log(`[HB Pack Route] Orders HTTP ${or.status} | ${ot.substring(0, 600)}`);
-          if (!or.ok) continue;
-          let oj;
-          try { oj = JSON.parse(ot); } catch { continue; }
-          const allOrders = oj?.data?.items || oj?.items || oj?.orders || (Array.isArray(oj) ? oj : []);
-          console.log(`[HB Pack Route] ${allOrders.length} sipariş (${ordUrl.split('/').slice(-1)})`);
-          if (allOrders.length === 0) continue;
-          // orderNumber ile eşleş; yoksa ilk siparişi al
-          const matchOrd = allOrders.find(o => {
-            const oNum = String(o.orderNumber || o.OrderNumber || o.merchantOrderNumber || o.id || '');
-            return oNum === merchantOrderNumber || oNum.includes(merchantOrderNumber);
-          }) || allOrders[0];
-          if (matchOrd) {
-            console.log(`[HB Pack Route] Eşleşen sipariş: ${JSON.stringify(matchOrd).substring(0, 800)}`);
-            const oItems = matchOrd.lineItems || matchOrd.items || matchOrd.orderLines || matchOrd.lines || [];
-            routeLineItems = oItems.map(i => ({
-              lineItemId: i.id || i.lineItemId || i.lineId || i.itemId,
-              quantity:   i.quantity || i.requestedQuantity || 1,
-            })).filter(i => i.lineItemId);
-            console.log(`[HB Pack Route] Orders'dan lineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
-            if (routeLineItems.length > 0) break;
-          }
-        } catch (oe) {
-          console.warn('[HB Pack Route] Orders fallback hatası:', oe.message);
-        }
-      }
-    }
-
-    // ── Son fallback: DB'den UUID item_id'leri kullan (yeni test siparişlerinde mevcut) ──
-    if (routeLineItems.length === 0 && dbLineItems.length > 0) {
-      console.log(`[HB Pack] DB UUID lineItems fallback: ${JSON.stringify(dbLineItems)}`);
-      routeLineItems = dbLineItems;
     }
 
     // ── Pack isteği gönder ────────────────────────────────────────────────────

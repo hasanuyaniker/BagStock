@@ -562,8 +562,16 @@ async function updateHBListingStockPrice(creds, updates) {
 
 /**
  * 3. SİPARİŞ: Paketi onayla (paketleme tamamlandı işareti)
- * Yöntem A: POST /packages/merchantid/{merchantId}/{packageNumber}/pack  (path-param)
- * Yöntem B: POST /packages/merchantid/{merchantId}/items/pack            (body JSON array)
+ *
+ * DOĞRU FORMAT (developers.hepsiburada.com'dan doğrulandı):
+ *   POST /packages/merchantid/{merchantId}
+ *   Body: { lineItemRequests: [{ id: <lineItemId>, quantity: <n> }] }
+ *
+ * ÖNEMLİ:
+ *   - Alan adı "lineItemRequests" (lineItems DEĞİL)
+ *   - Her item'da "id" kullan (lineItemId DEĞİL)
+ *   - Body'de "packageNumber" YOK — sadece lineItemRequests
+ *   - lineItemId kaynağı: packages LIST endpoint'inden chosenPkg.items[i].lineItemId
  */
 async function packHBOrder(creds, packageNumber, packageUuid, fallbackItems = []) {
   const { merchantId, username, apiKey, environment } = creds;
@@ -572,82 +580,46 @@ async function packHBOrder(creds, packageNumber, packageUuid, fallbackItems = []
   const ROOT    = `${base}/packages/merchantid/${merchantId}`;
 
   console.log(`[HepsiB Pack] START packageNumber=${packageNumber} uuid=${packageUuid} fallbackItems=${fallbackItems.length}`);
+  console.log(`[HepsiB Pack] fallbackItems detail: ${JSON.stringify(fallbackItems)}`);
 
-  // ── 1. Adım: Paket detayını çek — items[] → lineItemId'leri al ───────────
-  const detailUrl = `${base}/packages/merchantid/${merchantId}/packagenumber/${packageNumber}`;
-  let rawLineItems = [];
+  // fallbackItems: route'dan gelen { lineItemId, quantity } array'i
+  // HB API beklediği: { id, quantity } — "id" = lineItemId değeri
+  const lineItemRequests = fallbackItems.map(i => ({
+    id:       i.lineItemId || i.id,
+    quantity: i.quantity || 1,
+  })).filter(i => i.id);
 
-  try {
-    console.log(`[HepsiB Pack] Detail fetch: ${detailUrl}`);
-    const dr = await fetch(detailUrl, { headers, signal: AbortSignal.timeout(10000) });
-    const dt = await dr.text();
-    console.log(`[HepsiB Pack] Detail HTTP ${dr.status} | ${dt.substring(0, 800)}`);
-    if (dr.ok) {
-      let dj;
-      try { dj = JSON.parse(dt); } catch (pe) {
-        console.warn('[HepsiB Pack] Detail JSON parse hatası:', pe.message);
-      }
-      if (dj) {
-        const li = dj?.items || dj?.lineItems || dj?.data?.items || dj?.data?.lineItems || [];
-        console.log(`[HepsiB Pack] Detail raw items: ${JSON.stringify(li).substring(0, 500)}`);
-        if (Array.isArray(li) && li.length > 0) {
-          rawLineItems = li;
-          console.log(`[HepsiB Pack] ✓ Detail'den ${li.length} item. [0]: ${JSON.stringify(li[0]).substring(0, 300)}`);
-        } else {
-          console.warn('[HepsiB Pack] Detail items boş. Tam yanıt:', JSON.stringify(dj).substring(0, 500));
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[HepsiB Pack] Detail fetch EXCEPTION:', e.message);
-  }
+  console.log(`[HepsiB Pack] lineItemRequests (${lineItemRequests.length}): ${JSON.stringify(lineItemRequests)}`);
 
-  // Fallback: route'dan gelen hazır lineItems'ı kullan
-  if (rawLineItems.length === 0 && fallbackItems.length > 0) {
-    console.log(`[HepsiB Pack] Fallback lineItems kullanılıyor (${fallbackItems.length} adet)`);
-    rawLineItems = fallbackItems;
-  }
-
-  // lineItemId için tüm olası field adlarını dene
-  const lineItemsForPack = rawLineItems.map(i => ({
-    lineItemId: i.lineItemId || i.id || i.lineId || i.itemId || i.lineItemsId,
-    quantity:   i.quantity || 1,
-  })).filter(i => i.lineItemId);
-
-  console.log(`[HepsiB Pack] lineItemsForPack (${lineItemsForPack.length}): ${JSON.stringify(lineItemsForPack)}`);
-
-  // ── 2. Adım: Pack denemesi ────────────────────────────────────────────────
-  // UUID fallback: packageUuid lineItemId olarak kullan (son çare)
-  const uuidFallbackItems = packageUuid
-    ? [{ lineItemId: packageUuid, quantity: 1 }]
-    : [];
-
+  // ── Pack denemesi: doğru format = lineItemRequests[{id, quantity}], packageNumber YOK ──
   const attempts = [
-    // Ana format — detail/fallback'ten gelen gerçek lineItemId
-    ...(lineItemsForPack.length > 0 ? [
-      { label: 'lineItemId',
-        body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack }) },
-      { label: 'lineItemId+cargo',
-        body: JSON.stringify({ packageNumber, cargoCompany: 'Yurtiçi Kargo',
-                               cargoTrackingNumber: `BAGSTOCK-${packageNumber}`,
-                               lineItems: lineItemsForPack }) },
-      { label: 'lineItemId-noQty',
-        body: JSON.stringify({ packageNumber, lineItems: lineItemsForPack.map(i => ({ lineItemId: i.lineItemId })) }) },
+    // ✅ Doğru format (doc'tan doğrulandı): lineItemRequests + id
+    ...(lineItemRequests.length > 0 ? [
+      { label: 'lineItemRequests',
+        body: JSON.stringify({ lineItemRequests }) },
+      { label: 'lineItemRequests+cargo',
+        body: JSON.stringify({ lineItemRequests, cargoCompany: 'Yurtiçi Kargo', carrier: 'YURTICI' }) },
+      { label: 'lineItemRequests-noQty',
+        body: JSON.stringify({ lineItemRequests: lineItemRequests.map(i => ({ id: i.id })) }) },
     ] : []),
-    // UUID'yi lineItemId olarak gönder
-    ...(uuidFallbackItems.length > 0 ? [
-      { label: 'uuid-as-lineItemId',
-        body: JSON.stringify({ packageNumber, lineItems: uuidFallbackItems }) },
+    // Eski format denemeleri (geriye dönük uyumluluk / farklı versiyon ihtimali)
+    ...(lineItemRequests.length > 0 ? [
+      { label: 'lineItems-id',
+        body: JSON.stringify({ lineItems: lineItemRequests }) },
+      { label: 'lineItems-lineItemId',
+        body: JSON.stringify({ lineItems: lineItemRequests.map(i => ({ lineItemId: i.id, quantity: i.quantity })) }) },
     ] : []),
-    // lineItems null/boş — bazı API'ler bu şekilde "tümünü paketle" kabul eder
-    { label: 'noLineItems',
-      body: JSON.stringify({ packageNumber }) },
+    // UUID fallback (son çare)
+    ...(packageUuid ? [
+      { label: 'uuid-lineItemRequests',
+        body: JSON.stringify({ lineItemRequests: [{ id: packageUuid, quantity: 1 }] }) },
+    ] : []),
   ];
 
   const errors = [];
   for (const attempt of attempts) {
     try {
-      console.log(`[HepsiB Pack] ${attempt.label}: POST ${ROOT} body=${attempt.body.substring(0,200)}`);
+      console.log(`[HepsiB Pack] ${attempt.label}: POST ${ROOT} body=${attempt.body.substring(0,300)}`);
       const r = await fetch(ROOT, {
         method:  'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
