@@ -1188,8 +1188,9 @@ router.post('/hb-pack-order', async (req, res) => {
     const pkgUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
 
     console.log(`[HB Pack] Paket listesi çekiliyor (tarihsiz): ${pkgUrl}`);
-    let hbPackageNumber = null;
-    let hbPackageUuid   = null;
+    let hbPackageNumber  = null;
+    let hbPackageUuid    = null;
+    let pkgListLineItems = [];  // packages LIST'ten gelen items[].lineItemId — en güvenilir kaynak
 
     try {
       const pkgRes  = await fetch(pkgUrl, { headers, signal: AbortSignal.timeout(12000) });
@@ -1236,6 +1237,20 @@ router.post('/hb-pack-order', async (req, res) => {
         hbPackageUuid = chosenPkg?.id || null;
         console.log(`[HB Pack] packageNumber=${hbPackageNumber} uuid=${hbPackageUuid}`);
         console.log(`[HB Pack] chosenPkg KEYS: ${Object.keys(chosenPkg || {}).join(', ')}`);
+
+        // ── Packages LIST zaten items[].lineItemId içeriyor — direkt çek ────
+        // Detail endpoint /packagenumber/{n} → kargo bilgisi (lineItemId YOK)
+        // Packages list /packages/merchantid/{m} → tam paket (items[].lineItemId VAR!)
+        const pkgListItems = chosenPkg?.items || chosenPkg?.lineItems || chosenPkg?.lines || [];
+        if (pkgListItems.length > 0) {
+          console.log(`[HB Pack] ✓ Package list items (${pkgListItems.length}): ${JSON.stringify(pkgListItems.map(i => ({ lineItemId: i.lineItemId, qty: i.quantity })))}`);
+          // packages listesindeki items'ı dışarıya taşı — routeLineItems için kullanılacak
+          pkgListLineItems = pkgListItems.map(i => ({
+            lineItemId: i.lineItemId || i.id,
+            quantity:   i.quantity || 1,
+          })).filter(i => i.lineItemId);
+          console.log(`[HB Pack] pkgListLineItems (${pkgListLineItems.length}): ${JSON.stringify(pkgListLineItems)}`);
+        }
 
         // ── TÜM paketleri tara: detail'de lineItemId olan ilkini bul ────────────
         // Eski paketlerde (daha önce oluşturulmuş) lineItemId dolu olabilir
@@ -1295,8 +1310,13 @@ router.post('/hb-pack-order', async (req, res) => {
     }
 
     // ── Route'da detail'i biz çek — packHBOrder'a hazır lineItems gönder ──────
-    let routeLineItems = [];
-    if (hbPackageNumber) {
+    // EN GÜVENILIR KAYNAK: packages listesindeki chosenPkg.items (lineItemId doğrudan var)
+    let routeLineItems = pkgListLineItems;
+    if (routeLineItems.length > 0) {
+      console.log(`[HB Pack] ✅ routeLineItems packages list'ten alındı (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
+    }
+
+    if (hbPackageNumber && routeLineItems.length === 0) {
       try {
         const detailUrl2 = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${hbPackageNumber}`;
         console.log(`[HB Pack Route] Detail çekiliyor: ${detailUrl2}`);
