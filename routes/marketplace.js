@@ -1270,8 +1270,46 @@ router.post('/hb-pack-order', async (req, res) => {
     // /packagenumber/{n} detail → kargo bilgisi, lineItemId YOK (doğrulandı ✅)
     // orders endpoint → stub siparişleri 0 döndürüyor (doğrulandı ✅)
     let routeLineItems = pkgListLineItems;
+
+    // ── DOĞRU AKIŞ (HB docs): packageablewith endpoint → paketlenebilir kalemleri al ──
+    // GET /lineitems/merchantid/{merchantId}/packageablewith/lineitemid/{lineItemId}
+    // Response: { lineItems: [{ lineItemId, orderNumber, quantity }] }
+    // Bu endpoint "Open/Paketlenecek" durumundaki kalemleri döndürür.
+    // Dönen lineItemId'ler pack isteğinde kullanılmalı (packages LIST'tekinden farklı olabilir).
+    if (pkgListLineItems.length > 0) {
+      const firstLineItemId = pkgListLineItems[0].lineItemId;
+      const pwUrl = `${base}/lineitems/merchantid/${creds.merchantId}/packageablewith/lineitemid/${firstLineItemId}`;
+      console.log(`[HB Pack] packageablewith çağrılıyor: ${pwUrl}`);
+      try {
+        const pwr  = await fetch(pwUrl, { headers, signal: AbortSignal.timeout(10000) });
+        const pwt  = await pwr.text();
+        console.log(`[HB Pack] packageablewith HTTP ${pwr.status} | ${pwt.substring(0, 600)}`);
+        if (pwr.ok) {
+          let pwj;
+          try { pwj = JSON.parse(pwt); } catch {}
+          const pwItems = pwj?.lineItems || pwj?.items || (Array.isArray(pwj) ? pwj : []);
+          if (pwItems.length > 0) {
+            const pwLineItems = pwItems.map(i => ({
+              lineItemId: i.lineItemId || i.id,
+              quantity:   i.quantity || 1,
+            })).filter(i => i.lineItemId);
+            if (pwLineItems.length > 0) {
+              console.log(`[HB Pack] ✅ packageablewith'ten ${pwLineItems.length} kalem: ${JSON.stringify(pwLineItems)}`);
+              routeLineItems = pwLineItems;
+            } else {
+              console.log('[HB Pack] packageablewith boş dizi döndü — pkgListLineItems kullanılıyor');
+            }
+          } else {
+            console.log('[HB Pack] packageablewith items boş — pkgListLineItems kullanılıyor');
+          }
+        }
+      } catch (pwe) {
+        console.warn('[HB Pack] packageablewith hatası:', pwe.message);
+      }
+    }
+
     if (routeLineItems.length > 0) {
-      console.log(`[HB Pack] ✅ routeLineItems packages list'ten (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
+      console.log(`[HB Pack] ✅ routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
     } else {
       // Son fallback: DB UUID item_id'leri (stub siparişi oluştururken randomUUID ile kaydedildi)
       if (dbLineItems.length > 0) {
