@@ -506,6 +506,8 @@ router.get('/hb-raw-orders', async (req, res) => {
       // Paketler: status filtresiyle
       { label: 'packages_created',     url: `${base}/packages/merchantid/${creds.merchantId}?status=Created&limit=20&offset=0` },
       { label: 'packages_open',        url: `${base}/packages/merchantid/${creds.merchantId}?status=OPEN&limit=20&offset=0` },
+      // Siparişler: TARİH FİLTRESİ YOK (packages gibi) — lineItemId = items[i].id
+      { label: 'orders_no_filter',     url: `${base}/orders/merchantid/${creds.merchantId}?limit=20&offset=0` },
       // Siparişler: ISO tarih formatı
       { label: 'orders_iso',           url: `${base}/orders/merchantid/${creds.merchantId}?begindate=${today}T00%3A00%3A00%2B03%3A00&enddate=${today}T23%3A59%3A59%2B03%3A00&limit=20&offset=0` },
       // Siparişler: geniş aralık
@@ -1220,6 +1222,40 @@ router.post('/hb-pack-order', async (req, res) => {
         }
       } catch (de) {
         console.warn('[HB Pack Route] Detail fetch hatası:', de.message);
+      }
+    }
+
+    // ── Fallback: orders endpoint → items[i].id = lineItemId (HB docs doğruladı) ──
+    if (routeLineItems.length === 0) {
+      try {
+        const ordUrl = `${base}/orders/merchantid/${creds.merchantId}?limit=100&offset=0`;
+        console.log(`[HB Pack Route] Orders fallback: ${ordUrl}`);
+        const or = await fetch(ordUrl, { headers, signal: AbortSignal.timeout(12000) });
+        const ot = await or.text();
+        console.log(`[HB Pack Route] Orders HTTP ${or.status} | ${ot.substring(0, 600)}`);
+        if (or.ok) {
+          let oj;
+          try { oj = JSON.parse(ot); } catch {}
+          const allOrders = oj?.data?.items || oj?.items || oj?.orders || (Array.isArray(oj) ? oj : []);
+          console.log(`[HB Pack Route] ${allOrders.length} sipariş bulundu`);
+          // orderNumber ile eşleş; yoksa ilk siparişi al
+          const matchOrd = allOrders.find(o => {
+            const oNum = String(o.orderNumber || o.OrderNumber || o.merchantOrderNumber || o.id || '');
+            return oNum === merchantOrderNumber || oNum.includes(merchantOrderNumber);
+          }) || allOrders[0];
+          if (matchOrd) {
+            console.log(`[HB Pack Route] Eşleşen sipariş: ${JSON.stringify(matchOrd).substring(0, 600)}`);
+            const oItems = matchOrd.lineItems || matchOrd.items || matchOrd.orderLines || matchOrd.lines || [];
+            // lineItemId = items[i].id  (HB docs: "items.id alanından elde edebilirsiniz")
+            routeLineItems = oItems.map(i => ({
+              lineItemId: i.id || i.lineItemId || i.lineId || i.itemId,
+              quantity:   i.quantity || i.requestedQuantity || 1,
+            })).filter(i => i.lineItemId);
+            console.log(`[HB Pack Route] Orders'dan lineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
+          }
+        }
+      } catch (oe) {
+        console.warn('[HB Pack Route] Orders fallback hatası:', oe.message);
       }
     }
 
