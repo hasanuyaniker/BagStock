@@ -628,10 +628,25 @@ async function packHBOrder(creds, packageNumber, packageUuid, fallbackItems = []
       });
       const t = await r.text();
       console.log(`[HepsiB Pack] ${attempt.label} → HTTP ${r.status} | ${t.substring(0, 300)}`);
+
+      // ✅ 2xx = açık başarı
       if (r.ok) {
         try { return { method: attempt.label, data: JSON.parse(t) }; }
         catch { return { method: attempt.label, raw: t }; }
       }
+
+      // ✅ 409 Conflict + body'de packageNumber var:
+      //    HB SIT stub paketi zaten oluşturuyor; pack endpoint "zaten pakette" conflict verir.
+      //    Yanıt body'si paket nesnesi → pack fiilen gerçekleşti, başarı say.
+      if (r.status === 409) {
+        let parsed409 = null;
+        try { parsed409 = JSON.parse(t); } catch {}
+        if (parsed409 && (parsed409.packageNumber || parsed409.barcode)) {
+          console.log(`[HepsiB Pack] ${attempt.label} → 409 ama body paket nesnesi içeriyor — BAŞARI sayılıyor`);
+          return { method: attempt.label, data: parsed409, note: '409-already-packed' };
+        }
+      }
+
       errors.push(`[${attempt.label}]=${r.status}:${t.substring(0, 250)}`);
     } catch (e) {
       errors.push(`[${attempt.label}]=ERR:${e.message.substring(0, 60)}`);
