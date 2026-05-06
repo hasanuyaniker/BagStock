@@ -725,6 +725,11 @@ router.post('/create-test-hb-order', async (req, res) => {
       const bagstockOrderNumber = `HBTEST-${ts}${rand}`;  // BagStock DB'de saklanan, filtrelenebilir format
 
       // 5. HB SIT stub API'ye gönder — seçilen listing'lerin gerçek ID/SKU'larıyla
+      // Her satır kalemi için UUID oluştur — stub bunu lineItemId olarak kullanabilir
+      const { randomUUID } = require('crypto');
+      const generatedLineItemIds = selected.map(() => randomUUID());
+      console.log('[HB Test Order] Üretilen lineItemIds:', generatedLineItemIds);
+
       const hbBody = {
         Customer: {
           CustomerId: 'dfc8a27f-faae-4cb2-859c-8a7d50ee77be',
@@ -750,7 +755,11 @@ router.post('/create-test-hb-order', async (req, res) => {
           Quantity:         itemQtys[i],
           Sku:              l.sku || l.listingId,
           Vat:              l.vat || 20,
-          isBnplMP:         false
+          isBnplMP:         false,
+          // Stub'ın lineItemId olarak kullanması için — farklı olası field adları
+          Id:           generatedLineItemIds[i],
+          LineItemId:   generatedLineItemIds[i],
+          lineItemId:   generatedLineItemIds[i],
         })),
         OrderNumber: hbOrderNumber
       };
@@ -853,7 +862,8 @@ router.post('/create-test-hb-order', async (req, res) => {
       for (let i = 0; i < selected.length; i++) {
         const l   = selected[i];   // HB listing verisi
         const qty = itemQtys[i];
-        const itemId = `TEST-${orderId}-${i}-${Date.now()}`;
+        // DB'ye gerçek UUID kaydet — paketle butonunda lineItemId olarak kullanılacak
+        const itemId = generatedLineItemIds[i];
 
         // Eşleşen local ürünü barkod üzerinden ara (stok düşme için, zorunlu değil)
         const matchRes = await client.query(
@@ -1114,13 +1124,26 @@ router.post('/hb-pack-order', async (req, res) => {
     // DB'den bu siparişin tüm bilgilerini al
     // cargo_tracking_number = stub'ın döndürdüğü HB packageNumber (varsa)
     const dbRow = await client.query(
-      `SELECT order_id, order_number, cargo_tracking_number FROM marketplace_orders
-       WHERE platform='hepsiburada' AND (order_id=$1 OR order_number=$1 OR order_number=$2)
+      `SELECT mo.id, mo.order_id, mo.order_number, mo.cargo_tracking_number,
+              json_agg(json_build_object('item_id', moi.item_id, 'quantity', moi.quantity))
+                FILTER (WHERE moi.id IS NOT NULL) AS line_items
+       FROM marketplace_orders mo
+       LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+       WHERE mo.platform='hepsiburada'
+         AND (mo.order_id=$1 OR mo.order_number=$1 OR mo.order_number=$2)
+       GROUP BY mo.id
        LIMIT 1`,
       [String(bagstockOrderId), `HBTEST-${String(bagstockOrderId).replace('HB-TEST-','').replace('HBTEST-','')}`]
     );
     const row = dbRow.rows[0];
     console.log('[HB Pack] DB row:', JSON.stringify(row));
+
+    // DB'deki UUID item_id'leri — yeni test siparişlerinde crypto.randomUUID() ile üretildi
+    const dbLineItems = (row?.line_items || []).filter(li => {
+      const id = String(li.item_id || '');
+      return id.includes('-') && id.length >= 32; // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    }).map(li => ({ lineItemId: li.item_id, quantity: li.quantity || 1 }));
+    console.log(`[HB Pack] DB UUID lineItems (${dbLineItems.length}): ${JSON.stringify(dbLineItems)}`);
 
     // merchantOrderNumber = HB'ye OrderNumber olarak gönderdiğimiz saf rakam
     const merchantOrderNumber = row
@@ -1351,7 +1374,14 @@ router.post('/hb-pack-order', async (req, res) => {
       }
     }
 
+    // ── Son fallback: DB'den UUID item_id'leri kullan (yeni test siparişlerinde mevcut) ──
+    if (routeLineItems.length === 0 && dbLineItems.length > 0) {
+      console.log(`[HB Pack] DB UUID lineItems fallback: ${JSON.stringify(dbLineItems)}`);
+      routeLineItems = dbLineItems;
+    }
+
     // ── Pack isteği gönder ────────────────────────────────────────────────────
+    console.log(`[HB Pack] FINAL routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
     const result = await packHBOrder(creds, hbPackageNumber, hbPackageUuid, routeLineItems);
 
     // Local DB'de durumu güncelle (her iki id ile dene)
