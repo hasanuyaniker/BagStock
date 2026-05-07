@@ -159,10 +159,14 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   );
 
   // ── 2. Paketlenmiş siparişler (kargoda, teslim, iade vb.) ──────────────────
+  // NOT: /packages/ endpoint'i YYYY-MM-DD formatında begindate/enddate kabul ETMİYOR (400 döner).
+  // Bunun yerine "timespan" (saat cinsinden) kullanıyoruz — 30 gün = 720 saat.
+  // Tarih filtresi olmadan da çalışır ama timespan ile belirli bir aralık alıyoruz.
   console.log('[HepsiB] /packages/ endpoint çekiliyor (paketlenmiş siparişler)...');
+  const timespanHours = days * 24;  // gün → saat
   await fetchPaginated(
     `${base}/packages/merchantid/${merchantId}`,
-    { begindate, enddate },
+    { timespan: String(timespanHours) },
     headers,
     (pkg) => {
       const norm = normalizeHBPackage(pkg);
