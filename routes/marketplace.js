@@ -565,6 +565,75 @@ router.get('/hb-raw-orders', async (req, res) => {
   }
 });
 
+// ── GET /api/marketplace/hb-test-labelling — Tüm paketlerde labelling dene ───
+// SIT'te hangi packageNumber'da labelling çalışıyor bulmak için
+router.get('/hb-test-labelling', async (req, res) => {
+  try {
+    const credRow = await pool.query("SELECT value FROM app_settings WHERE key = 'marketplace_credentials'");
+    const creds = credRow.rows[0] ? JSON.parse(credRow.rows[0].value).hepsiburada : null;
+    if (!creds?.merchantId) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    const { getHBBase, makeHBHeaders } = require('../services/hepsiburada');
+    const base    = getHBBase(creds.environment);
+    const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
+
+    // 1. Mevcut tüm paketleri al
+    const pkgListUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
+    const plr = await fetch(pkgListUrl, { headers, signal: AbortSignal.timeout(10000) });
+    const plBody = await plr.json();
+    const allPkgs = Array.isArray(plBody) ? plBody : (plBody?.items || plBody?.data?.items || []);
+
+    console.log(`[HB Labelling Test] ${allPkgs.length} paket bulundu`);
+
+    // 2. Her paket için labelling endpoint dene — hem packageNumber hem UUID ile
+    const labelResults = [];
+    for (const pkg of allPkgs) {
+      const pkgNum  = pkg.packageNumber || pkg.id;
+      const pkgUuid = pkg.id;
+
+      // Format 1: packageNumber ile
+      const url1 = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${pkgNum}/labelling`;
+      let r1, t1;
+      try {
+        r1 = await fetch(url1, { headers, signal: AbortSignal.timeout(8000) });
+        t1 = await r1.text();
+      } catch (e) { t1 = e.message; r1 = { status: 0 }; }
+
+      // Format 2: UUID ile (eğer farklıysa)
+      let r2Status = null, t2 = null;
+      if (pkgUuid && pkgUuid !== pkgNum) {
+        const url2 = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${pkgUuid}/labelling`;
+        try {
+          const r2 = await fetch(url2, { headers, signal: AbortSignal.timeout(8000) });
+          t2 = await r2.text();
+          r2Status = r2.status;
+        } catch (e) { t2 = e.message; r2Status = 0; }
+      }
+
+      const entry = {
+        packageNumber: pkgNum,
+        uuid:          pkgUuid,
+        status:        pkg.status,
+        cargoCompany:  pkg.cargoCompany,
+        labelling_num:  { httpStatus: r1.status, ok: r1.ok, body: t1.substring(0, 200) },
+        ...(r2Status !== null ? { labelling_uuid: { httpStatus: r2Status, body: t2?.substring(0, 200) } } : {}),
+      };
+      console.log(`[HB Labelling Test] pkg=${pkgNum} → labelling HTTP ${r1.status}`);
+      labelResults.push(entry);
+    }
+
+    const working = labelResults.filter(l => l.labelling_num?.ok || l.labelling_uuid?.httpStatus === 200);
+    res.json({
+      total:        allPkgs.length,
+      workingCount: working.length,
+      working,
+      all:          labelResults,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/marketplace/test-shipping-email ─────────────────────────────────
 // Bugün kargoya verilen tüm siparişleri tek mail ile gönderir
 // ── POST /api/marketplace/test-hb-connection — HB API bağlantı testi ────────
