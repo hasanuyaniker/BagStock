@@ -641,10 +641,11 @@ router.post('/test-hb-connection', async (req, res) => {
     const today = formatHBDate(new Date());
     const base  = getHBBase(environment);
 
-    // Doğru endpoint + doğru param isimleri (lowercase begindate/enddate)
+    // Siparişler: tarih filtresi ile (orders endpoint bunu destekliyor)
+    // Paketler: tarih filtresi YOK — begindate/enddate her iki ortamda da 400 döndürüyor
     const candidates = [
       `${base}/orders/merchantid/${hb.merchantId}?begindate=${today}&enddate=${today}&limit=1&offset=0`,
-      `${base}/packages/merchantid/${hb.merchantId}?begindate=${today}&enddate=${today}&limit=1&offset=0`,
+      `${base}/packages/merchantid/${hb.merchantId}?limit=1&offset=0`,
     ];
 
     const results = [];
