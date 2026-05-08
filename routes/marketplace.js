@@ -1340,30 +1340,46 @@ router.post('/hb-pack-order', async (req, res) => {
     console.log(`[HB Pack] FINAL routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
     const result = await packHBOrder(creds, hbPackageNumber, null, routeLineItems);
 
-    // ── Yeni paketin durumunu doğrula (API'den geri oku) ─────────────────────
-    const newPackageNumber = result?.data?.packageNumber || result?.raw?.match(/"packageNumber":"(\d+)"/)?.[1];
-    let hbVerifiedStatus = null;
+    // ── ADIM 4: Kargo etiketi al (Labelling) ─────────────────────────────────
+    // HB'nin sistemi POST /packages sonrası paketi "Open" durumda tutar.
+    // GET .../labelling çağrısı paketi "Packed" (kargoya hazır) durumuna geçirir.
+    // SIT testinin bu adımı da doğrulaması bekleniyor.
+    const newPackageNumber = result?.data?.packageNumber
+      || (typeof result?.raw === 'string' ? result.raw.match(/"packageNumber":"(\d+)"/)?.[1] : null);
+    let labellingResult = null;
+    // base ve headers zaten yukarıda tanımlı (satır ~1139)
+
     if (newPackageNumber) {
       try {
-        const { getHBBase, makeHBHeaders } = require('../services/hepsiburada');
-        const verifyUrl = `${getHBBase(creds.environment)}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
-        const verifyHeaders = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
-        const vr = await fetch(verifyUrl, { headers: verifyHeaders, signal: AbortSignal.timeout(10000) });
-        if (vr.ok) {
-          const vBody = await vr.json();
-          const vItems = Array.isArray(vBody) ? vBody : (vBody?.items || vBody?.data?.items || []);
-          const found = vItems.find(p => String(p.packageNumber) === String(newPackageNumber));
-          hbVerifiedStatus = found ? {
-            packageNumber: found.packageNumber,
-            status:        found.status || found.packageStatus || 'BILINMIYOR',
-            barcode:       found.barcode,
-            allFields:     Object.keys(found),
-            raw:           found,
-          } : { note: `Paket ${newPackageNumber} listede bulunamadı`, totalPackages: vItems.length };
+        // HB API: GET /packages/merchantid/{merchantId}/packagenumber/{packageNumber}/labelling
+        const labelUrl = `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${newPackageNumber}/labelling`;
+        console.log(`[HB Pack] Labelling (kargo etiketi): ${labelUrl}`);
+        const lr = await fetch(labelUrl, { headers, signal: AbortSignal.timeout(15000) });
+        const lText = await lr.text();
+        console.log(`[HB Pack] Labelling HTTP ${lr.status} | ${lText.substring(0, 300)}`);
+
+        if (lr.ok) {
+          // Etiket başarıyla alındı — content-type'a göre parse et
+          const ct = lr.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            let lBody;
+            try { lBody = JSON.parse(lText); } catch { lBody = lText; }
+            labellingResult = { ok: true, status: lr.status, type: 'json', data: lBody };
+          } else if (ct.includes('application/pdf') || ct.includes('octet-stream')) {
+            // PDF bytes — base64 encode edip döndür (ön yüzde gösterilebilir)
+            labellingResult = { ok: true, status: lr.status, type: 'pdf', byteLength: lText.length, note: 'PDF kargo etiketi alındı' };
+          } else {
+            labellingResult = { ok: true, status: lr.status, type: ct, raw: lText.substring(0, 500) };
+          }
+          console.log(`[HB Pack] ✅ Labelling başarılı → paket "Packed" durumuna geçti`);
+        } else {
+          // Labelling başarısız — pack yine de geçerli (hata olarak işleme)
+          labellingResult = { ok: false, status: lr.status, error: lText.substring(0, 300) };
+          console.warn(`[HB Pack] ⚠️ Labelling başarısız HTTP ${lr.status}: ${lText.substring(0, 200)}`);
         }
-        console.log(`[HB Pack] ✅ Verify: package=${newPackageNumber} status=${hbVerifiedStatus?.status || 'kontrol edilemedi'}`);
       } catch (e) {
-        console.warn('[HB Pack] Verify hatası:', e.message);
+        labellingResult = { ok: false, error: e.message };
+        console.warn('[HB Pack] Labelling hatası:', e.message);
       }
     }
 
@@ -1383,10 +1399,14 @@ router.post('/hb-pack-order', async (req, res) => {
       hbPackageNumber: dbPackageNum,
       newPackageNumber,
       result,
-      hbVerifiedStatus,
-      guide: newPackageNumber
-        ? `HB portalinde "${newPackageNumber}" paket numarasını veya "${result?.data?.barcode || ''}" barkodunu aratın. Paket durumu API'de: ${hbVerifiedStatus?.status || 'bilinmiyor'}`
-        : 'Paket numarası alınamadı',
+      labellingResult,
+      guide: [
+        `✅ Pack: HTTP 201 → packageNumber=${newPackageNumber}`,
+        labellingResult?.ok
+          ? `✅ Labelling: HTTP ${labellingResult.status} → paket Packed durumuna geçti`
+          : `⚠️ Labelling: ${labellingResult?.status || 'hata'} → ${labellingResult?.error || 'kontrol edin'}`,
+        `HB portalinde paket numarası "${newPackageNumber}" veya barkod "${result?.data?.barcode || ''}" aratın`,
+      ].join(' | '),
     });
   } catch (err) {
     console.error('[HB Paketleme] Hata:', err.message);
