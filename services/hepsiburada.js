@@ -150,12 +150,15 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   const yesterday  = formatHBDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
   const week7ago   = formatHBDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
 
+  // Yeni merchant'larda HB, aktivasyon öncesi tarihleri reddeder.
+  // tarihsiz endpoint ilk sırada — çalışırsa en güvenilir yol.
+  // Tarihe dayalı sorgular ek güvence olarak arkada kalır.
   const ordersStrategies = [
-    { label: `son ${days} gün`,  params: { begindate, enddate } },
-    { label: 'son 7 gün',        params: { begindate: week7ago,  enddate: today } },
-    { label: 'dün+bugün',        params: { begindate: yesterday, enddate: today } },
-    { label: 'sadece bugün',     params: { begindate: today,     enddate: today } },
     { label: 'tarihsiz',         params: {} },
+    { label: 'sadece bugün',     params: { begindate: today,     enddate: today } },
+    { label: 'dün+bugün',        params: { begindate: yesterday, enddate: today } },
+    { label: 'son 7 gün',        params: { begindate: week7ago,  enddate: today } },
+    { label: `son ${days} gün`,  params: { begindate, enddate } },
   ];
 
   const ordersCallback = (item) => {
