@@ -314,19 +314,26 @@ function normalizeHBOpenOrder(order) {
 
   const items = (order.lineItems || order.orderLines || order.lines || order.items || []).map(line => ({
     item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-    barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || '').trim(),
+    barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
     sku:               line.merchantSku || line.sku || '',
     product_name:      line.name || line.productName || line.hepsiburadaSku || '',
     quantity:          parseInt(line.quantity || line.requestedQuantity || 1),
-    price:             parseFloat(line.price || line.salePrice || 0),
+    price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? line.salePrice ?? 0),
     raw_status:        rawStatus,
     status:            HB_STATUS_MAP[rawStatus] || 'bekliyor',
     status_tr:         HB_STATUS_TR[rawStatus] || 'Satıcıda Bekliyor',
     should_deduct:     false,
-    commission_amount: null,
-    commission_rate:   null,
+    commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? 0) || null,
+    commission_rate:   parseFloat(line.commissionRate ?? 0) || null,
     cargo_desi:        null,
   }));
+
+  // HB timestamps come without timezone ("2026-05-06T23:22:41.823") — treat as Turkey (UTC+3)
+  const parseHBDate = (str) => {
+    if (!str) return new Date();
+    if (str.includes('+') || str.endsWith('Z')) return new Date(str);
+    return new Date(str + '+03:00');
+  };
 
   return {
     platform:              'hepsiburada',
@@ -336,8 +343,8 @@ function normalizeHBOpenOrder(order) {
     status_tr:             HB_STATUS_TR[rawStatus] || 'Satıcıda Bekliyor',
     raw_status:            rawStatus,
     customer_name:         order.customer?.fullName || order.customerName || '',
-    order_date:            order.orderDate ? new Date(order.orderDate) : new Date(),
-    total_price:           parseFloat(order.totalPrice || order.grossAmount || 0),
+    order_date:            parseHBDate(order.orderDate),
+    total_price:           parseFloat(order.totalPrice?.amount ?? order.totalPrice ?? order.grossAmount ?? 0),
     currency:              'TRY',
     cargo_company:         null,
     cargo_tracking_number: null,
@@ -360,21 +367,28 @@ function normalizeHBPackage(pkg) {
   const statusTr   = HB_PKG_STATUS_TR[rawStatus] || HB_STATUS_TR[rawStatus] || rawStatus;
   const isReturned = HB_RETURN_STATUSES.has(rawStatus);
 
+  // HB timestamps come without timezone — treat as Turkey (UTC+3)
+  const parseHBDate = (str) => {
+    if (!str) return new Date();
+    if (str.includes('+') || str.endsWith('Z')) return new Date(str);
+    return new Date(str + '+03:00');
+  };
+
   const items = (pkg.lineItems || pkg.lines || pkg.items || []).map(line => {
     const lineStatus = line.status || rawStatus;
     return {
       item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-      barcode:           (line.barcode || line.merchantBarcode || '').trim(),
+      barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
       sku:               line.merchantSku || line.sku || '',
-      product_name:      line.name || line.productName || '',
+      product_name:      line.name || line.productName || line.hepsiburadaSku || '',
       quantity:          parseInt(line.quantity || 1),
-      price:             parseFloat(line.price || line.salePrice || 0),
+      price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? line.salePrice ?? 0),
       raw_status:        lineStatus,
       status:            HB_PKG_STATUS_MAP[lineStatus] || HB_STATUS_MAP[lineStatus] || internalSt,
       status_tr:         HB_PKG_STATUS_TR[lineStatus] || HB_STATUS_TR[lineStatus] || lineStatus,
       should_deduct:     HB_DEDUCT_STATUSES.has(rawStatus),
-      commission_amount: parseFloat(line.commissionAmount || line.merchantCommissionAmount || 0) || null,
-      commission_rate:   parseFloat(line.commissionRate   || line.merchantCommissionRate   || 0) || null,
+      commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? line.merchantCommissionAmount ?? 0) || null,
+      commission_rate:   parseFloat(line.commissionRate ?? line.merchantCommissionRate ?? 0) || null,
       cargo_desi:        parseFloat(line.desi || line.cargoDeciWeight || 0) || null,
     };
   });
@@ -398,8 +412,8 @@ function normalizeHBPackage(pkg) {
     status_tr:             statusTr,
     raw_status:            rawStatus,
     customer_name:         pkg.customer?.fullName || pkg.customerName || '',
-    order_date:            pkg.orderDate ? new Date(pkg.orderDate) : new Date(),
-    total_price:           parseFloat(pkg.totalPrice || pkg.grossAmount || 0),
+    order_date:            parseHBDate(pkg.orderDate),
+    total_price:           parseFloat(pkg.totalPrice?.amount ?? pkg.totalPrice ?? pkg.grossAmount ?? 0),
     currency:              'TRY',
     cargo_company:         pkg.cargoCompany || pkg.shippingCompany || null,
     cargo_tracking_number: pkg.trackingNumber || pkg.cargoTrackingNumber || null,

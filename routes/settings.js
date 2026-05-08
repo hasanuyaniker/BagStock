@@ -196,10 +196,11 @@ router.get('/marketplace-credentials', authMiddleware, async (req, res) => {
         configured: !!(creds.trendyol?.supplierId && creds.trendyol?.apiKey && creds.trendyol?.apiSecret)
       },
       hepsiburada: {
-        merchantId: creds.hepsiburada?.merchantId || '',
-        username:   creds.hepsiburada?.username   || '',
-        apiKey:     creds.hepsiburada?.apiKey ? '***' + (creds.hepsiburada.apiKey.slice(-4) || '') : '',
-        configured: !!(creds.hepsiburada?.merchantId && creds.hepsiburada?.username && creds.hepsiburada?.apiKey)
+        merchantId:  creds.hepsiburada?.merchantId  || '',
+        username:    creds.hepsiburada?.username     || '',
+        apiKey:      creds.hepsiburada?.apiKey ? '***' + (creds.hepsiburada.apiKey.slice(-4) || '') : '',
+        environment: creds.hepsiburada?.environment  || 'sit',
+        configured:  !!(creds.hepsiburada?.merchantId && creds.hepsiburada?.username && creds.hepsiburada?.apiKey)
       }
     };
     res.json(masked);
