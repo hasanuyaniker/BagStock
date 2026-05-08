@@ -159,23 +159,53 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   );
 
   // ── 2. Paketlenmiş siparişler (kargoda, teslim, iade vb.) ──────────────────
-  // ÖNEMLI: /packages/ endpoint'i SIT ortamında begindate/enddate VE timespan
-  // parametrelerini reddedip HTTP 400 döndürüyor (GetPackageLinesBadRequestError).
-  // Sadece limit + offset kullanılmalı — tarih filtresi yok.
-  // (pack route'daki fetchPackageInfo da aynı şekilde tarihsiz çalışıyor ve 200 dönüyor)
-  console.log('[HepsiB] /packages/ endpoint çekiliyor (tarih filtresi yok)...');
-  await fetchPaginated(
-    `${base}/packages/merchantid/${merchantId}`,
-    {},   // tarih parametresi yok — limit+offset fetchPaginated tarafından ekleniyor
-    headers,
-    (pkg) => {
-      const norm = normalizeHBPackage(pkg);
-      if (norm.order_id && !seenIds.has(norm.order_id)) {
-        seenIds.add(norm.order_id);
-        allOrders.push(norm);
+  // /packages/ endpoint'i ortama göre farklı davranır:
+  //   SIT:  tarihsiz çalışır ({} → 200), tarihli 400 döner
+  //   PROD: tarihsiz 400 dönebilir, tarihli çalışır VEYA merchant yeniyse tüm stratejiler 400 döner
+  // Strateji: birden fazla yaklaşım sırayla denenecek, ilk başarılı olanla devam edilecek
+  const today = formatHBDate(new Date());
+  const yesterday = formatHBDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const week7ago = formatHBDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+
+  const pkgStrategies = [
+    { label: 'tarihsiz',         params: {} },
+    { label: 'sadece bugün',     params: { begindate: today,     enddate: today } },
+    { label: 'dün+bugün',        params: { begindate: yesterday, enddate: today } },
+    { label: `son ${days} gün`,  params: { begindate, enddate } },
+    { label: 'son 7 gün',        params: { begindate: week7ago,  enddate: today } },
+  ];
+
+  let pkgFetched = false;
+  const pkgBase = `${base}/packages/merchantid/${merchantId}`;
+  const pkgCallback = (pkg) => {
+    const norm = normalizeHBPackage(pkg);
+    if (norm.order_id && !seenIds.has(norm.order_id)) {
+      seenIds.add(norm.order_id);
+      allOrders.push(norm);
+    }
+  };
+
+  for (const strategy of pkgStrategies) {
+    try {
+      console.log(`[HepsiB] /packages/ deneniyor: ${strategy.label} | params: ${JSON.stringify(strategy.params)}`);
+      await fetchPaginated(pkgBase, strategy.params, headers, pkgCallback);
+      console.log(`[HepsiB] /packages/ başarılı: ${strategy.label}`);
+      pkgFetched = true;
+      break;
+    } catch (e) {
+      if (e.message.includes('400') || e.message.includes('BadRequest')) {
+        console.warn(`[HepsiB] /packages/ strateji başarısız (${strategy.label}): ${e.message.substring(0, 120)}`);
+        // Sonraki stratejiyi dene
+      } else {
+        // 400 dışı hata (ağ hatası, 401, 500 vb.) — direkt fırlat
+        throw e;
       }
     }
-  );
+  }
+
+  if (!pkgFetched) {
+    console.warn('[HepsiB] /packages/ tüm stratejiler başarısız — paketler atlandı, sadece açık siparişler işlendi');
+  }
 
   console.log(`[HepsiB] Toplam ${allOrders.length} sipariş çekildi`);
   return allOrders;
