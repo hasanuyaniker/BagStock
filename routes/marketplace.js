@@ -499,23 +499,14 @@ router.get('/hb-raw-orders', async (req, res) => {
       // STUB: oluşturulan siparişleri listele (GET kendi endpoint'i varsa)
       { label: 'STUB_orders_list',     url: `${stubBase}/orders/merchantId/${creds.merchantId}` },
       { label: 'STUB_packages_list',   url: `${stubBase}/packages/merchantId/${creds.merchantId}` },
-      // Paketler: tarih filtresi yok
-      { label: 'packages_no_filter',   url: `${base}/packages/merchantid/${creds.merchantId}?limit=20&offset=0` },
-      // Paketler: geniş tarih aralığı (1 yıl)
-      { label: 'packages_wide',        url: `${base}/packages/merchantid/${creds.merchantId}?begindate=${formatHBDate(new Date(Date.now() - 365*24*3600*1000))}&enddate=${today}&limit=20&offset=0` },
-      // Paketler: status filtresiyle
-      { label: 'packages_created',     url: `${base}/packages/merchantid/${creds.merchantId}?status=Created&limit=20&offset=0` },
-      { label: 'packages_open',        url: `${base}/packages/merchantid/${creds.merchantId}?status=OPEN&limit=20&offset=0` },
+      // Paketler: tarih filtresi yok (tüm paketler)
+      { label: 'packages_no_filter',   url: `${base}/packages/merchantid/${creds.merchantId}?limit=100&offset=0` },
+      // Paketler: status filtresiyle — Packed (büyük P)
+      { label: 'packages_Packed',      url: `${base}/packages/merchantid/${creds.merchantId}?status=Packed&limit=20&offset=0` },
+      { label: 'packages_Created',     url: `${base}/packages/merchantid/${creds.merchantId}?status=Created&limit=20&offset=0` },
+      { label: 'packages_Open',        url: `${base}/packages/merchantid/${creds.merchantId}?status=Open&limit=20&offset=0` },
       // Siparişler: TARİH FİLTRESİ YOK (packages gibi) — lineItemId = items[i].id
       { label: 'orders_no_filter',     url: `${base}/orders/merchantid/${creds.merchantId}?limit=20&offset=0` },
-      // Siparişler: DOĞRU datetime formatı "yyyy-MM-dd HH:mm" (boşluklu)
-      { label: 'orders_datetime',      url: `${base}/orders/merchantid/${creds.merchantId}?begindate=${encodeURIComponent(start + ' 00:00')}&enddate=${encodeURIComponent(today + ' 23:59')}&limit=20&offset=0` },
-      // Ödemesi beklenen siparişler — stub siparişler burada olabilir
-      { label: 'orders_paymentawaiting', url: `${base}/orders/merchantid/${creds.merchantId}/paymentawaiting?limit=20&offset=0` },
-      // Siparişler: ISO tarih formatı
-      { label: 'orders_iso',           url: `${base}/orders/merchantid/${creds.merchantId}?begindate=${today}T00%3A00%3A00%2B03%3A00&enddate=${today}T23%3A59%3A59%2B03%3A00&limit=20&offset=0` },
-      // Siparişler: geniş aralık (eski YYYY-MM-DD format)
-      { label: 'orders_wide',          url: `${base}/orders/merchantid/${creds.merchantId}?begindate=${start}&enddate=${today}&limit=20&offset=0` },
     ];
 
     const results = {};
@@ -536,71 +527,35 @@ router.get('/hb-raw-orders', async (req, res) => {
           firstPackageNumber = firstItem.packageNumber || firstItem.id;
           firstPackageUuid   = firstItem.id;
         }
+        // packages_no_filter için TÜM paket listesini kaydet (status özeti için)
+        if (q.label === 'packages_no_filter' && Array.isArray(items)) {
+          results['ALL_PACKAGES_STATUS'] = items.map(p => ({
+            packageNumber: p.packageNumber || p.id || '?',
+            status:        p.status || p.packageStatus || p.state || 'YOK',
+            barcode:       p.barcode || '',
+            orderNumber:   p.orderNumber || p.merchantOrderNumber || '',
+            lineItemCount: (p.lineItems || p.lines || p.items || []).length,
+            // Tüm field adlarını göster (hangi field'da status var?)
+            allFields:     Object.keys(p),
+            rawJson:       p,
+          }));
+          // 5000121991 paketi özellikle işaretle
+          const targetPkg = items.find(p =>
+            String(p.packageNumber) === '5000121991' || String(p.id) === '5000121991'
+          );
+          results['TARGET_PACKAGE_5000121991'] = targetPkg
+            ? { found: true, status: targetPkg.status || targetPkg.packageStatus, full: targetPkg }
+            : { found: false, note: 'Pakette 5000121991 bulunamadı' };
+        }
+
         results[q.label] = {
           status: r.status, count,
-          sample: Array.isArray(items) ? items.slice(0, 2) : body,
+          sample: Array.isArray(items) ? items.slice(0, 3) : body,
           first_full: firstItem
         };
         console.log(`[HB Raw] ${q.label} → HTTP ${r.status} count=${count}`);
       } catch (e) {
         results[q.label] = { error: e.message };
-      }
-    }
-
-    // İlk paketin detayını çek — lineItems yapısını gör
-    if (firstPackageNumber) {
-      const detailAttempts = [
-        `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${firstPackageNumber}`,
-        `${base}/packages/merchantid/${creds.merchantId}/${firstPackageNumber}`,
-        `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${firstPackageNumber}/items`,
-        `${base}/packages/merchantid/${creds.merchantId}/${firstPackageNumber}/items`,
-        `${base}/packages/merchantid/${creds.merchantId}/${firstPackageNumber}/lineItems`,
-        ...(firstPackageUuid ? [
-          `${base}/packages/merchantid/${creds.merchantId}/packagenumber/${firstPackageUuid}`,
-          `${base}/packages/merchantid/${creds.merchantId}/${firstPackageUuid}`,
-        ] : []),
-      ];
-      for (const dUrl of detailAttempts) {
-        try {
-          const dr = await fetch(dUrl, { headers, signal: AbortSignal.timeout(8000) });
-          const dt = await dr.text();
-          let dbody;
-          try { dbody = JSON.parse(dt); } catch { dbody = dt; }
-          // Break yok — tüm URL'leri dene, hepsinin body'sini göster
-          results[`DETAIL:${dUrl.split('/').slice(-3).join('/')}`] = {
-            status: dr.status,
-            body: dbody,
-            // UI için sample/count alanları
-            sample: dbody,
-            count: 0
-          };
-        } catch (e) {
-          results[`DETAIL:${dUrl.split('/').slice(-3).join('/')}`] = { error: e.message };
-        }
-      }
-    }
-
-    // ── Paket tam JSON'ını döndür (truncate yok) ─────────────────────────────
-    // packages_no_filter'daki ilk paketin TÜM field'larını göster
-    if (firstPackageNumber) {
-      try {
-        const fullPkgUrl = `${base}/packages/merchantid/${creds.merchantId}?limit=2&offset=0`;
-        const fpr = await fetch(fullPkgUrl, { headers, signal: AbortSignal.timeout(10000) });
-        const fpt = await fpr.text();
-        let fpBody;
-        try { fpBody = JSON.parse(fpt); } catch { fpBody = fpt; }
-        const fpItems = Array.isArray(fpBody) ? fpBody : (fpBody?.data?.items || fpBody?.items || []);
-        results['FULL_PACKAGE_JSON'] = {
-          status: fpr.status,
-          count: fpItems.length,
-          // TAM JSON — truncate yok
-          first_full: fpItems[0] || null,
-          first_keys: fpItems[0] ? Object.keys(fpItems[0]) : [],
-          body: fpBody,
-          sample: fpItems[0] ? JSON.stringify(fpItems[0]) : null
-        };
-      } catch (fe) {
-        results['FULL_PACKAGE_JSON'] = { error: fe.message };
       }
     }
 
@@ -1385,7 +1340,35 @@ router.post('/hb-pack-order', async (req, res) => {
     console.log(`[HB Pack] FINAL routeLineItems (${routeLineItems.length}): ${JSON.stringify(routeLineItems)}`);
     const result = await packHBOrder(creds, hbPackageNumber, null, routeLineItems);
 
+    // ── Yeni paketin durumunu doğrula (API'den geri oku) ─────────────────────
+    const newPackageNumber = result?.data?.packageNumber || result?.raw?.match(/"packageNumber":"(\d+)"/)?.[1];
+    let hbVerifiedStatus = null;
+    if (newPackageNumber) {
+      try {
+        const { getHBBase, makeHBHeaders } = require('../services/hepsiburada');
+        const verifyUrl = `${getHBBase(creds.environment)}/packages/merchantid/${creds.merchantId}?limit=100&offset=0`;
+        const verifyHeaders = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
+        const vr = await fetch(verifyUrl, { headers: verifyHeaders, signal: AbortSignal.timeout(10000) });
+        if (vr.ok) {
+          const vBody = await vr.json();
+          const vItems = Array.isArray(vBody) ? vBody : (vBody?.items || vBody?.data?.items || []);
+          const found = vItems.find(p => String(p.packageNumber) === String(newPackageNumber));
+          hbVerifiedStatus = found ? {
+            packageNumber: found.packageNumber,
+            status:        found.status || found.packageStatus || 'BILINMIYOR',
+            barcode:       found.barcode,
+            allFields:     Object.keys(found),
+            raw:           found,
+          } : { note: `Paket ${newPackageNumber} listede bulunamadı`, totalPackages: vItems.length };
+        }
+        console.log(`[HB Pack] ✅ Verify: package=${newPackageNumber} status=${hbVerifiedStatus?.status || 'kontrol edilemedi'}`);
+      } catch (e) {
+        console.warn('[HB Pack] Verify hatası:', e.message);
+      }
+    }
+
     // Local DB'de durumu güncelle
+    const dbPackageNum = newPackageNumber || hbPackageNumber;
     await client.query(
       `UPDATE marketplace_orders
        SET status='bekliyor', status_tr='Paketlendi', raw_status='Packed',
@@ -1395,7 +1378,16 @@ router.post('/hb-pack-order', async (req, res) => {
       [String(bagstockOrderId), String(bagstockOrderId), `HBTEST-${merchantOrderNumber}`]
     );
 
-    res.json({ ok: true, hbPackageNumber, result });
+    res.json({
+      ok: true,
+      hbPackageNumber: dbPackageNum,
+      newPackageNumber,
+      result,
+      hbVerifiedStatus,
+      guide: newPackageNumber
+        ? `HB portalinde "${newPackageNumber}" paket numarasını veya "${result?.data?.barcode || ''}" barkodunu aratın. Paket durumu API'de: ${hbVerifiedStatus?.status || 'bilinmiyor'}`
+        : 'Paket numarası alınamadı',
+    });
   } catch (err) {
     console.error('[HB Paketleme] Hata:', err.message);
     res.status(502).json({ ok: false, error: err.message, attempted_packageNumber: err._pkgNum });
