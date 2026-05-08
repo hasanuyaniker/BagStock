@@ -144,28 +144,54 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   const seenIds   = new Set();
 
   // ── 1. Açık siparişler (ödemesi tamamlanmış, paketlenecek) ──────────────────
-  console.log('[HepsiB] /orders/ endpoint çekiliyor (OPEN siparişler)...');
-  await fetchPaginated(
-    `${base}/orders/merchantid/${merchantId}`,
-    { begindate, enddate },
-    headers,
-    (item) => {
-      const norm = normalizeHBOpenOrder(item);
-      if (norm.order_id && !seenIds.has(norm.order_id)) {
-        seenIds.add(norm.order_id);
-        allOrders.push(norm);
+  // Production'da yeni merchant'lar için uzun tarih aralığı (30 gün) 400 döndürebilir.
+  // Merchant aktivasyon tarihi öncesi sorgulama reddedilir. Çoklu strateji denen.
+  const today      = formatHBDate(new Date());
+  const yesterday  = formatHBDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const week7ago   = formatHBDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+
+  const ordersStrategies = [
+    { label: `son ${days} gün`,  params: { begindate, enddate } },
+    { label: 'son 7 gün',        params: { begindate: week7ago,  enddate: today } },
+    { label: 'dün+bugün',        params: { begindate: yesterday, enddate: today } },
+    { label: 'sadece bugün',     params: { begindate: today,     enddate: today } },
+    { label: 'tarihsiz',         params: {} },
+  ];
+
+  const ordersCallback = (item) => {
+    const norm = normalizeHBOpenOrder(item);
+    if (norm.order_id && !seenIds.has(norm.order_id)) {
+      seenIds.add(norm.order_id);
+      allOrders.push(norm);
+    }
+  };
+
+  let ordersFetched = false;
+  for (const strategy of ordersStrategies) {
+    try {
+      console.log(`[HepsiB] /orders/ deneniyor: ${strategy.label}`);
+      await fetchPaginated(`${base}/orders/merchantid/${merchantId}`, strategy.params, headers, ordersCallback);
+      console.log(`[HepsiB] /orders/ başarılı: ${strategy.label}`);
+      ordersFetched = true;
+      break;
+    } catch (e) {
+      if (e.message.includes('400') || e.message.includes('BadRequest')) {
+        console.warn(`[HepsiB] /orders/ strateji başarısız (${strategy.label}): ${e.message.substring(0, 120)}`);
+      } else {
+        throw e;
       }
     }
-  );
+  }
+  if (!ordersFetched) {
+    console.warn('[HepsiB] /orders/ tüm stratejiler başarısız — açık siparişler atlandı');
+  }
 
   // ── 2. Paketlenmiş siparişler (kargoda, teslim, iade vb.) ──────────────────
   // /packages/ endpoint'i ortama göre farklı davranır:
   //   SIT:  tarihsiz çalışır ({} → 200), tarihli 400 döner
   //   PROD: tarihsiz 400 dönebilir, tarihli çalışır VEYA merchant yeniyse tüm stratejiler 400 döner
   // Strateji: birden fazla yaklaşım sırayla denenecek, ilk başarılı olanla devam edilecek
-  const today = formatHBDate(new Date());
-  const yesterday = formatHBDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  const week7ago = formatHBDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+  // (today, yesterday, week7ago yukarıda tanımlı)
 
   const pkgStrategies = [
     { label: 'tarihsiz',         params: {} },
