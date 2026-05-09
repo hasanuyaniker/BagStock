@@ -1717,14 +1717,16 @@ async function upsertOrder(db, order) {
   try {
     await client.query('BEGIN');
 
-    // Kargo e-posta bildirimi için: mevcut durumu önceden oku
+    // Kargo e-posta bildirimi için: mevcut durumu ve kargoda_at'i önceden oku
     let prevStatus = null;
+    let prevKargodaAt = null;
     if (order.status === 'kargoda') {
       const prevRow = await client.query(
-        `SELECT status FROM marketplace_orders WHERE platform = $1 AND order_id = $2`,
+        `SELECT status, kargoda_at FROM marketplace_orders WHERE platform = $1 AND order_id = $2`,
         [order.platform, order.order_id]
       );
-      prevStatus = prevRow.rows[0]?.status || null;
+      prevStatus    = prevRow.rows[0]?.status     || null;
+      prevKargodaAt = prevRow.rows[0]?.kargoda_at || null;
     }
 
     // Siparişi upsert et (tüm yeni alanlarla)
@@ -1742,16 +1744,24 @@ async function upsertOrder(db, order) {
           kargoda_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (platform, order_id) DO UPDATE SET
-         -- Terminal durumlar (teslim_edildi, iade_onaylandi) bekliyor/kargoda'ya düşürülemez
+         -- Durum öncelik kuralları (geri düşme engeli):
+         --   teslim_edildi / iade_onaylandi → bekliyor/kargoda/iptal'a düşürülemez
+         --   kargoda → bekliyor veya iptal'a düşürülemez
          status = CASE
            WHEN marketplace_orders.status IN ('teslim_edildi','iade_onaylandi')
                 AND EXCLUDED.status IN ('bekliyor','kargoda','iptal')
+           THEN marketplace_orders.status
+           WHEN marketplace_orders.status = 'kargoda'
+                AND EXCLUDED.status IN ('bekliyor','iptal')
            THEN marketplace_orders.status
            ELSE EXCLUDED.status
          END,
          status_tr = CASE
            WHEN marketplace_orders.status IN ('teslim_edildi','iade_onaylandi')
                 AND EXCLUDED.status IN ('bekliyor','kargoda','iptal')
+           THEN marketplace_orders.status_tr
+           WHEN marketplace_orders.status = 'kargoda'
+                AND EXCLUDED.status IN ('bekliyor','iptal')
            THEN marketplace_orders.status_tr
            ELSE EXCLUDED.status_tr
          END,
@@ -1762,8 +1772,9 @@ async function upsertOrder(db, order) {
            ELSE marketplace_orders.kargoda_at
          END,
          raw_status           = EXCLUDED.raw_status,
-         customer_name        = EXCLUDED.customer_name,
-         total_price          = EXCLUDED.total_price,
+         customer_name        = COALESCE(NULLIF(EXCLUDED.customer_name,''), marketplace_orders.customer_name),
+         -- total_price: flat format paketlerden 0 gelirse mevcut değeri koru
+         total_price          = COALESCE(NULLIF(EXCLUDED.total_price, 0), marketplace_orders.total_price),
          cargo_status         = EXCLUDED.cargo_status,
          cargo_company        = COALESCE(EXCLUDED.cargo_company, marketplace_orders.cargo_company),
          cargo_tracking_number= COALESCE(EXCLUDED.cargo_tracking_number, marketplace_orders.cargo_tracking_number),
@@ -1820,10 +1831,15 @@ async function upsertOrder(db, order) {
              status            = EXCLUDED.status,
              raw_status        = EXCLUDED.raw_status,
              status_tr         = EXCLUDED.status_tr,
-             product_id        = COALESCE(EXCLUDED.product_id, marketplace_order_items.product_id),
+             -- Flat format'tan gelen boş/sıfır değerler mevcut veriyi silmesin
+             product_id        = COALESCE(EXCLUDED.product_id,        marketplace_order_items.product_id),
+             product_name      = COALESCE(NULLIF(EXCLUDED.product_name,''), marketplace_order_items.product_name),
+             barcode           = COALESCE(NULLIF(EXCLUDED.barcode,''),      marketplace_order_items.barcode),
+             quantity          = COALESCE(NULLIF(EXCLUDED.quantity,0),      marketplace_order_items.quantity),
+             price             = COALESCE(NULLIF(EXCLUDED.price,0),         marketplace_order_items.price),
              commission_amount = COALESCE(EXCLUDED.commission_amount, marketplace_order_items.commission_amount),
-             commission_rate   = COALESCE(EXCLUDED.commission_rate, marketplace_order_items.commission_rate),
-             cargo_desi        = COALESCE(EXCLUDED.cargo_desi, marketplace_order_items.cargo_desi),
+             commission_rate   = COALESCE(EXCLUDED.commission_rate,   marketplace_order_items.commission_rate),
+             cargo_desi        = COALESCE(EXCLUDED.cargo_desi,        marketplace_order_items.cargo_desi),
              stock_deducted    = TRUE`,
           [
             orderId,
@@ -1869,10 +1885,15 @@ async function upsertOrder(db, order) {
              status            = EXCLUDED.status,
              raw_status        = EXCLUDED.raw_status,
              status_tr         = EXCLUDED.status_tr,
-             product_id        = COALESCE(EXCLUDED.product_id, marketplace_order_items.product_id),
+             -- Flat format'tan gelen boş/sıfır değerler mevcut veriyi silmesin
+             product_id        = COALESCE(EXCLUDED.product_id,        marketplace_order_items.product_id),
+             product_name      = COALESCE(NULLIF(EXCLUDED.product_name,''), marketplace_order_items.product_name),
+             barcode           = COALESCE(NULLIF(EXCLUDED.barcode,''),      marketplace_order_items.barcode),
+             quantity          = COALESCE(NULLIF(EXCLUDED.quantity,0),      marketplace_order_items.quantity),
+             price             = COALESCE(NULLIF(EXCLUDED.price,0),         marketplace_order_items.price),
              commission_amount = COALESCE(EXCLUDED.commission_amount, marketplace_order_items.commission_amount),
-             commission_rate   = COALESCE(EXCLUDED.commission_rate, marketplace_order_items.commission_rate),
-             cargo_desi        = COALESCE(EXCLUDED.cargo_desi, marketplace_order_items.cargo_desi)
+             commission_rate   = COALESCE(EXCLUDED.commission_rate,   marketplace_order_items.commission_rate),
+             cargo_desi        = COALESCE(EXCLUDED.cargo_desi,        marketplace_order_items.cargo_desi)
            RETURNING id, stock_deducted`,
           [
             orderId,
@@ -1931,11 +1952,13 @@ async function upsertOrder(db, order) {
       await client.query('COMMIT');
     }
 
-    // Kargoya geçiş bildirimi — daha önce kargoda değilse her geçişte mail gönder
+    // Kargoya geçiş bildirimi
+    // Koşul: kargoda durumuna geçiş VE daha önce hiç kargoda_at set edilmemiş
+    // → kargoda_at kontrolü sayesinde aynı sipariş için tekrar mail gönderilmez
     if (order.status === 'kargoda') {
-      console.log(`[Mailer] Kontrol: #${order.order_number} prevStatus=${prevStatus||'(yeni)'} → kargoda`);
+      console.log(`[Mailer] Kontrol: #${order.order_number} prevStatus=${prevStatus||'(yeni)'} kargodaAt=${prevKargodaAt||'yok'}`);
     }
-    if (order.status === 'kargoda' && prevStatus !== 'kargoda') {
+    if (order.status === 'kargoda' && prevStatus !== 'kargoda' && !prevKargodaAt) {
       try {
         console.log(`[Mailer] Email tetiklendi → #${order.order_number}`);
         const { sendShippingNotification } = require('../services/mailer');

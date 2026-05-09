@@ -204,14 +204,17 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   // Her sorgu kendi rawStatus'unu taşır — normalizer'a iletilir.
   const pkgQueries = [
     // Open / Packed siparişler
+    // Open / Packed — timespan olmadan = sadece şu an aksiyon bekleyen paketler.
+    // NOT: timespan=720 kaldırıldı; bu parametre kargodaki paketleri Packed gibi
+    // döndürüp yanlış status yazımlarına ve tekrar mail gönderimlerine yol açıyordu.
     { url: pkgBase,                  params: {},               label: 'open-tarihsiz',        rawStatus: 'Packed'      },
-    { url: pkgBase,                  params: { timespan:'720'},label: 'open-720h',             rawStatus: 'Packed'      },
     // Kargoya verilen (shipped endpoint'i sadece tarihsiz çalışıyor)
     { url: `${pkgBase}/shipped`,     params: {},               label: 'shipped-tarihsiz',     rawStatus: 'Shipped'     },
     // Teslim edilen
     { url: `${pkgBase}/delivered`,   params: {},               label: 'delivered-tarihsiz',   rawStatus: 'Delivered'   },
-    // Teslim edilemeyen
-    { url: `${pkgBase}/undelivered`, params: {},               label: 'undelivered-tarihsiz', rawStatus: 'UnDelivered' },
+    // NOT: /undelivered endpoint'i kaldırıldı — kargoda durumundaki siparişleri
+    // yanlışlıkla 'iptal' olarak işaretliyordu. UnDelivered paketler upsertOrder'daki
+    // durum öncelik kuralları ile korunuyor.
   ];
 
   const pkgCallback = (pkg, forcedRawStatus) => {
