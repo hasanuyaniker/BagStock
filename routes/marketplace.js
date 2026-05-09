@@ -453,6 +453,46 @@ router.patch('/orders/:id/desi', async (req, res) => {
   }
 });
 
+// ── PATCH /api/marketplace/orders/:id/status ── Manuel durum güncelleme ───────
+router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
+  const STATUS_MAP = {
+    'bekliyor':        { status_tr: 'Satıcıda Bekliyor',  raw_status: 'OPEN'      },
+    'kargoda':         { status_tr: 'Kargoya Verildi',    raw_status: 'Shipped'   },
+    'teslim_edildi':   { status_tr: 'Teslim Edildi',      raw_status: 'Delivered' },
+    'iptal':           { status_tr: 'İptal Edildi',       raw_status: 'Cancelled' },
+    'iade_bekliyor':   { status_tr: 'İade Bekliyor',      raw_status: 'Returned'  },
+    'iade_onaylandi':  { status_tr: 'İade Onaylandı',     raw_status: 'ReturnAccepted' },
+  };
+  try {
+    const id     = parseInt(req.params.id);
+    const status = req.body.status;
+    if (isNaN(id)) return res.status(400).json({ error: 'Geçersiz sipariş ID' });
+    if (!STATUS_MAP[status]) return res.status(400).json({ error: `Geçersiz durum: ${status}. Kabul edilenler: ${Object.keys(STATUS_MAP).join(', ')}` });
+
+    const { status_tr, raw_status } = STATUS_MAP[status];
+    const result = await pool.query(
+      `UPDATE marketplace_orders
+       SET status=$1, status_tr=$2, raw_status=$3, updated_at=NOW()
+       WHERE id=$4
+       RETURNING id, order_number, platform, status, status_tr`,
+      [status, status_tr, raw_status, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+
+    // items tablosunu da güncelle
+    await pool.query(
+      `UPDATE marketplace_order_items SET status=$1, status_tr=$2, raw_status=$3 WHERE order_id=$4`,
+      [status, status_tr, raw_status, id]
+    );
+
+    console.log(`[Marketplace] Manuel durum güncelleme: sipariş #${id} → ${status}`);
+    res.json({ ok: true, order: result.rows[0] });
+  } catch (err) {
+    console.error('[Marketplace] Manuel durum güncelleme hatası:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/marketplace/orders/export ── CSV export ─────────────────────────
 router.get('/orders/export', async (req, res) => {
   try {

@@ -2381,7 +2381,7 @@ function renderOrders(orders, total) {
       <td class="col-platform">${platformBadge[order.platform] || escHtml(order.platform)}${manualTag}</td>
       <td class="col-order-no" style="font-family:monospace;font-size:11px;">${escHtml(order.order_number || order.order_id)}</td>
       <td class="col-date" style="font-size:11px;">${dateStr}</td>
-      <td class="col-status">${statusHtml}</td>
+      <td class="col-status">${statusHtml}<button onclick="editOrderStatus(${order.id},'${escHtml(order.status)}')" title="Durumu manuel güncelle" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;opacity:0.5;font-size:11px;">✏️</button></td>
       <td class="col-product">${itemsHtml}</td>
       <td class="col-price" style="font-weight:600;text-align:right;">${formatCurrency(price)}</td>
       <td class="col-comm" style="text-align:right;font-size:11px;">${commHtml}</td>
@@ -2432,6 +2432,47 @@ function renderOrdersPagination(total, currentPage) {
     html += `<button class="btn btn-secondary btn-sm" onclick="loadOrders(${currentPage + 1})">Sonraki →</button>`;
   }
   el.innerHTML = html;
+}
+
+// ── Manuel durum güncelleme ───────────────────────────────────────────────────
+
+const STATUS_OPTIONS = [
+  { value: 'bekliyor',       label: 'Bekliyor (Satıcıda)' },
+  { value: 'kargoda',        label: 'Kargoda' },
+  { value: 'teslim_edildi',  label: 'Teslim Edildi' },
+  { value: 'iptal',          label: 'İptal Edildi' },
+  { value: 'iade_bekliyor',  label: 'İade Bekliyor' },
+  { value: 'iade_onaylandi', label: 'İade Onaylandı' },
+];
+
+function editOrderStatus(orderId, currentStatus) {
+  const opts = STATUS_OPTIONS.map(o =>
+    `${o.value === currentStatus ? '✓ ' : '  '}${o.label} (${o.value})`
+  ).join('\n');
+  const choice = prompt(`Yeni durumu seçin (şu an: ${currentStatus}):\n\n${opts}\n\nDurum kodunu yazın:`, currentStatus);
+  if (!choice || choice === currentStatus) return;
+  const valid = STATUS_OPTIONS.find(o => o.value === choice.trim());
+  if (!valid) { showToast('Geçersiz durum kodu', 'error'); return; }
+  saveOrderStatus(orderId, choice.trim());
+}
+
+async function saveOrderStatus(orderId, status) {
+  try {
+    const res = await apiFetch(`/api/marketplace/orders/${orderId}/status`, {
+      method: 'PATCH',
+      body: { status }
+    });
+    if (!res) return;
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`Durum güncellendi: ${data.order.status_tr}`);
+      loadOrders(_ordersPage);
+    } else {
+      showToast(data.error || 'Durum kaydedilemedi', 'error');
+    }
+  } catch (err) {
+    showToast('Hata: ' + err.message, 'error');
+  }
 }
 
 // ── Desi düzenleme ───────────────────────────────────────────────────────────
