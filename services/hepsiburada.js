@@ -377,7 +377,16 @@ function normalizeHBPackage(pkg) {
     return new Date(str + '+03:00');
   };
 
-  const items = (pkg.lineItems || pkg.lines || pkg.items || []).map(line => {
+  // DEBUG — ilk pakette ham alanları logla, sonra kaldır
+  const rawLines = pkg.lineItems || pkg.lines || pkg.items || [];
+  if (rawLines.length > 0) {
+    console.log('[HepsiB][DEBUG] pkg.status:', pkg.status);
+    console.log('[HepsiB][DEBUG] pkg keys:', Object.keys(pkg).join(', '));
+    console.log('[HepsiB][DEBUG] line[0] keys:', Object.keys(rawLines[0]).join(', '));
+    console.log('[HepsiB][DEBUG] line[0] raw:', JSON.stringify(rawLines[0]).substring(0, 500));
+  }
+
+  const items = rawLines.map(line => {
     const lineStatus = line.status || rawStatus;
     return {
       item_id:           String(line.id || line.lineItemId || line.lineId || ''),
