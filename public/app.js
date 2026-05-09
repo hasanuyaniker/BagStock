@@ -2446,21 +2446,42 @@ const STATUS_OPTIONS = [
 ];
 
 function editOrderStatus(orderId, currentStatus) {
+  // Mevcut modal varsa kaldır
+  const existing = document.getElementById('statusModal');
+  if (existing) existing.remove();
+
   const currentLabel = STATUS_OPTIONS.find(o => o.value === currentStatus)?.label || currentStatus;
-  const opts = STATUS_OPTIONS.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
-  const msg = `Sipariş durumunu değiştir\nŞu an: ${currentLabel}\n\n${opts}\n\nSadece NUMARA girin (örn: 2):`;
-  const choice = prompt(msg, '');
-  if (!choice || !choice.trim()) return;
-  const idx = parseInt(choice.trim(), 10) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= STATUS_OPTIONS.length) {
-    alert(`Geçersiz seçim.\nLütfen 1 ile ${STATUS_OPTIONS.length} arasında bir numara girin.\n\n${opts}`);
-    return;
-  }
-  const selected = STATUS_OPTIONS[idx];
-  if (selected.value === currentStatus) return;
-  if (confirm(`"${currentLabel}" → "${selected.label}" olarak değiştirilsin mi?`)) {
-    saveOrderStatus(orderId, selected.value);
-  }
+
+  const optionsHtml = STATUS_OPTIONS.map(o => `
+    <button onclick="confirmStatusChange(${orderId},'${o.value}','${o.label}')"
+      style="display:block;width:100%;text-align:left;padding:8px 12px;margin:2px 0;
+             border:1px solid ${o.value === currentStatus ? '#3b82f6' : '#374151'};
+             border-radius:6px;background:${o.value === currentStatus ? '#1d4ed8' : '#1f2937'};
+             color:#fff;cursor:pointer;font-size:13px;">
+      ${o.value === currentStatus ? '✓ ' : ''}${o.label}
+    </button>`).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'statusModal';
+  modal.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;"
+         onclick="if(event.target===this)this.parentElement.remove()">
+      <div style="background:#111827;border:1px solid #374151;border-radius:12px;padding:20px;min-width:260px;max-width:340px;">
+        <div style="color:#9ca3af;font-size:12px;margin-bottom:12px;">Şu an: <strong style="color:#fff">${currentLabel}</strong></div>
+        ${optionsHtml}
+        <button onclick="document.getElementById('statusModal').remove()"
+          style="display:block;width:100%;padding:8px;margin-top:10px;border:1px solid #374151;
+                 border-radius:6px;background:transparent;color:#6b7280;cursor:pointer;font-size:12px;">
+          İptal
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function confirmStatusChange(orderId, statusValue, statusLabel) {
+  document.getElementById('statusModal')?.remove();
+  saveOrderStatus(orderId, statusValue);
 }
 
 async function saveOrderStatus(orderId, status) {
