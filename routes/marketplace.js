@@ -456,40 +456,125 @@ router.patch('/orders/:id/desi', async (req, res) => {
 // ── PATCH /api/marketplace/orders/:id/status ── Manuel durum güncelleme ───────
 router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
   const STATUS_MAP = {
-    'bekliyor':        { status_tr: 'Satıcıda Bekliyor',  raw_status: 'OPEN'      },
-    'kargoda':         { status_tr: 'Kargoya Verildi',    raw_status: 'Shipped'   },
-    'teslim_edildi':   { status_tr: 'Teslim Edildi',      raw_status: 'Delivered' },
-    'iptal':           { status_tr: 'İptal Edildi',       raw_status: 'Cancelled' },
-    'iade_bekliyor':   { status_tr: 'İade Bekliyor',      raw_status: 'Returned'  },
+    'bekliyor':        { status_tr: 'Satıcıda Bekliyor',  raw_status: 'OPEN'           },
+    'kargoda':         { status_tr: 'Kargoya Verildi',    raw_status: 'Shipped'        },
+    'teslim_edildi':   { status_tr: 'Teslim Edildi',      raw_status: 'Delivered'      },
+    'iptal':           { status_tr: 'İptal Edildi',       raw_status: 'Cancelled'      },
+    'iade_bekliyor':   { status_tr: 'İade Bekliyor',      raw_status: 'Returned'       },
     'iade_onaylandi':  { status_tr: 'İade Onaylandı',     raw_status: 'ReturnAccepted' },
   };
+  const DEDUCT_STATUSES = new Set(['kargoda', 'teslim_edildi']);
+  const client = await pool.connect();
   try {
     const id     = parseInt(req.params.id);
     const status = req.body.status;
     if (isNaN(id)) return res.status(400).json({ error: 'Geçersiz sipariş ID' });
-    if (!STATUS_MAP[status]) return res.status(400).json({ error: `Geçersiz durum: ${status}. Kabul edilenler: ${Object.keys(STATUS_MAP).join(', ')}` });
+    if (!STATUS_MAP[status]) return res.status(400).json({ error: `Geçersiz durum: ${status}` });
 
     const { status_tr, raw_status } = STATUS_MAP[status];
-    const result = await pool.query(
+
+    await client.query('BEGIN');
+
+    // Mevcut sipariş + stok durumunu oku
+    const prevRow = await client.query(
+      `SELECT mo.*, mo.status AS prev_status, mo.stock_deducted,
+              json_agg(json_build_object(
+                'id', moi.id, 'barcode', moi.barcode,
+                'quantity', moi.quantity, 'stock_deducted', moi.stock_deducted
+              )) AS items
+       FROM marketplace_orders mo
+       LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+       WHERE mo.id = $1
+       GROUP BY mo.id`,
+      [id]
+    );
+    if (!prevRow.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    }
+    const prev = prevRow.rows[0];
+    const prevStatus = prev.prev_status;
+
+    // Sipariş durumunu güncelle
+    const kargodaAt = status === 'kargoda' && prevStatus !== 'kargoda' ? 'NOW()' : 'kargoda_at';
+    await client.query(
       `UPDATE marketplace_orders
-       SET status=$1, status_tr=$2, raw_status=$3, updated_at=NOW()
-       WHERE id=$4
-       RETURNING id, order_number, platform, status, status_tr`,
+       SET status=$1, status_tr=$2, raw_status=$3,
+           kargoda_at = ${kargodaAt === 'NOW()' ? 'NOW()' : 'kargoda_at'},
+           updated_at = NOW()
+       WHERE id=$4`,
       [status, status_tr, raw_status, id]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Sipariş bulunamadı' });
 
-    // items tablosunu da güncelle
-    await pool.query(
+    // Items durumunu güncelle
+    await client.query(
       `UPDATE marketplace_order_items SET status=$1, status_tr=$2, raw_status=$3 WHERE marketplace_order_id=$4`,
       [status, status_tr, raw_status, id]
     );
 
-    console.log(`[Marketplace] Manuel durum güncelleme: sipariş #${id} → ${status}`);
-    res.json({ ok: true, order: result.rows[0] });
+    // Stok düşümü — kargoda/teslim ve henüz düşülmemişse
+    let deducted = 0;
+    if (DEDUCT_STATUSES.has(status) && !prev.stock_deducted) {
+      const items = prev.items || [];
+      for (const item of items) {
+        if (!item.barcode || item.stock_deducted) continue;
+        const prodRow = await client.query(
+          `SELECT id, name, stock_quantity FROM products
+           WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1`,
+          [item.barcode]
+        );
+        if (!prodRow.rows.length) continue;
+        const product = prodRow.rows[0];
+        const qty     = parseInt(item.quantity) || 1;
+        const newStock = Math.max(0, product.stock_quantity - qty);
+        await client.query(
+          'UPDATE products SET stock_quantity=$1, updated_at=NOW() WHERE id=$2',
+          [newStock, product.id]
+        );
+        await client.query(
+          'UPDATE marketplace_order_items SET stock_deducted=TRUE WHERE id=$1',
+          [item.id]
+        );
+        const saleDate = new Date().toISOString().split('T')[0];
+        await client.query(
+          `INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [product.id, -qty, saleDate, `Manuel #${prev.order_number}`, prev.platform]
+        );
+        deducted++;
+        console.log(`[Manuel] Stok düşüldü: ${product.name} ${product.stock_quantity}→${newStock}`);
+      }
+      if (deducted > 0) {
+        await client.query(
+          'UPDATE marketplace_orders SET stock_deducted=TRUE, updated_at=NOW() WHERE id=$1', [id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Kargo e-postası — bekliyor → kargoda geçişinde
+    if (status === 'kargoda' && prevStatus === 'bekliyor') {
+      try {
+        const { sendShippingNotification } = require('../services/mailer');
+        await sendShippingNotification({
+          platform: prev.platform, order_number: prev.order_number,
+          customer_name: prev.customer_name, id
+        });
+        console.log(`[Manuel] Kargo e-postası gönderildi → #${prev.order_number}`);
+      } catch (mailErr) {
+        console.warn('[Manuel] E-posta hatası:', mailErr.message);
+      }
+    }
+
+    console.log(`[Manuel] #${prev.order_number}: ${prevStatus} → ${status} | stok: ${deducted}`);
+    res.json({ ok: true, status, status_tr, deducted });
   } catch (err) {
-    console.error('[Marketplace] Manuel durum güncelleme hatası:', err);
+    await client.query('ROLLBACK');
+    console.error('[Manuel] Durum güncelleme hatası:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
