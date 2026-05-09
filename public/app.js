@@ -2381,7 +2381,7 @@ function renderOrders(orders, total) {
       <td class="col-platform">${platformBadge[order.platform] || escHtml(order.platform)}${manualTag}</td>
       <td class="col-order-no" style="font-family:monospace;font-size:11px;">${escHtml(order.order_number || order.order_id)}</td>
       <td class="col-date" style="font-size:11px;">${dateStr}</td>
-      <td class="col-status">${statusHtml}<button onclick="editOrderStatus(${order.id},'${escHtml(order.status)}')" title="Durumu manuel güncelle" style="background:none;border:none;cursor:pointer;padding:0 0 0 4px;opacity:0.5;font-size:11px;">✏️</button></td>
+      <td class="col-status">${statusHtml}</td>
       <td class="col-product">${itemsHtml}</td>
       <td class="col-price" style="font-weight:600;text-align:right;">${formatCurrency(price)}</td>
       <td class="col-comm" style="text-align:right;font-size:11px;">${commHtml}</td>
@@ -2434,74 +2434,7 @@ function renderOrdersPagination(total, currentPage) {
   el.innerHTML = html;
 }
 
-// ── Manuel durum güncelleme ───────────────────────────────────────────────────
-
-const STATUS_OPTIONS = [
-  { value: 'bekliyor',       label: 'Bekliyor (Satıcıda)' },
-  { value: 'kargoda',        label: 'Kargoda' },
-  { value: 'teslim_edildi',  label: 'Teslim Edildi' },
-  { value: 'iptal',          label: 'İptal Edildi' },
-  { value: 'iade_bekliyor',  label: 'İade Bekliyor' },
-  { value: 'iade_onaylandi', label: 'İade Onaylandı' },
-];
-
-function editOrderStatus(orderId, currentStatus) {
-  // Mevcut modal varsa kaldır
-  const existing = document.getElementById('statusModal');
-  if (existing) existing.remove();
-
-  const currentLabel = STATUS_OPTIONS.find(o => o.value === currentStatus)?.label || currentStatus;
-
-  const optionsHtml = STATUS_OPTIONS.map(o => `
-    <button onclick="confirmStatusChange(${orderId},'${o.value}','${o.label}')"
-      style="display:block;width:100%;text-align:left;padding:8px 12px;margin:2px 0;
-             border:1px solid ${o.value === currentStatus ? '#3b82f6' : '#374151'};
-             border-radius:6px;background:${o.value === currentStatus ? '#1d4ed8' : '#1f2937'};
-             color:#fff;cursor:pointer;font-size:13px;">
-      ${o.value === currentStatus ? '✓ ' : ''}${o.label}
-    </button>`).join('');
-
-  const modal = document.createElement('div');
-  modal.id = 'statusModal';
-  modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;"
-         onclick="if(event.target===this)this.parentElement.remove()">
-      <div style="background:#111827;border:1px solid #374151;border-radius:12px;padding:20px;min-width:260px;max-width:340px;">
-        <div style="color:#9ca3af;font-size:12px;margin-bottom:12px;">Şu an: <strong style="color:#fff">${currentLabel}</strong></div>
-        ${optionsHtml}
-        <button onclick="document.getElementById('statusModal').remove()"
-          style="display:block;width:100%;padding:8px;margin-top:10px;border:1px solid #374151;
-                 border-radius:6px;background:transparent;color:#6b7280;cursor:pointer;font-size:12px;">
-          İptal
-        </button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-}
-
-function confirmStatusChange(orderId, statusValue, statusLabel) {
-  document.getElementById('statusModal')?.remove();
-  saveOrderStatus(orderId, statusValue);
-}
-
-async function saveOrderStatus(orderId, status) {
-  try {
-    const res = await apiFetch(`/api/marketplace/orders/${orderId}/status`, {
-      method: 'PATCH',
-      body: { status }
-    });
-    if (!res) return;
-    const data = await res.json();
-    if (data.ok) {
-      showToast(`Durum güncellendi: ${data.order.status_tr}`);
-      loadOrders(_ordersPage);
-    } else {
-      showToast(data.error || 'Durum kaydedilemedi', 'error');
-    }
-  } catch (err) {
-    showToast('Hata: ' + err.message, 'error');
-  }
-}
+// ── Desi düzenleme (manuel durum güncelleme kaldırıldı — sync otomatik yapar) ─
 
 // ── Desi düzenleme ───────────────────────────────────────────────────────────
 

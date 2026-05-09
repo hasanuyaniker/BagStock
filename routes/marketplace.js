@@ -1931,11 +1931,11 @@ async function upsertOrder(db, order) {
       await client.query('COMMIT');
     }
 
-    // Kargoya geçiş bildirimi — sadece bekliyor → kargoda geçişinde
+    // Kargoya geçiş bildirimi — daha önce kargoda değilse her geçişte mail gönder
     if (order.status === 'kargoda') {
       console.log(`[Mailer] Kontrol: #${order.order_number} prevStatus=${prevStatus||'(yeni)'} → kargoda`);
     }
-    if (order.status === 'kargoda' && prevStatus === 'bekliyor') {
+    if (order.status === 'kargoda' && prevStatus !== 'kargoda') {
       try {
         console.log(`[Mailer] Email tetiklendi → #${order.order_number}`);
         const { sendShippingNotification } = require('../services/mailer');
