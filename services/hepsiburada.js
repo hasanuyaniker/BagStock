@@ -197,30 +197,25 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   // NOT: Base endpoint'te status query param YOKTUR — dokümanda tanımlanmamış.
   //      timespan parametresi destekleniyor (son N saat).
 
-  const pkgBase    = `${base}/packages/merchantid/${merchantId}`;
-  const activation = '2026-05-08'; // merchant aktivasyon tarihi (bu tarih öncesi 400 döner)
+  const pkgBase = `${base}/packages/merchantid/${merchantId}`;
 
-  // Her endpoint için sorgu tanımları: [url_suffix, params, log_label, rawStatus]
+  // Tarihli sorgular /shipped ve /delivered endpoint'lerinde WrongDateFormat veriyor.
+  // Bu nedenle sadece tarihsiz sorgular kullanılıyor.
+  // Her sorgu kendi rawStatus'unu taşır — normalizer'a iletilir.
   const pkgQueries = [
-    // Open / Packed siparişler (tarihsiz)
-    { url: pkgBase,                      params: {},                                              label: 'open-tarihsiz',      rawStatus: 'Open'      },
-    { url: pkgBase,                      params: { timespan: '720' },                             label: 'open-720h',          rawStatus: 'Open'      },
-    // Kargoya verilen siparişler
-    { url: `${pkgBase}/shipped`,         params: { begindate: activation, enddate: today },       label: 'shipped-aktif',      rawStatus: 'Shipped'   },
-    { url: `${pkgBase}/shipped`,         params: { begindate: yesterday,  enddate: today },       label: 'shipped-dünbugün',   rawStatus: 'Shipped'   },
-    { url: `${pkgBase}/shipped`,         params: { begindate: week7ago,   enddate: today },       label: 'shipped-7gün',       rawStatus: 'Shipped'   },
-    { url: `${pkgBase}/shipped`,         params: {},                                              label: 'shipped-tarihsiz',   rawStatus: 'Shipped'   },
-    // Teslim edilen siparişler
-    { url: `${pkgBase}/delivered`,       params: { begindate: activation, enddate: today },       label: 'delivered-aktif',    rawStatus: 'Delivered' },
-    { url: `${pkgBase}/delivered`,       params: { begindate: week7ago,   enddate: today },       label: 'delivered-7gün',     rawStatus: 'Delivered' },
-    { url: `${pkgBase}/delivered`,       params: {},                                              label: 'delivered-tarihsiz', rawStatus: 'Delivered' },
-    // Teslim edilemeyen siparişler
-    { url: `${pkgBase}/undelivered`,     params: { begindate: activation, enddate: today },       label: 'undelivered-aktif',  rawStatus: 'UnDelivered' },
-    { url: `${pkgBase}/undelivered`,     params: {},                                              label: 'undelivered-tarihsiz', rawStatus: 'UnDelivered' },
+    // Open / Packed siparişler
+    { url: pkgBase,                  params: {},               label: 'open-tarihsiz',        rawStatus: 'Packed'      },
+    { url: pkgBase,                  params: { timespan:'720'},label: 'open-720h',             rawStatus: 'Packed'      },
+    // Kargoya verilen (shipped endpoint'i sadece tarihsiz çalışıyor)
+    { url: `${pkgBase}/shipped`,     params: {},               label: 'shipped-tarihsiz',     rawStatus: 'Shipped'     },
+    // Teslim edilen
+    { url: `${pkgBase}/delivered`,   params: {},               label: 'delivered-tarihsiz',   rawStatus: 'Delivered'   },
+    // Teslim edilemeyen
+    { url: `${pkgBase}/undelivered`, params: {},               label: 'undelivered-tarihsiz', rawStatus: 'UnDelivered' },
   ];
 
-  const pkgCallback = (pkg) => {
-    const norm = normalizeHBPackage(pkg);
+  const pkgCallback = (pkg, forcedRawStatus) => {
+    const norm = normalizeHBPackage(pkg, forcedRawStatus);
     if (norm.order_id && !seenIds.has(norm.order_id)) {
       seenIds.add(norm.order_id);
       allOrders.push(norm);
@@ -232,7 +227,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     try {
       console.log(`[HepsiB] /packages/ ${q.label} | ${q.url.split('/').slice(-2).join('/')} | params: ${JSON.stringify(q.params)}`);
       const beforeCount = allOrders.length;
-      await fetchPaginated(q.url, q.params, headers, pkgCallback);
+      await fetchPaginated(q.url, q.params, headers, (pkg) => pkgCallback(pkg, q.rawStatus));
       const added = allOrders.length - beforeCount;
       if (added > 0) {
         console.log(`[HepsiB] /packages/ ${q.label}: +${added} yeni paket`);
@@ -383,9 +378,16 @@ function normalizeHBOpenOrder(order) {
   };
 }
 
-/** Paket normalleştiricisi (/packages endpoint'i) */
-function normalizeHBPackage(pkg) {
-  const rawStatus  = pkg.status || '';
+/**
+ * Paket normalleştiricisi — iki farklı HB endpoint formatını destekler:
+ *  A) Base /packages/ → camelCase, lineItems dizisi var
+ *  B) /shipped, /delivered, /undelivered → PascalCase, düz paket kaydı (line items yok)
+ *
+ * forcedRawStatus: çağıran endpoint'in bilinen status değeri (B formatı için zorunlu)
+ */
+function normalizeHBPackage(pkg, forcedRawStatus) {
+  // A formatı: pkg.status var | B formatı: yoksa forcedRawStatus kullan
+  const rawStatus  = pkg.status || pkg.Status || forcedRawStatus || '';
   const internalSt = HB_PKG_STATUS_MAP[rawStatus] || HB_STATUS_MAP[rawStatus] || 'bekliyor';
   const statusTr   = HB_PKG_STATUS_TR[rawStatus] || HB_STATUS_TR[rawStatus] || rawStatus;
   const isReturned = HB_RETURN_STATUSES.has(rawStatus);
@@ -397,44 +399,72 @@ function normalizeHBPackage(pkg) {
     return new Date(str + '+03:00');
   };
 
-  // DEBUG — ilk pakette ham alanları logla, sonra kaldır
+  // B formatı (shipped/delivered) PascalCase kullanır ve line items içermez.
+  // Bu durumda paketteki Barcode alanından sentetik bir item oluştururuz.
   const rawLines = pkg.lineItems || pkg.lines || pkg.items || [];
-  if (rawLines.length > 0) {
-    console.log('[HepsiB][DEBUG] pkg.status:', pkg.status);
-    console.log('[HepsiB][DEBUG] pkg keys:', Object.keys(pkg).join(', '));
-    console.log('[HepsiB][DEBUG] line[0] keys:', Object.keys(rawLines[0]).join(', '));
-    console.log('[HepsiB][DEBUG] line[0] raw:', JSON.stringify(rawLines[0]).substring(0, 500));
+  const isFlatFormat = rawLines.length === 0 && (pkg.Barcode || pkg.PackageNumber);
+
+  let items;
+  if (isFlatFormat) {
+    // Flat format: /shipped, /delivered, /undelivered endpoint'leri
+    const pkgBarcode = (pkg.Barcode || pkg.barcode || '').trim();
+    const pkgDesi    = parseFloat(pkg.Deci || pkg.deci || 0) || null;
+    items = pkgBarcode ? [{
+      item_id:           String(pkg.Id || pkg.id || ''),
+      barcode:           pkgBarcode,
+      sku:               '',
+      product_name:      '',
+      quantity:          1,
+      price:             0,
+      raw_status:        rawStatus,
+      status:            internalSt,
+      status_tr:         statusTr,
+      should_deduct:     HB_DEDUCT_STATUSES.has(rawStatus),
+      commission_amount: null,
+      commission_rate:   null,
+      cargo_desi:        pkgDesi,
+    }] : [];
+  } else {
+    // Full format: base /packages/ endpoint'i — line items var
+    items = rawLines.map(line => {
+      const lineStatus = line.status || rawStatus;
+      return {
+        item_id:           String(line.id || line.lineItemId || line.lineId || ''),
+        barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
+        sku:               line.merchantSku || line.sku || '',
+        product_name:      line.name || line.productName || line.hepsiburadaSku || '',
+        quantity:          parseInt(line.quantity || 1),
+        price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? line.salePrice ?? 0),
+        raw_status:        lineStatus,
+        status:            HB_PKG_STATUS_MAP[lineStatus] || HB_STATUS_MAP[lineStatus] || internalSt,
+        status_tr:         HB_PKG_STATUS_TR[lineStatus] || HB_STATUS_TR[lineStatus] || lineStatus,
+        should_deduct:     HB_DEDUCT_STATUSES.has(rawStatus),
+        commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? line.merchantCommissionAmount ?? 0) || null,
+        commission_rate:   parseFloat(line.commissionRate ?? line.merchantCommissionRate ?? 0) || null,
+        cargo_desi:        parseFloat(line.desi || line.cargoDeciWeight || 0) || null,
+      };
+    });
   }
 
-  const items = rawLines.map(line => {
-    const lineStatus = line.status || rawStatus;
-    return {
-      item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-      barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
-      sku:               line.merchantSku || line.sku || '',
-      product_name:      line.name || line.productName || line.hepsiburadaSku || '',
-      quantity:          parseInt(line.quantity || 1),
-      price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? line.salePrice ?? 0),
-      raw_status:        lineStatus,
-      status:            HB_PKG_STATUS_MAP[lineStatus] || HB_STATUS_MAP[lineStatus] || internalSt,
-      status_tr:         HB_PKG_STATUS_TR[lineStatus] || HB_STATUS_TR[lineStatus] || lineStatus,
-      should_deduct:     HB_DEDUCT_STATUSES.has(rawStatus),
-      commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? line.merchantCommissionAmount ?? 0) || null,
-      commission_rate:   parseFloat(line.commissionRate ?? line.merchantCommissionRate ?? 0) || null,
-      cargo_desi:        parseFloat(line.desi || line.cargoDeciWeight || 0) || null,
-    };
-  });
-
-  const totalCommission  = items.reduce((s, i) => s + (i.commission_amount || 0), 0);
-  const commRates        = items.filter(i => i.commission_rate).map(i => i.commission_rate);
+  const totalCommission   = items.reduce((s, i) => s + (i.commission_amount || 0), 0);
+  const commRates         = items.filter(i => i.commission_rate).map(i => i.commission_rate);
   const avgCommissionRate = commRates.length
     ? Math.round(commRates.reduce((a,b)=>a+b,0) / commRates.length * 100) / 100
     : null;
   const totalDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
 
+  // orderId: her iki format için fallback zinciri
   const orderId = String(
-    pkg.orderNumber || pkg.packageNumber || pkg.id || pkg.packageId || ''
+    pkg.OrderNumber || pkg.orderNumber ||
+    pkg.PackageNumber || pkg.packageNumber ||
+    pkg.Id || pkg.id || pkg.packageId || ''
   );
+
+  // order_date: flat format ShippedDate/DeliveredDate kullanır
+  const dateStr = pkg.ShippedDate || pkg.DeliveredDate || pkg.UnDeliveredDate || pkg.orderDate;
+
+  // cargo_desi: flat format Deci (PascalCase)
+  const pkgDesi = parseFloat(pkg.Deci || pkg.desi || 0) || null;
 
   return {
     platform:              'hepsiburada',
@@ -444,7 +474,7 @@ function normalizeHBPackage(pkg) {
     status_tr:             statusTr,
     raw_status:            rawStatus,
     customer_name:         pkg.customer?.fullName || pkg.customerName || '',
-    order_date:            parseHBDate(pkg.orderDate),
+    order_date:            parseHBDate(dateStr),
     total_price:           parseFloat(pkg.totalPrice?.amount ?? pkg.totalPrice ?? pkg.grossAmount ?? 0),
     currency:              'TRY',
     cargo_company:         pkg.cargoCompany || pkg.shippingCompany || null,
@@ -453,7 +483,7 @@ function normalizeHBPackage(pkg) {
     cargo_cost:            parseFloat(pkg.shippingCost || 0) || null,
     commission_amount:     totalCommission > 0 ? totalCommission : null,
     commission_rate:       avgCommissionRate,
-    cargo_desi:            totalDesi > 0 ? totalDesi : null,
+    cargo_desi:            totalDesi > 0 ? totalDesi : pkgDesi,
     is_returned:           isReturned,
     return_reason:         isReturned ? (pkg.returnReason || '') : null,
     return_date:           isReturned && pkg.returnDate ? new Date(pkg.returnDate) : null,

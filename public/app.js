@@ -2446,19 +2446,21 @@ const STATUS_OPTIONS = [
 ];
 
 function editOrderStatus(orderId, currentStatus) {
-  const opts = STATUS_OPTIONS.map((o, i) =>
-    `${i + 1}. ${o.label}`
-  ).join('\n');
-  const choice = prompt(`Yeni durumu seçin (şu an: ${currentStatus}):\n\n${opts}\n\nNumara girin (1-${STATUS_OPTIONS.length}):`, '');
-  if (!choice) return;
-  const idx = parseInt(choice.trim()) - 1;
+  const currentLabel = STATUS_OPTIONS.find(o => o.value === currentStatus)?.label || currentStatus;
+  const opts = STATUS_OPTIONS.map((o, i) => `${i + 1}. ${o.label}`).join('\n');
+  const msg = `Sipariş durumunu değiştir\nŞu an: ${currentLabel}\n\n${opts}\n\nSadece NUMARA girin (örn: 2):`;
+  const choice = prompt(msg, '');
+  if (!choice || !choice.trim()) return;
+  const idx = parseInt(choice.trim(), 10) - 1;
   if (isNaN(idx) || idx < 0 || idx >= STATUS_OPTIONS.length) {
-    showToast('Geçersiz seçim — 1 ile ' + STATUS_OPTIONS.length + ' arası numara girin', 'error');
+    alert(`Geçersiz seçim.\nLütfen 1 ile ${STATUS_OPTIONS.length} arasında bir numara girin.\n\n${opts}`);
     return;
   }
   const selected = STATUS_OPTIONS[idx];
   if (selected.value === currentStatus) return;
-  saveOrderStatus(orderId, selected.value);
+  if (confirm(`"${currentLabel}" → "${selected.label}" olarak değiştirilsin mi?`)) {
+    saveOrderStatus(orderId, selected.value);
+  }
 }
 
 async function saveOrderStatus(orderId, status) {
