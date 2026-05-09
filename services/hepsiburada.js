@@ -281,6 +281,11 @@ async function fetchPaginated(baseUrl, extraParams, headers, onItem) {
 
     const items = extractItems(data);
     console.log(`[HepsiB] ${items.length} kayıt alındı (offset=${offset})`);
+    // DEBUG — ilk item'ın ham yapısını logla
+    if (items.length > 0 && offset === 0) {
+      console.log('[HepsiB][DEBUG] item[0] keys:', Object.keys(items[0]).join(', '));
+      console.log('[HepsiB][DEBUG] item[0]:', JSON.stringify(items[0]).substring(0, 800));
+    }
 
     if (!items.length) { hasMore = false; break; }
 
