@@ -189,34 +189,34 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     console.warn('[HepsiB] /orders/ tüm stratejiler başarısız — açık siparişler atlandı');
   }
 
-  // ── 2. Paketlenmiş siparişler (kargoda, teslim, iade vb.) ──────────────────
-  // /packages/ endpoint'i ortama göre farklı davranır:
-  //   SIT:  tarihsiz çalışır ({} → 200), tarihli 400 döner
-  //   PROD: tarihsiz 400 dönebilir, tarihli çalışır VEYA merchant yeniyse tüm stratejiler 400 döner
-  // Packages endpoint'i status'e göre ayrı ayrı sorgula.
-  // Tarihsiz sorgu sadece Open/Packed döndürüyor; Shipped/Delivered için tarihli sorgu gerekiyor.
-  // Aktivasyon tarihi: 2026-05-08 — ondan önceki tarihler 400 veriyor.
-  // Her kombinezon ayrı çalışır, benzersiz paketler toplanır (break yok).
-  const pkgBase = `${base}/packages/merchantid/${merchantId}`;
+  // ── 2. Paketler — HB'nin status bazlı AYRI endpoint'leri var ─────────────────
+  // Dok: /packages/merchantid/{id}           → Open/Packed (aksiyon bekleyenler)
+  //      /packages/merchantid/{id}/shipped   → Kargoya Verilen
+  //      /packages/merchantid/{id}/delivered → Teslim Edilen
+  //      /packages/merchantid/{id}/undelivered→ Teslim Edilemedi
+  // NOT: Base endpoint'te status query param YOKTUR — dokümanda tanımlanmamış.
+  //      timespan parametresi destekleniyor (son N saat).
 
-  // 1) Tarihsiz (Open/Packed paketler için)
-  const pkgStatusQueries = [
-    { label: 'tarihsiz-genel',   params: {} },
-    { label: 'tarihsiz-Packed',  params: { status: 'Packed'    } },
-    { label: 'tarihsiz-Created', params: { status: 'Created'   } },
-    { label: 'tarihsiz-Open',    params: { status: 'Open'      } },
-  ];
+  const pkgBase    = `${base}/packages/merchantid/${merchantId}`;
+  const activation = '2026-05-08'; // merchant aktivasyon tarihi (bu tarih öncesi 400 döner)
 
-  // 2) Tarihli (Shipped/Delivered için — aktivasyon tarihinden itibaren)
-  const activation = '2026-05-08'; // merchant aktivasyon tarihi
-  const pkgDateQueries = [
-    { label: `Shipped-bugün`,    params: { status: 'Shipped',   begindate: today,      enddate: today      } },
-    { label: `Shipped-7gün`,     params: { status: 'Shipped',   begindate: week7ago,   enddate: today      } },
-    { label: `Shipped-aktif`,    params: { status: 'Shipped',   begindate: activation, enddate: today      } },
-    { label: `Delivered-7gün`,   params: { status: 'Delivered', begindate: week7ago,   enddate: today      } },
-    { label: `Delivered-aktif`,  params: { status: 'Delivered', begindate: activation, enddate: today      } },
-    { label: `tarihli-aktif`,    params: {                       begindate: activation, enddate: today      } },
-    { label: `tarihli-bugün`,    params: {                       begindate: today,      enddate: today      } },
+  // Her endpoint için sorgu tanımları: [url_suffix, params, log_label, rawStatus]
+  const pkgQueries = [
+    // Open / Packed siparişler (tarihsiz)
+    { url: pkgBase,                      params: {},                                              label: 'open-tarihsiz',      rawStatus: 'Open'      },
+    { url: pkgBase,                      params: { timespan: '720' },                             label: 'open-720h',          rawStatus: 'Open'      },
+    // Kargoya verilen siparişler
+    { url: `${pkgBase}/shipped`,         params: { begindate: activation, enddate: today },       label: 'shipped-aktif',      rawStatus: 'Shipped'   },
+    { url: `${pkgBase}/shipped`,         params: { begindate: yesterday,  enddate: today },       label: 'shipped-dünbugün',   rawStatus: 'Shipped'   },
+    { url: `${pkgBase}/shipped`,         params: { begindate: week7ago,   enddate: today },       label: 'shipped-7gün',       rawStatus: 'Shipped'   },
+    { url: `${pkgBase}/shipped`,         params: {},                                              label: 'shipped-tarihsiz',   rawStatus: 'Shipped'   },
+    // Teslim edilen siparişler
+    { url: `${pkgBase}/delivered`,       params: { begindate: activation, enddate: today },       label: 'delivered-aktif',    rawStatus: 'Delivered' },
+    { url: `${pkgBase}/delivered`,       params: { begindate: week7ago,   enddate: today },       label: 'delivered-7gün',     rawStatus: 'Delivered' },
+    { url: `${pkgBase}/delivered`,       params: {},                                              label: 'delivered-tarihsiz', rawStatus: 'Delivered' },
+    // Teslim edilemeyen siparişler
+    { url: `${pkgBase}/undelivered`,     params: { begindate: activation, enddate: today },       label: 'undelivered-aktif',  rawStatus: 'UnDelivered' },
+    { url: `${pkgBase}/undelivered`,     params: {},                                              label: 'undelivered-tarihsiz', rawStatus: 'UnDelivered' },
   ];
 
   const pkgCallback = (pkg) => {
@@ -228,11 +228,11 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   };
 
   let pkgFetched = false;
-  for (const q of [...pkgStatusQueries, ...pkgDateQueries]) {
+  for (const q of pkgQueries) {
     try {
-      console.log(`[HepsiB] /packages/ deneniyor: ${q.label} | params: ${JSON.stringify(q.params)}`);
+      console.log(`[HepsiB] /packages/ ${q.label} | ${q.url.split('/').slice(-2).join('/')} | params: ${JSON.stringify(q.params)}`);
       const beforeCount = allOrders.length;
-      await fetchPaginated(pkgBase, q.params, headers, pkgCallback);
+      await fetchPaginated(q.url, q.params, headers, pkgCallback);
       const added = allOrders.length - beforeCount;
       if (added > 0) {
         console.log(`[HepsiB] /packages/ ${q.label}: +${added} yeni paket`);
@@ -240,7 +240,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
       }
     } catch (e) {
       if (e.message.includes('400') || e.message.includes('BadRequest')) {
-        console.warn(`[HepsiB] /packages/ strateji başarısız (${q.label}): ${e.message.substring(0, 100)}`);
+        console.warn(`[HepsiB] /packages/ başarısız (${q.label}): ${e.message.substring(0, 100)}`);
       } else {
         throw e;
       }

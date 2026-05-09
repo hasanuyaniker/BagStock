@@ -2446,14 +2446,19 @@ const STATUS_OPTIONS = [
 ];
 
 function editOrderStatus(orderId, currentStatus) {
-  const opts = STATUS_OPTIONS.map(o =>
-    `${o.value === currentStatus ? '✓ ' : '  '}${o.label} (${o.value})`
+  const opts = STATUS_OPTIONS.map((o, i) =>
+    `${i + 1}. ${o.label}`
   ).join('\n');
-  const choice = prompt(`Yeni durumu seçin (şu an: ${currentStatus}):\n\n${opts}\n\nDurum kodunu yazın:`, currentStatus);
-  if (!choice || choice === currentStatus) return;
-  const valid = STATUS_OPTIONS.find(o => o.value === choice.trim());
-  if (!valid) { showToast('Geçersiz durum kodu', 'error'); return; }
-  saveOrderStatus(orderId, choice.trim());
+  const choice = prompt(`Yeni durumu seçin (şu an: ${currentStatus}):\n\n${opts}\n\nNumara girin (1-${STATUS_OPTIONS.length}):`, '');
+  if (!choice) return;
+  const idx = parseInt(choice.trim()) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= STATUS_OPTIONS.length) {
+    showToast('Geçersiz seçim — 1 ile ' + STATUS_OPTIONS.length + ' arası numara girin', 'error');
+    return;
+  }
+  const selected = STATUS_OPTIONS[idx];
+  if (selected.value === currentStatus) return;
+  saveOrderStatus(orderId, selected.value);
 }
 
 async function saveOrderStatus(orderId, status) {
