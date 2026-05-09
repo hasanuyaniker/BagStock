@@ -193,19 +193,32 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   // /packages/ endpoint'i ortama göre farklı davranır:
   //   SIT:  tarihsiz çalışır ({} → 200), tarihli 400 döner
   //   PROD: tarihsiz 400 dönebilir, tarihli çalışır VEYA merchant yeniyse tüm stratejiler 400 döner
-  // Strateji: birden fazla yaklaşım sırayla denenecek, ilk başarılı olanla devam edilecek
-  // (today, yesterday, week7ago yukarıda tanımlı)
+  // Packages endpoint'i status'e göre ayrı ayrı sorgula.
+  // Tarihsiz sorgu sadece Open/Packed döndürüyor; Shipped/Delivered için tarihli sorgu gerekiyor.
+  // Aktivasyon tarihi: 2026-05-08 — ondan önceki tarihler 400 veriyor.
+  // Her kombinezon ayrı çalışır, benzersiz paketler toplanır (break yok).
+  const pkgBase = `${base}/packages/merchantid/${merchantId}`;
 
-  const pkgStrategies = [
-    { label: 'tarihsiz',         params: {} },
-    { label: 'sadece bugün',     params: { begindate: today,     enddate: today } },
-    { label: 'dün+bugün',        params: { begindate: yesterday, enddate: today } },
-    { label: `son ${days} gün`,  params: { begindate, enddate } },
-    { label: 'son 7 gün',        params: { begindate: week7ago,  enddate: today } },
+  // 1) Tarihsiz (Open/Packed paketler için)
+  const pkgStatusQueries = [
+    { label: 'tarihsiz-genel',   params: {} },
+    { label: 'tarihsiz-Packed',  params: { status: 'Packed'    } },
+    { label: 'tarihsiz-Created', params: { status: 'Created'   } },
+    { label: 'tarihsiz-Open',    params: { status: 'Open'      } },
   ];
 
-  let pkgFetched = false;
-  const pkgBase = `${base}/packages/merchantid/${merchantId}`;
+  // 2) Tarihli (Shipped/Delivered için — aktivasyon tarihinden itibaren)
+  const activation = '2026-05-08'; // merchant aktivasyon tarihi
+  const pkgDateQueries = [
+    { label: `Shipped-bugün`,    params: { status: 'Shipped',   begindate: today,      enddate: today      } },
+    { label: `Shipped-7gün`,     params: { status: 'Shipped',   begindate: week7ago,   enddate: today      } },
+    { label: `Shipped-aktif`,    params: { status: 'Shipped',   begindate: activation, enddate: today      } },
+    { label: `Delivered-7gün`,   params: { status: 'Delivered', begindate: week7ago,   enddate: today      } },
+    { label: `Delivered-aktif`,  params: { status: 'Delivered', begindate: activation, enddate: today      } },
+    { label: `tarihli-aktif`,    params: {                       begindate: activation, enddate: today      } },
+    { label: `tarihli-bugün`,    params: {                       begindate: today,      enddate: today      } },
+  ];
+
   const pkgCallback = (pkg) => {
     const norm = normalizeHBPackage(pkg);
     if (norm.order_id && !seenIds.has(norm.order_id)) {
@@ -214,26 +227,28 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     }
   };
 
-  for (const strategy of pkgStrategies) {
+  let pkgFetched = false;
+  for (const q of [...pkgStatusQueries, ...pkgDateQueries]) {
     try {
-      console.log(`[HepsiB] /packages/ deneniyor: ${strategy.label} | params: ${JSON.stringify(strategy.params)}`);
-      await fetchPaginated(pkgBase, strategy.params, headers, pkgCallback);
-      console.log(`[HepsiB] /packages/ başarılı: ${strategy.label}`);
-      pkgFetched = true;
-      break;
+      console.log(`[HepsiB] /packages/ deneniyor: ${q.label} | params: ${JSON.stringify(q.params)}`);
+      const beforeCount = allOrders.length;
+      await fetchPaginated(pkgBase, q.params, headers, pkgCallback);
+      const added = allOrders.length - beforeCount;
+      if (added > 0) {
+        console.log(`[HepsiB] /packages/ ${q.label}: +${added} yeni paket`);
+        pkgFetched = true;
+      }
     } catch (e) {
       if (e.message.includes('400') || e.message.includes('BadRequest')) {
-        console.warn(`[HepsiB] /packages/ strateji başarısız (${strategy.label}): ${e.message.substring(0, 120)}`);
-        // Sonraki stratejiyi dene
+        console.warn(`[HepsiB] /packages/ strateji başarısız (${q.label}): ${e.message.substring(0, 100)}`);
       } else {
-        // 400 dışı hata (ağ hatası, 401, 500 vb.) — direkt fırlat
         throw e;
       }
     }
   }
 
   if (!pkgFetched) {
-    console.warn('[HepsiB] /packages/ tüm stratejiler başarısız — paketler atlandı, sadece açık siparişler işlendi');
+    console.warn('[HepsiB] /packages/ tüm sorgular 0 kayıt döndürdü');
   }
 
   console.log(`[HepsiB] Toplam ${allOrders.length} sipariş çekildi`);
