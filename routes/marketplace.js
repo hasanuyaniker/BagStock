@@ -481,7 +481,7 @@ router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
 
     // items tablosunu da güncelle
     await pool.query(
-      `UPDATE marketplace_order_items SET status=$1, status_tr=$2, raw_status=$3 WHERE order_id=$4`,
+      `UPDATE marketplace_order_items SET status=$1, status_tr=$2, raw_status=$3 WHERE marketplace_order_id=$4`,
       [status, status_tr, raw_status, id]
     );
 
