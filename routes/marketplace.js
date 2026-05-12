@@ -1718,11 +1718,16 @@ async function upsertOrder(db, order) {
     await client.query('BEGIN');
 
     // Kargo e-posta bildirimi için: mevcut durumu ve kargoda_at'i önceden oku
+    // order_id VEYA order_number ile eşleşen satır aranır (ID tutarsızlığına karşı)
     let prevStatus = null;
     let prevKargodaAt = null;
     if (order.status === 'kargoda') {
       const prevRow = await client.query(
-        `SELECT status, kargoda_at FROM marketplace_orders WHERE platform = $1 AND order_id = $2`,
+        `SELECT status, kargoda_at FROM marketplace_orders
+         WHERE platform = $1
+           AND (order_id = $2 OR (order_number = $2 AND $2 <> ''))
+         ORDER BY kargoda_at DESC NULLS LAST
+         LIMIT 1`,
         [order.platform, order.order_id]
       );
       prevStatus    = prevRow.rows[0]?.status     || null;
@@ -1808,6 +1813,26 @@ async function upsertOrder(db, order) {
 
     const orderId              = orderResult.rows[0].id;
     const orderAlreadyDeducted = orderResult.rows[0].stock_deducted === true;
+
+    // ── HB Çapraz-Güncelleme: PackageNumber → OrderNumber köprüsü ────────────
+    // order_id = PackageNumber, order_number = OrderNumber (sipariş numarası).
+    // /orders endpoint'inden gelen bekliyor satır order_id=orderNumber ile saklanmış
+    // olabilir. O satırı da kargoda'ya güncelleyerek iki satır olmasını önle.
+    if (order.platform === 'hepsiburada' && order.status === 'kargoda' &&
+        order.order_number && order.order_number !== order.order_id) {
+      await client.query(
+        `UPDATE marketplace_orders
+         SET status       = 'kargoda',
+             status_tr    = 'Kargoya Verildi',
+             raw_status   = $1,
+             kargoda_at   = COALESCE(kargoda_at, NOW()),
+             updated_at   = NOW()
+         WHERE platform   = 'hepsiburada'
+           AND order_id   = $2
+           AND status NOT IN ('kargoda','teslim_edildi','iade_onaylandi')`,
+        [order.raw_status, order.order_number]
+      );
+    }
 
     // ── Order-level guard ─────────────────────────────────────────────────────
     // Sipariş daha önce tam olarak işlendiyse stok düşümünü tamamen atla.

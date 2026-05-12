@@ -356,10 +356,23 @@ function normalizeHBOpenOrder(order) {
     return new Date(str + '+03:00');
   };
 
+  // /orders endpoint'ten gelen bekliyor siparişler:
+  // Paket numarası varsa onu birincil anahtar olarak kullan (/packages endpoint'iyle uyumlu olur)
+  // Yoksa sipariş numarasını kullan
+  const pkgNumFromOrder = String(
+    order.packageId || order.packageNumber ||
+    (order.lineItems?.[0]?.packageId) ||
+    (order.lineItems?.[0]?.packageNumber) || ''
+  );
+  const orderNumFromOrder = String(order.orderNumber || order.id || order.orderId || '');
+  const orderId = pkgNumFromOrder || orderNumFromOrder;
+
+  console.log(`[HepsiB][ORDER] orderNumber=${orderNumFromOrder} packageNumber=${pkgNumFromOrder} → order_id=${orderId}`);
+
   return {
     platform:              'hepsiburada',
-    order_id:              String(order.orderNumber || order.id || order.orderId || ''),
-    order_number:          String(order.orderNumber || order.id || order.orderId || ''),
+    order_id:              orderId,
+    order_number:          orderNumFromOrder,  // sipariş numarası her zaman gösterim için
     status:                HB_STATUS_MAP[rawStatus] || 'bekliyor',
     status_tr:             HB_STATUS_TR[rawStatus] || 'Satıcıda Bekliyor',
     raw_status:            rawStatus,
@@ -456,12 +469,24 @@ function normalizeHBPackage(pkg, forcedRawStatus) {
     : null;
   const totalDesi = items.reduce((s, i) => s + (i.cargo_desi || 0), 0);
 
-  // orderId: her iki format için fallback zinciri
-  const orderId = String(
-    pkg.OrderNumber || pkg.orderNumber ||
+  // Paket numarası = birincil DB anahtarı (her iki endpoint'te tutarlı)
+  // Sipariş numarası = gösterim alanı (HB portaldaki "Sipariş No" ile eşleşir)
+  const pkgNumber  = String(
     pkg.PackageNumber || pkg.packageNumber ||
     pkg.Id || pkg.id || pkg.packageId || ''
   );
+  const orderNum   = String(
+    pkg.OrderNumber || pkg.orderNumber || ''
+  );
+  // Birincil anahtar: paket numarası varsa onu kullan, yoksa sipariş numarasına düş
+  const orderId    = pkgNumber || orderNum;
+  // Gösterim: sipariş numarası varsa onu göster (HB portaldaki değer), yoksa paket numarası
+  const displayNum = orderNum  || pkgNumber;
+
+  // DEBUG: ilk paket için tam field mapping'i logla (Railway'den izlenebilir)
+  if (orderId) {
+    console.log(`[HepsiB][PKG] PackageNumber=${pkgNumber} OrderNumber=${orderNum} → order_id=${orderId} order_number=${displayNum} status=${rawStatus}`);
+  }
 
   // order_date: flat format ShippedDate/DeliveredDate kullanır
   const dateStr = pkg.ShippedDate || pkg.DeliveredDate || pkg.UnDeliveredDate || pkg.orderDate;
@@ -472,7 +497,7 @@ function normalizeHBPackage(pkg, forcedRawStatus) {
   return {
     platform:              'hepsiburada',
     order_id:              orderId,
-    order_number:          orderId,
+    order_number:          displayNum,
     status:                internalSt,
     status_tr:             statusTr,
     raw_status:            rawStatus,

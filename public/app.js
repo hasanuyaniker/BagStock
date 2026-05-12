@@ -2277,7 +2277,7 @@ function renderOrders(orders, total) {
   if (!tbody) return;
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:#6b7280;">
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:40px;color:#6b7280;">
       <div style="font-size:32px;margin-bottom:8px;">📭</div>
       <div>Sipariş bulunamadı</div>
       <div style="font-size:12px;margin-top:4px;">API entegrasyonunu ayarlamak için Ayarlar → API Entegrasyonu bölümüne gidin</div>
@@ -2314,15 +2314,30 @@ function renderOrders(orders, total) {
 
   const rows = orders.map(order => {
     const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
+
+    // Ürün adı — sadece isim (barkod ve adet ayrı kolonlarda)
     const itemsHtml = items.length > 0
       ? items.map(item => {
           const name = escHtml(item.p_name || item.product_name || item.barcode || '');
-          const bc   = item.barcode ? `<span style="color:#9ca3af;font-size:10px;">${item.barcode}</span>` : '';
-          const qty  = `×${item.quantity}`;
-          const ded  = item.stock_deducted ? '<span style="color:#16a34a;" title="Stok düşürüldü">✓</span>' : '';
-          return `<div style="line-height:1.5;">${name} ${bc} ${qty}${ded}</div>`;
+          const ded  = item.stock_deducted ? ' <span style="color:#16a34a;" title="Stok düşürüldü">✓</span>' : '';
+          return `<div style="line-height:1.5;">${name}${ded}</div>`;
         }).join('')
       : '<span style="color:#9ca3af;">—</span>';
+
+    // Adet kolonu
+    const qtyHtml = items.length > 0
+      ? items.map(item =>
+          `<div style="line-height:1.5;text-align:center;font-weight:600;">${item.quantity || 1}</div>`
+        ).join('')
+      : '<span style="color:#d1d5db;">—</span>';
+
+    // Barkod kolonu
+    const barcodeHtml = items.length > 0
+      ? items.map(item => item.barcode
+          ? `<div style="line-height:1.5;font-size:10px;color:#6b7280;font-family:monospace;">${escHtml(item.barcode)}</div>`
+          : '<div style="line-height:1.5;">—</div>'
+        ).join('')
+      : '<span style="color:#d1d5db;">—</span>';
 
     // Order-level flag VEYA item-level flag: biri TRUE ise stok düşürülmüş demektir
     const anyDeducted  = items.some(i => i.stock_deducted) || order.stock_deducted === true;
@@ -2383,6 +2398,8 @@ function renderOrders(orders, total) {
       <td class="col-date" style="font-size:11px;">${dateStr}</td>
       <td class="col-status">${statusHtml}</td>
       <td class="col-product">${itemsHtml}</td>
+      <td class="col-qty" style="text-align:center;font-size:12px;">${qtyHtml}</td>
+      <td class="col-barcode" style="font-size:10px;">${barcodeHtml}</td>
       <td class="col-price" style="font-weight:600;text-align:right;">${formatCurrency(price)}</td>
       <td class="col-comm" style="text-align:right;font-size:11px;">${commHtml}</td>
       <td class="col-desi" style="text-align:center;font-size:11px;">${desiHtml}</td>
@@ -2401,6 +2418,8 @@ function renderOrders(orders, total) {
     tfoot.innerHTML = `<tr id="ordersTotalsRow">
       <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
       <td class="col-product"></td>
+      <td class="col-qty"></td>
+      <td class="col-barcode"></td>
       <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
       <td class="col-comm" style="text-align:right;font-weight:700;">—</td>
       <td class="col-desi" style="text-align:center;font-weight:700;">${validDesiCount > 0 ? 'Ort.' + avgDesi : '—'}</td>
