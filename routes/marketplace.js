@@ -658,6 +658,45 @@ router.post('/sync', async (req, res) => {
   }
 });
 
+// ── POST /api/marketplace/hb-reset-sync ──────────────────────────────────────
+// HB siparişlerini DB'den tamamen siler ve API'den sıfırdan çeker.
+// Bekliyor(/packages), Kargoda(/shipped), Teslim Edildi(/delivered) hepsini getirir.
+router.post('/hb-reset-sync', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // 1. Mevcut tüm HB siparişlerini ve kalemlerini sil
+    await client.query(
+      `DELETE FROM marketplace_order_items
+       WHERE marketplace_order_id IN
+         (SELECT id FROM marketplace_orders WHERE platform = 'hepsiburada')`
+    );
+    const delResult = await client.query(
+      `DELETE FROM marketplace_orders WHERE platform = 'hepsiburada' RETURNING id`
+    );
+    const deletedCount = delResult.rowCount;
+    client.release();
+
+    console.log(`[HB Reset] ${deletedCount} eski HB siparişi silindi. Yeniden senkronizasyon başlıyor...`);
+    res.json({ ok: true, deleted: deletedCount, message: `${deletedCount} eski HB siparişi silindi. Senkronizasyon başlatıldı — 10-20 saniye içinde siparişler güncellenecek.` });
+
+    // 2. HB'yi yeniden senkronize et (async — yanıt zaten gönderildi)
+    try {
+      const credRow = await pool.query("SELECT value FROM app_settings WHERE key = 'marketplace_credentials'");
+      const creds = credRow.rows[0] ? JSON.parse(credRow.rows[0].value) : {};
+      if (creds.hepsiburada?.merchantId && creds.hepsiburada?.apiKey) {
+        await syncPlatform(pool, 'hepsiburada', creds.hepsiburada);
+        console.log('[HB Reset] Yeniden senkronizasyon tamamlandı.');
+      }
+    } catch (syncErr) {
+      console.error('[HB Reset] Yeniden sync hatası:', syncErr.message);
+    }
+  } catch (err) {
+    try { client.release(); } catch {}
+    console.error('[HB Reset] Hata:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/marketplace/hb-raw-orders — HB orders + packages ham verisi (debug) ──
 router.get('/hb-raw-orders', async (req, res) => {
   try {
