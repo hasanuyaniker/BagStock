@@ -131,7 +131,12 @@ router.get('/orders', async (req, res) => {
               ) AS items
        FROM marketplace_orders mo
        LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
-       LEFT JOIN products p ON p.id = moi.product_id
+       LEFT JOIN LATERAL (
+         SELECT id, name, barcode FROM products p2
+         WHERE p2.id = moi.product_id
+            OR (moi.product_id IS NULL AND (p2.barcode = moi.barcode OR p2.barcode2 = moi.barcode OR p2.barcode3 = moi.barcode))
+         LIMIT 1
+       ) p ON true
        ${where}
        GROUP BY mo.id
        ORDER BY mo.order_date DESC
@@ -2026,7 +2031,38 @@ async function upsertOrder(db, order) {
       try {
         console.log(`[Mailer] Email tetiklendi → #${order.order_number}`);
         const { sendShippingNotification } = require('../services/mailer');
-        await sendShippingNotification({ ...order, id: orderId });
+
+        // Siparişi DB'den tam olarak çek (products JOIN ile p_name, customer_name, total_price dahil)
+        // Sync'ten gelen ham order nesnesi flat-format ise eksik olabilir — DB her zaman doğru
+        const emailOrderRes = await db.query(`
+          SELECT mo.*,
+                 COALESCE(
+                   json_agg(
+                     json_build_object(
+                       'item_id',      moi.item_id,
+                       'barcode',      moi.barcode,
+                       'product_name', COALESCE(NULLIF(moi.product_name,''), p.name, moi.barcode),
+                       'quantity',     moi.quantity,
+                       'price',        moi.price,
+                       'p_name',       p.name
+                     ) ORDER BY moi.id
+                   ) FILTER (WHERE moi.id IS NOT NULL),
+                   '[]'::json
+                 ) AS items
+          FROM marketplace_orders mo
+          LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+          LEFT JOIN LATERAL (
+            SELECT id, name FROM products p2
+            WHERE p2.id = moi.product_id
+               OR (moi.product_id IS NULL AND (p2.barcode = moi.barcode OR p2.barcode2 = moi.barcode OR p2.barcode3 = moi.barcode))
+            LIMIT 1
+          ) p ON true
+          WHERE mo.id = $1
+          GROUP BY mo.id
+        `, [orderId]);
+
+        const emailOrder = emailOrderRes.rows[0] || { ...order, id: orderId };
+        await sendShippingNotification(emailOrder);
       } catch (mailErr) {
         console.error('[Marketplace] Kargo e-posta hatası:', mailErr.message);
       }

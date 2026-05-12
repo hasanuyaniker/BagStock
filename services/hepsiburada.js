@@ -250,6 +250,98 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   }
 
   console.log(`[HepsiB] Toplam ${allOrders.length} sipariş çekildi`);
+
+  // ── Flat-format paket zenginleştirme ─────────────────────────────────────────
+  // /shipped ve /delivered endpoint'leri sadece düz (flat) kayıt döndürür:
+  // lineItems olmaz, Barcode alanı teslimat/kargo barkodu olabilir.
+  // İki adımda ürün adı + müşteri bilgisi doldurmaya çalışıyoruz.
+
+  // Zenginleştirilmesi gereken flat-format paketler
+  const flatToEnrich = allOrders.filter(o =>
+    o.platform === 'hepsiburada' &&
+    Array.isArray(o.items) &&
+    o.items.every(i => !i.product_name) &&
+    o.order_id
+  );
+
+  if (flatToEnrich.length > 0) {
+    console.log(`[HepsiB] ${flatToEnrich.length} flat-format paket zenginleştirilecek`);
+
+    // Adım 1: Bu sync'te /orders endpoint'inden zaten gelen siparişlerle eşleştir
+    // order_number üzerinden eşleme — /orders open siparişler lineItems içerir
+    const richByOrderNum = new Map();
+    for (const o of allOrders) {
+      if (o.order_number && o.items && o.items.some(i => i.product_name)) {
+        richByOrderNum.set(o.order_number, o);
+      }
+    }
+
+    for (const flatOrder of flatToEnrich) {
+      if (flatOrder.order_number && richByOrderNum.has(flatOrder.order_number)) {
+        const rich = richByOrderNum.get(flatOrder.order_number);
+        flatOrder.items = rich.items.map(i => ({
+          ...i,
+          status:        flatOrder.status,
+          status_tr:     flatOrder.status_tr,
+          raw_status:    flatOrder.raw_status,
+          should_deduct: HB_DEDUCT_STATUSES.has(flatOrder.raw_status),
+        }));
+        flatOrder.customer_name = flatOrder.customer_name || rich.customer_name || '';
+        flatOrder.total_price   = flatOrder.total_price   || rich.total_price   || 0;
+        console.log(`[HepsiB] ✓ #${flatOrder.order_number} /orders verisiyle zenginleştirildi`);
+      }
+    }
+
+    // Adım 2: Hâlâ eksik olanlar için HB API'den paket detayı çek
+    // GET /packages/merchantid/{id}/packagenumber/{pkgNum} → lineItems ile tam paket
+    const stillFlat = flatToEnrich.filter(o => o.items.every(i => !i.product_name));
+    if (stillFlat.length > 0) {
+      console.log(`[HepsiB] ${stillFlat.length} paket için API'den detay çekiliyor...`);
+      for (const flatOrder of stillFlat) {
+        try {
+          const detailUrl = `${pkgBase}/packagenumber/${flatOrder.order_id}`;
+          console.log(`[HepsiB] Paket detay GET ${detailUrl}`);
+          const res = await fetch(detailUrl, { headers, signal: AbortSignal.timeout(10000) });
+          console.log(`[HepsiB] Paket detay HTTP ${res.status}`);
+          if (!res.ok) continue;
+
+          const pkgData = await res.json();
+          const lineItems = pkgData?.lineItems || pkgData?.lines || pkgData?.items || [];
+          if (lineItems.length > 0) {
+            flatOrder.items = lineItems.map(line => ({
+              item_id:           String(line.id || line.lineItemId || line.lineId || ''),
+              barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
+              sku:               line.merchantSku || line.sku || '',
+              product_name:      line.name || line.productName || line.hepsiburadaSku || '',
+              quantity:          parseInt(line.quantity || 1),
+              price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? 0),
+              raw_status:        flatOrder.raw_status,
+              status:            flatOrder.status,
+              status_tr:         flatOrder.status_tr,
+              should_deduct:     HB_DEDUCT_STATUSES.has(flatOrder.raw_status),
+              commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? 0) || null,
+              commission_rate:   parseFloat(line.commissionRate ?? 0) || null,
+              cargo_desi:        null,
+            }));
+            if (!flatOrder.customer_name && pkgData?.customer?.fullName) {
+              flatOrder.customer_name = pkgData.customer.fullName;
+            }
+            if (!flatOrder.total_price || flatOrder.total_price === 0) {
+              flatOrder.total_price = parseFloat(pkgData?.totalPrice?.amount ?? pkgData?.totalPrice ?? 0) || 0;
+            }
+            console.log(`[HepsiB] ✓ #${flatOrder.order_id} API zenginleştirme başarılı (${lineItems.length} ürün)`);
+          } else {
+            // lineItems yok ama yanıt geldi — ham veriyi logla
+            console.log(`[HepsiB] ⚠ #${flatOrder.order_id} detay yanıtı lineItems içermiyor: ${JSON.stringify(pkgData).substring(0, 300)}`);
+          }
+        } catch (enrichErr) {
+          console.warn(`[HepsiB] #${flatOrder.order_id} zenginleştirme hatası: ${enrichErr.message.substring(0, 100)}`);
+        }
+      }
+    }
+  }
+
+  console.log(`[HepsiB] Zenginleştirme tamamlandı. Döndürülen sipariş: ${allOrders.length}`);
   return allOrders;
 }
 
