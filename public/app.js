@@ -2485,6 +2485,26 @@ async function saveDesi(orderId, desiValue) {
   }
 }
 
+// HB siparişlerindeki eksik ürün adlarını API'den çek (DB'yi güncelle)
+async function hbEnrichOrders() {
+  const btn = document.getElementById('hbEnrichBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ürün adları çekiliyor...'; }
+  try {
+    const res = await apiFetch('/api/marketplace/hb-enrich-orders', { method: 'POST' });
+    if (!res) return;
+    const data = await res.json();
+    showToast(data.message || 'HB ürün adları güncelleniyor. 20 saniye sonra yenile.', 'success');
+    // 20 saniye sonra otomatik yenile (işlem arka planda)
+    setTimeout(() => { loadOrders(); }, 20000);
+  } catch (err) {
+    showToast('Hata: ' + err.message, 'error');
+  } finally {
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '🏷️ HB Ürün Adlarını Çek'; }
+    }, 25000);
+  }
+}
+
 // HB verilerini sıfırla ve API'den yeniden çek
 async function hbResetSync() {
   const btn = document.getElementById('hbResetBtn');
