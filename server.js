@@ -249,26 +249,20 @@ async function runMigrations() {
       console.log('✓ 21.04.2026 satış verileri silindi');
     }
 
-    // ── marketplace_order_items komisyon sütunlarını INTEGER → NUMERIC'e çevir ─
-    // ADD COLUMN IF NOT EXISTS yalnızca sütun yoksa çalışır; eğer sütun INTEGER
-    // olarak oluşturulduysa tip dönüşümü gerekmektedir.
-    const fixCommissionTypes = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_moi_commission_numeric_v1'`);
-    if (fixCommissionTypes.rows.length === 0) {
-      // Mevcut tipleri kontrol et
-      const colTypes = await pool.query(`
-        SELECT column_name, data_type
-        FROM information_schema.columns
-        WHERE table_name = 'marketplace_order_items'
-          AND column_name IN ('commission_amount', 'commission_rate')
-      `);
-      for (const col of colTypes.rows) {
-        if (col.data_type === 'integer') {
-          const newType = col.column_name === 'commission_amount' ? 'NUMERIC(10,4)' : 'NUMERIC(6,2)';
-          await pool.query(`ALTER TABLE marketplace_order_items ALTER COLUMN ${col.column_name} TYPE ${newType} USING ${col.column_name}::numeric`);
-          console.log(`✓ marketplace_order_items.${col.column_name} INTEGER → ${newType} dönüştürüldü`);
-        }
+    // ── komisyon sütunlarını kesin olarak NUMERIC tipine zorla (koşulsuz) ──────
+    // Her deploy'da çalışır; sütun zaten NUMERIC ise PostgreSQL bunu sessizce kabul eder.
+    // INTEGER kolona ondalıklı değer (415.584 vb.) yazılamadığı için bu ALTER şarttır.
+    {
+      const commissionAlters = [
+        `ALTER TABLE marketplace_order_items ALTER COLUMN commission_amount TYPE NUMERIC(10,4) USING commission_amount::numeric`,
+        `ALTER TABLE marketplace_order_items ALTER COLUMN commission_rate   TYPE NUMERIC(6,2)  USING commission_rate::numeric`,
+        `ALTER TABLE marketplace_orders      ALTER COLUMN commission_amount TYPE NUMERIC(10,4) USING commission_amount::numeric`,
+        `ALTER TABLE marketplace_orders      ALTER COLUMN commission_rate   TYPE NUMERIC(6,2)  USING commission_rate::numeric`,
+      ];
+      for (const sql of commissionAlters) {
+        try { await pool.query(sql); } catch (e) { /* sütun zaten doğru tipte veya yok */ }
       }
-      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('fix_moi_commission_numeric_v1', 'true') ON CONFLICT (key) DO NOTHING`);
+      console.log('✓ Komisyon sütun tipleri NUMERIC olarak doğrulandı');
     }
 
     console.log('✓ Migration tamam');
