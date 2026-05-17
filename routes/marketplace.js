@@ -2160,8 +2160,8 @@ router.post('/test-shipping-email', async (req, res) => {
         });
       }
 
-      // ── Sadece HB siparişlerini DB'de eşleştir ───────────────────────────
-      // Ürün adı eksik olan HB siparişlerini çek
+      // ── Tüm HB siparişlerini çek (ürün adı dolu/boş fark etmez) ─────────────
+      // Ürün adı güncellemesi sadece boşsa yapılır; tutar/komisyon her zaman yazılır.
       const dbRes = await pool.query(`
         SELECT mo.id AS mo_id, mo.order_number,
                moi.id AS item_id,
@@ -2169,13 +2169,18 @@ router.post('/test-shipping-email', async (req, res) => {
         FROM marketplace_orders mo
         JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
         WHERE mo.platform = 'hepsiburada'
-          AND (moi.product_name IS NULL OR moi.product_name = '' OR moi.product_name ~ '^[0-9]{8,}$')
       `);
       const dbByOrderNum = new Map();
       for (const r of dbRes.rows) {
-        dbByOrderNum.set(String(r.order_number), r);
+        // Aynı sipariş numarasından birden fazla satır olabilir (nadiren) — ilkini al
+        if (!dbByOrderNum.has(String(r.order_number))) {
+          dbByOrderNum.set(String(r.order_number), r);
+        }
       }
-      console.log(`[HB Import] DB'de ${dbByOrderNum.size} eksik HB siparişi var`);
+      console.log(`[HB Import] DB'de toplam ${dbByOrderNum.size} HB siparişi var`);
+
+      // Türkçe para formatı: "1.924,0000" → 1924.00
+      const parseTR = (s) => parseFloat(String(s || '0').replace(/\./g, '').replace(',', '.')) || 0;
 
       let updated = 0, skipped = 0, notFound = 0;
       const errors = [];
@@ -2186,13 +2191,21 @@ router.post('/test-shipping-email', async (req, res) => {
 
         if (!dbRow) { notFound++; continue; }
 
-        const productName = (row.productName || '').trim();
-        if (!productName) { skipped++; continue; }
+        const productName  = (row.productName  || '').trim();
+        const merchantSku  = (row.merchantSku  || '').trim();
+        const hbSku        = (row.hbSku        || '').trim();
+        const customerName = (row.customerName || '').trim();
+        const totalPrice       = parseTR(row.totalPrice);
+        const commissionAmount = parseTR(row.commissionAmount);
+        const commissionRate   = totalPrice > 0
+          ? Math.round((commissionAmount / totalPrice) * 10000) / 100
+          : null;
+
+        if (!productName && !totalPrice && !commissionAmount) { skipped++; continue; }
 
         try {
-          // products tablosunda merchantSku ile eşleştir
+          // marketplace_order_items — ürün adı boşsa güncelle, komisyon her zaman yaz
           let productId = null;
-          const merchantSku = (row.merchantSku || '').trim();
           if (merchantSku) {
             const pr = await pool.query(
               `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1`,
@@ -2201,48 +2214,48 @@ router.post('/test-shipping-email', async (req, res) => {
             productId = pr.rows[0]?.id || null;
           }
 
-          const hbSku       = (row.hbSku || '').trim();
-          const customerName= (row.customerName || '').trim();
+          const needsNameUpdate = !dbRow.product_name ||
+            dbRow.product_name === '' ||
+            /^[0-9]{8,}$/.test(dbRow.product_name);
 
-          // Türkçe para formatı: "1.924,0000" → 1924.00
-          // Bin ayırıcı nokta → kaldır, ondalık virgül → nokta
-          const parseTR = (s) => parseFloat(String(s || '0').replace(/\./g, '').replace(',', '.')) || 0;
+          if (needsNameUpdate && productName) {
+            await pool.query(
+              `UPDATE marketplace_order_items
+               SET product_name      = $1,
+                   sku               = COALESCE(NULLIF($2,''), sku),
+                   product_id        = COALESCE($3, product_id),
+                   barcode           = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
+                   commission_amount = CASE WHEN $6 > 0 THEN $6 ELSE commission_amount END,
+                   commission_rate   = CASE WHEN $7 IS NOT NULL THEN $7 ELSE commission_rate END
+               WHERE marketplace_order_id = $5
+                 AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
+              [productName, hbSku, productId, merchantSku, dbRow.mo_id, commissionAmount, commissionRate]
+            );
+          } else {
+            // Ürün adı zaten dolu — sadece komisyonu güncelle
+            await pool.query(
+              `UPDATE marketplace_order_items
+               SET commission_amount = CASE WHEN $1 > 0 THEN $1 ELSE commission_amount END,
+                   commission_rate   = CASE WHEN $2 IS NOT NULL THEN $2 ELSE commission_rate END
+               WHERE marketplace_order_id = $3`,
+              [commissionAmount, commissionRate, dbRow.mo_id]
+            );
+          }
 
-          const totalPrice       = parseTR(row.totalPrice);
-          const commissionAmount = parseTR(row.commissionAmount);
-          // Komisyon oranı: komisyon / tutar * 100 (tutar > 0 ise)
-          const commissionRate   = totalPrice > 0
-            ? Math.round((commissionAmount / totalPrice) * 10000) / 100  // 2 ondalık
-            : null;
-
-          // marketplace_order_items güncelle (komisyon da)
-          await pool.query(
-            `UPDATE marketplace_order_items
-             SET product_name      = $1,
-                 sku               = COALESCE(NULLIF($2,''), sku),
-                 product_id        = COALESCE($3, product_id),
-                 barcode           = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
-                 commission_amount = CASE WHEN $6 > 0 THEN $6 ELSE commission_amount END,
-                 commission_rate   = CASE WHEN $7 IS NOT NULL THEN $7 ELSE commission_rate END
-             WHERE marketplace_order_id = $5
-               AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
-            [productName, hbSku, productId, merchantSku, dbRow.mo_id, commissionAmount, commissionRate]
-          );
-
-          // marketplace_orders güncelle (müşteri adı, tutar, komisyon)
+          // marketplace_orders — tutar ve komisyon her zaman güncelle
           await pool.query(
             `UPDATE marketplace_orders
-             SET customer_name    = CASE WHEN $1 != '' THEN $1 ELSE customer_name END,
-                 total_price      = CASE WHEN $2 > 0 THEN $2 ELSE total_price END,
-                 commission_amount= CASE WHEN $3 > 0 THEN $3 ELSE commission_amount END,
-                 commission_rate  = CASE WHEN $4 IS NOT NULL THEN $4 ELSE commission_rate END,
-                 updated_at       = NOW()
+             SET customer_name     = CASE WHEN $1 != '' THEN $1 ELSE customer_name END,
+                 total_price       = CASE WHEN $2 > 0 THEN $2 ELSE total_price END,
+                 commission_amount = CASE WHEN $3 > 0 THEN $3 ELSE commission_amount END,
+                 commission_rate   = CASE WHEN $4 IS NOT NULL THEN $4 ELSE commission_rate END,
+                 updated_at        = NOW()
              WHERE id = $5`,
             [customerName, totalPrice, commissionAmount, commissionRate, dbRow.mo_id]
           );
 
           updated++;
-          console.log(`[HB Import] ✓ #${orderNo} → "${productName}"`);
+          console.log(`[HB Import] ✓ #${orderNo} tutar=${totalPrice} komisyon=${commissionAmount} (${needsNameUpdate && productName ? 'ürün adı + ' : ''}tutar/komisyon güncellendi)`);
         } catch (e) {
           errors.push({ orderNo, error: e.message });
           console.error(`[HB Import] ✗ #${orderNo}: ${e.message}`);
