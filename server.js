@@ -248,6 +248,29 @@ async function runMigrations() {
       await pool.query(`INSERT INTO app_settings (key, value) VALUES ('sales_cleaned_20260421', 'true') ON CONFLICT (key) DO NOTHING`);
       console.log('✓ 21.04.2026 satış verileri silindi');
     }
+
+    // ── marketplace_order_items komisyon sütunlarını INTEGER → NUMERIC'e çevir ─
+    // ADD COLUMN IF NOT EXISTS yalnızca sütun yoksa çalışır; eğer sütun INTEGER
+    // olarak oluşturulduysa tip dönüşümü gerekmektedir.
+    const fixCommissionTypes = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_moi_commission_numeric_v1'`);
+    if (fixCommissionTypes.rows.length === 0) {
+      // Mevcut tipleri kontrol et
+      const colTypes = await pool.query(`
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_name = 'marketplace_order_items'
+          AND column_name IN ('commission_amount', 'commission_rate')
+      `);
+      for (const col of colTypes.rows) {
+        if (col.data_type === 'integer') {
+          const newType = col.column_name === 'commission_amount' ? 'NUMERIC(10,4)' : 'NUMERIC(6,2)';
+          await pool.query(`ALTER TABLE marketplace_order_items ALTER COLUMN ${col.column_name} TYPE ${newType} USING ${col.column_name}::numeric`);
+          console.log(`✓ marketplace_order_items.${col.column_name} INTEGER → ${newType} dönüştürüldü`);
+        }
+      }
+      await pool.query(`INSERT INTO app_settings (key, value) VALUES ('fix_moi_commission_numeric_v1', 'true') ON CONFLICT (key) DO NOTHING`);
+    }
+
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);
