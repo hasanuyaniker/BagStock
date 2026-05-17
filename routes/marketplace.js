@@ -953,8 +953,7 @@ router.post('/hb-enrich-orders', async (req, res) => {
              SET product_name = $1,
                  sku          = COALESCE(NULLIF($2,''), sku),
                  product_id   = COALESCE($3, product_id),
-                 barcode      = CASE WHEN $4 != '' THEN $4 ELSE barcode END,
-                 updated_at   = NOW()
+                 barcode      = CASE WHEN $4 != '' THEN $4 ELSE barcode END
              WHERE marketplace_order_id = $5
                AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
             [name, hbSku, productId, merchantSku || '', mo_id]
@@ -1012,8 +1011,7 @@ async function _applyHBEnrichment(db, moId, lineItems, customerName, totalPrice)
          SET product_name = $1,
              product_id   = COALESCE($2, product_id),
              sku          = COALESCE(NULLIF($3,''), sku),
-             barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
-             updated_at   = NOW()
+             barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END
          WHERE marketplace_order_id = $5
            AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
         [productName, productId, hbSku, merchantBarcode, moId]
@@ -2208,8 +2206,7 @@ router.post('/test-shipping-email', async (req, res) => {
              SET product_name = $1,
                  sku          = COALESCE(NULLIF($2,''), sku),
                  product_id   = COALESCE($3, product_id),
-                 barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
-                 updated_at   = NOW()
+                 barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END
              WHERE marketplace_order_id = $5
                AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
             [productName, hbSku, productId, merchantSku, dbRow.mo_id]
