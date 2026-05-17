@@ -2039,6 +2039,11 @@ router.post('/test-shipping-email', async (req, res) => {
     'hepsiburada urun kodu':                   'hbSku',
     'hepsiburada sku':                         'hbSku',
     'hbsku':                                   'hbSku',
+    // ── Komisyon Tutarı ───────────────────────────────────────────────────
+    'komisyon tutari kdv dahil':               'commissionAmount',
+    'komisyon tutari':                         'commissionAmount',
+    'hb alacagi net komisyon tutari kdv dahil':'commissionAmount',
+    'commission amount':                       'commissionAmount',
     // ── Kargo ─────────────────────────────────────────────────────────────
     'kargo takip no':                          'cargoTracking',
     'takip no':                                'cargoTracking',
@@ -2197,29 +2202,43 @@ router.post('/test-shipping-email', async (req, res) => {
           }
 
           const hbSku       = (row.hbSku || '').trim();
-          const totalPrice  = parseFloat((row.totalPrice || '0').replace(',', '.')) || 0;
           const customerName= (row.customerName || '').trim();
 
-          // marketplace_order_items güncelle
+          // Türkçe para formatı: "1.924,0000" → 1924.00
+          // Bin ayırıcı nokta → kaldır, ondalık virgül → nokta
+          const parseTR = (s) => parseFloat(String(s || '0').replace(/\./g, '').replace(',', '.')) || 0;
+
+          const totalPrice       = parseTR(row.totalPrice);
+          const commissionAmount = parseTR(row.commissionAmount);
+          // Komisyon oranı: komisyon / tutar * 100 (tutar > 0 ise)
+          const commissionRate   = totalPrice > 0
+            ? Math.round((commissionAmount / totalPrice) * 10000) / 100  // 2 ondalık
+            : null;
+
+          // marketplace_order_items güncelle (komisyon da)
           await pool.query(
             `UPDATE marketplace_order_items
-             SET product_name = $1,
-                 sku          = COALESCE(NULLIF($2,''), sku),
-                 product_id   = COALESCE($3, product_id),
-                 barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END
+             SET product_name      = $1,
+                 sku               = COALESCE(NULLIF($2,''), sku),
+                 product_id        = COALESCE($3, product_id),
+                 barcode           = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
+                 commission_amount = CASE WHEN $6 > 0 THEN $6 ELSE commission_amount END,
+                 commission_rate   = CASE WHEN $7 IS NOT NULL THEN $7 ELSE commission_rate END
              WHERE marketplace_order_id = $5
                AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
-            [productName, hbSku, productId, merchantSku, dbRow.mo_id]
+            [productName, hbSku, productId, merchantSku, dbRow.mo_id, commissionAmount, commissionRate]
           );
 
-          // marketplace_orders güncelle (müşteri adı ve tutar)
+          // marketplace_orders güncelle (müşteri adı, tutar, komisyon)
           await pool.query(
             `UPDATE marketplace_orders
-             SET customer_name = CASE WHEN $1 != '' THEN $1 ELSE customer_name END,
-                 total_price   = CASE WHEN $2 > 0 THEN $2 ELSE total_price END,
-                 updated_at    = NOW()
-             WHERE id = $3`,
-            [customerName, totalPrice, dbRow.mo_id]
+             SET customer_name    = CASE WHEN $1 != '' THEN $1 ELSE customer_name END,
+                 total_price      = CASE WHEN $2 > 0 THEN $2 ELSE total_price END,
+                 commission_amount= CASE WHEN $3 > 0 THEN $3 ELSE commission_amount END,
+                 commission_rate  = CASE WHEN $4 IS NOT NULL THEN $4 ELSE commission_rate END,
+                 updated_at       = NOW()
+             WHERE id = $5`,
+            [customerName, totalPrice, commissionAmount, commissionRate, dbRow.mo_id]
           );
 
           updated++;
