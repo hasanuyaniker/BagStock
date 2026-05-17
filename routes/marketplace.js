@@ -2225,8 +2225,8 @@ router.post('/test-shipping-email', async (req, res) => {
                    sku               = COALESCE(NULLIF($2,''), sku),
                    product_id        = COALESCE($3, product_id),
                    barcode           = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
-                   commission_amount = CASE WHEN $6 > 0 THEN $6 ELSE commission_amount END,
-                   commission_rate   = CASE WHEN $7 IS NOT NULL THEN $7 ELSE commission_rate END
+                   commission_amount = CASE WHEN $6 > 0 THEN $6::numeric ELSE commission_amount END,
+                   commission_rate   = CASE WHEN $7::numeric IS NOT NULL THEN $7::numeric ELSE commission_rate END
                WHERE marketplace_order_id = $5
                  AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
               [productName, hbSku, productId, merchantSku, dbRow.mo_id, commissionAmount, commissionRate]
@@ -2235,8 +2235,8 @@ router.post('/test-shipping-email', async (req, res) => {
             // Ürün adı zaten dolu — sadece komisyonu güncelle
             await pool.query(
               `UPDATE marketplace_order_items
-               SET commission_amount = CASE WHEN $1 > 0 THEN $1 ELSE commission_amount END,
-                   commission_rate   = CASE WHEN $2 IS NOT NULL THEN $2 ELSE commission_rate END
+               SET commission_amount = CASE WHEN $1 > 0 THEN $1::numeric ELSE commission_amount END,
+                   commission_rate   = CASE WHEN $2::numeric IS NOT NULL THEN $2::numeric ELSE commission_rate END
                WHERE marketplace_order_id = $3`,
               [commissionAmount, commissionRate, dbRow.mo_id]
             );
@@ -2246,9 +2246,9 @@ router.post('/test-shipping-email', async (req, res) => {
           await pool.query(
             `UPDATE marketplace_orders
              SET customer_name     = CASE WHEN $1 != '' THEN $1 ELSE customer_name END,
-                 total_price       = CASE WHEN $2 > 0 THEN $2 ELSE total_price END,
-                 commission_amount = CASE WHEN $3 > 0 THEN $3 ELSE commission_amount END,
-                 commission_rate   = CASE WHEN $4 IS NOT NULL THEN $4 ELSE commission_rate END,
+                 total_price       = CASE WHEN $2 > 0 THEN $2::numeric ELSE total_price END,
+                 commission_amount = CASE WHEN $3 > 0 THEN $3::numeric ELSE commission_amount END,
+                 commission_rate   = CASE WHEN $4::numeric IS NOT NULL THEN $4::numeric ELSE commission_rate END,
                  updated_at        = NOW()
              WHERE id = $5`,
             [customerName, totalPrice, commissionAmount, commissionRate, dbRow.mo_id]
