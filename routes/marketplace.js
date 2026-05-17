@@ -1978,80 +1978,82 @@ router.post('/test-shipping-email', async (req, res) => {
 // HB satıcı panelinden indirilen CSV veya Excel dosyasını içe aktarır.
 // Sipariş No ile eşleştirerek ürün adı, müşteri adı, tutar güncellenir.
 // Desteklenen formatlar: .csv, .xlsx, .xls
+// HB panel export formatı: noktalı virgül (;) ayırıcı, ilk satır boş olabilir
 (function () {
   const multer  = require('multer');
   const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-  // Normalize edilmiş sütun adı → standart key eşlemesi
-  const COL_MAP = {
-    // Sipariş No
-    'siparis no':          'orderNo',
-    'sipariş no':          'orderNo',
-    'order no':            'orderNo',
-    'order number':        'orderNo',
-    'ordernumber':         'orderNo',
-    'sipariş numarası':    'orderNo',
-    'siparis numarasi':    'orderNo',
-    // Ürün Adı
-    'urun adi':            'productName',
-    'ürün adı':            'productName',
-    'ürün ismi':           'productName',
-    'urun ismi':           'productName',
-    'product name':        'productName',
-    'productname':         'productName',
-    'ürün':                'productName',
-    'urun':                'productName',
-    'name':                'productName',
-    'ürün başlığı':        'productName',
-    'urun basligi':        'productName',
-    // Müşteri
-    'musteri':             'customerName',
-    'müşteri':             'customerName',
-    'müşteri adı':         'customerName',
-    'musteri adi':         'customerName',
-    'customer name':       'customerName',
-    'alıcı adı':           'customerName',
-    // Tutar
-    'tutar':               'totalPrice',
-    'siparis tutari':      'totalPrice',
-    'sipariş tutarı':      'totalPrice',
-    'toplam':              'totalPrice',
-    'total':               'totalPrice',
-    'total price':         'totalPrice',
-    // Merchant SKU / Satıcı Kodu
-    'satici kodu':         'merchantSku',
-    'satıcı kodu':         'merchantSku',
-    'merchant sku':        'merchantSku',
-    'merchantsku':         'merchantSku',
-    'barcode':             'merchantSku',
-    'barkod':              'merchantSku',
-    // HepsiburadaSku
-    'hepsiburadaSku':      'hbSku',
-    'hepsiburada sku':     'hbSku',
-    'hbsku':               'hbSku',
-    // Kargo
-    'kargo takip no':      'cargoTracking',
-    'takip no':            'cargoTracking',
-    'tracking no':         'cargoTracking',
-    'kargo firması':        'cargoCompany',
-    'kargo firmasi':        'cargoCompany',
-    'cargo company':        'cargoCompany',
-  };
-
+  // Türkçe karakterleri ASCII'ye normalize et (büyük/küçük harf farklılıklarını yok et)
   function normalizeHeader(h) {
-    return String(h || '').toLowerCase().trim()
-      .replace(/\s+/g, ' ')
-      .replace(/[İ]/g, 'i').replace(/[Ş]/g, 'ş').replace(/[Ğ]/g, 'ğ')
-      .replace(/[Ç]/g, 'ç').replace(/[Ö]/g, 'ö').replace(/[Ü]/g, 'ü')
-      .replace(/[ı]/g, 'i');
+    return String(h || '')
+      .replace(/İ/g, 'i').replace(/I/g, 'i')
+      .replace(/Ş/g, 's').replace(/ş/g, 's')
+      .replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
+      .replace(/Ç/g, 'c').replace(/ç/g, 'c')
+      .replace(/Ö/g, 'o').replace(/ö/g, 'o')
+      .replace(/Ü/g, 'u').replace(/ü/g, 'u')
+      .replace(/ı/g, 'i')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')  // özel karakter → boşluk
+      .trim();
   }
+
+  // normalize edilmiş sütun adı → standart key
+  // HB panel CSV export sütunları (Tum_Sekmeler formatı) dahil
+  const COL_MAP = {
+    // ── Sipariş No ─────────────────────────────────────────────────────────
+    'siparis no':                              'orderNo',
+    'siparis numarasi':                        'orderNo',
+    'order no':                                'orderNo',
+    'order number':                            'orderNo',
+    'ordernumber':                             'orderNo',
+    // ── Ürün Adı ───────────────────────────────────────────────────────────
+    'urun adi':                                'productName',
+    'urun ismi':                               'productName',
+    'product name':                            'productName',
+    'productname':                             'productName',
+    'urun':                                    'productName',
+    'name':                                    'productName',
+    'urun basligi':                            'productName',
+    // ── Müşteri / Alıcı ───────────────────────────────────────────────────
+    'alici':                                   'customerName',
+    'alici adi':                               'customerName',
+    'musteri':                                 'customerName',
+    'musteri adi':                             'customerName',
+    'customer name':                           'customerName',
+    'fatura adi':                              'customerName',
+    // ── Tutar ─────────────────────────────────────────────────────────────
+    'tutar':                                   'totalPrice',
+    'faturalandirilacak satis fiyati':         'totalPrice',
+    'faturalandirilacak birim satis fiyati':   'totalPrice',
+    'siparis tutari':                          'totalPrice',
+    'toplam':                                  'totalPrice',
+    'total':                                   'totalPrice',
+    'total price':                             'totalPrice',
+    // ── Merchant SKU / Satıcı Stok Kodu ──────────────────────────────────
+    'satici stok kodu':                        'merchantSku',
+    'satici kodu':                             'merchantSku',
+    'merchant sku':                            'merchantSku',
+    'merchantsku':                             'merchantSku',
+    'barcode':                                 'merchantSku',
+    'barkod':                                  'merchantSku',
+    // ── HepsiburadaSku / Hepsiburada Ürün Kodu ───────────────────────────
+    'hepsiburada urun kodu':                   'hbSku',
+    'hepsiburada sku':                         'hbSku',
+    'hbsku':                                   'hbSku',
+    // ── Kargo ─────────────────────────────────────────────────────────────
+    'kargo takip no':                          'cargoTracking',
+    'takip no':                                'cargoTracking',
+    'kargo firmasi':                           'cargoCompany',
+  };
 
   function mapHeaders(rawHeaders) {
     const map = {}; // colIndex → stdKey
+    const used = new Set();
     rawHeaders.forEach((h, i) => {
       const norm = normalizeHeader(h);
       const key  = COL_MAP[norm];
-      if (key && !(key in Object.values(map))) map[i] = key;
+      if (key && !used.has(key)) { map[i] = key; used.add(key); }
     });
     return map;
   }
@@ -2065,6 +2067,27 @@ router.post('/test-shipping-email', async (req, res) => {
     return obj;
   }
 
+  // Delimiter otomatik tespiti: noktalı virgül mi, virgül mi?
+  function detectDelimiter(line) {
+    const sc = (line.match(/;/g) || []).length;
+    const cm = (line.match(/,/g) || []).length;
+    return sc >= cm ? ';' : ',';
+  }
+
+  // Delimiter-aware CSV satır parse (tırnak desteği)
+  function parseLine(line, delim) {
+    const result = [];
+    let inQuote = false, cur = '';
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQuote = !inQuote; }
+      else if (c === delim && !inQuote) { result.push(cur); cur = ''; }
+      else cur += c;
+    }
+    result.push(cur);
+    return result.map(s => s.replace(/^"|"$/g, '').trim());
+  }
+
   router.post('/hb-import-orders', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Dosya yüklenmedi' });
 
@@ -2074,31 +2097,27 @@ router.post('/test-shipping-email', async (req, res) => {
     try {
       if (ext === 'csv') {
         // ── CSV parse ──────────────────────────────────────────────────────
+        // HB export: UTF-8, BOM olabilir, ; ayırıcı, ilk satır boş olabilir
         const text = req.file.buffer.toString('utf-8').replace(/^﻿/, ''); // BOM
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        if (!lines.length) return res.status(400).json({ error: 'CSV boş' });
+        const allLines = text.split(/\r?\n/);
 
-        // Basit CSV parse (tırnakları handle eder)
-        function parseCsvLine(line) {
-          const result = [];
-          let inQuote = false, cur = '';
-          for (let i = 0; i < line.length; i++) {
-            const c = line[i];
-            if (c === '"') { inQuote = !inQuote; }
-            else if (c === ',' && !inQuote) { result.push(cur); cur = ''; }
-            else cur += c;
-          }
-          result.push(cur);
-          return result.map(s => s.replace(/^"|"$/g, '').trim());
-        }
+        // İlk boş satırları atla — gerçek header satırını bul
+        const headerIdx = allLines.findIndex(l => l.trim().length > 0);
+        if (headerIdx === -1) return res.status(400).json({ error: 'CSV boş' });
 
-        const headers = parseCsvLine(lines[0]);
+        const headerLine = allLines[headerIdx];
+        const delim = detectDelimiter(headerLine);
+        console.log(`[HB Import CSV] Delimiter: "${delim}" | Header satır: ${headerIdx + 1}`);
+
+        const headers = parseLine(headerLine, delim);
         const colMap  = mapHeaders(headers);
-        console.log('[HB Import CSV] Headers:', headers.join(' | '));
+        console.log('[HB Import CSV] Headers (normalize):', headers.map(normalizeHeader).join(' | '));
         console.log('[HB Import CSV] ColMap:', JSON.stringify(colMap));
 
-        for (let i = 1; i < lines.length; i++) {
-          const cells = parseCsvLine(lines[i]);
+        for (let i = headerIdx + 1; i < allLines.length; i++) {
+          const line = allLines[i].trim();
+          if (!line) continue;
+          const cells = parseLine(line, delim);
           const obj   = rowToObj(cells, colMap);
           if (obj.orderNo) rows.push(obj);
         }
@@ -2114,11 +2133,12 @@ router.post('/test-shipping-email', async (req, res) => {
         ws.eachRow((row, rowNum) => {
           const cells = [];
           row.eachCell({ includeEmpty: true }, (cell) => {
-            cells.push(cell.text ?? cell.value ?? '');
+            cells.push(String(cell.text ?? cell.value ?? '').trim());
           });
-          if (rowNum === 1) {
+          // İlk dolu satırı header kabul et
+          if (!colMap && cells.some(c => c)) {
             colMap = mapHeaders(cells);
-            console.log('[HB Import XLS] Headers:', cells.join(' | '));
+            console.log('[HB Import XLS] Headers (normalize):', cells.map(normalizeHeader).join(' | '));
             console.log('[HB Import XLS] ColMap:', JSON.stringify(colMap));
           } else if (colMap) {
             const obj = rowToObj(cells, colMap);
@@ -2129,8 +2149,13 @@ router.post('/test-shipping-email', async (req, res) => {
         return res.status(400).json({ error: 'Desteklenmeyen format. CSV, XLSX veya XLS yükleyin.' });
       }
 
-      console.log(`[HB Import] ${rows.length} satır parse edildi`);
-      if (!rows.length) return res.status(400).json({ error: 'Dosyada sipariş satırı bulunamadı. Sütun adlarını kontrol edin.' });
+      console.log(`[HB Import] ${rows.length} satır parse edildi. İlk 3:`, JSON.stringify(rows.slice(0, 3)));
+      if (!rows.length) {
+        return res.status(400).json({
+          error: 'Dosyada sipariş satırı bulunamadı. Sütun adlarını kontrol edin.',
+          hint: 'Beklenen sütunlar: "Sipariş Numarası", "Ürün Adı", "Alıcı", "Satıcı Stok Kodu"'
+        });
+      }
 
       // ── Sadece HB siparişlerini DB'de eşleştir ───────────────────────────
       // Ürün adı eksik olan HB siparişlerini çek
