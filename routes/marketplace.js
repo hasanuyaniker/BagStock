@@ -1974,6 +1974,257 @@ router.post('/test-shipping-email', async (req, res) => {
   }
 });
 
+// ── POST /api/marketplace/hb-import-orders ───────────────────────────────────
+// HB satıcı panelinden indirilen CSV veya Excel dosyasını içe aktarır.
+// Sipariş No ile eşleştirerek ürün adı, müşteri adı, tutar güncellenir.
+// Desteklenen formatlar: .csv, .xlsx, .xls
+(function () {
+  const multer  = require('multer');
+  const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+  // Normalize edilmiş sütun adı → standart key eşlemesi
+  const COL_MAP = {
+    // Sipariş No
+    'siparis no':          'orderNo',
+    'sipariş no':          'orderNo',
+    'order no':            'orderNo',
+    'order number':        'orderNo',
+    'ordernumber':         'orderNo',
+    'sipariş numarası':    'orderNo',
+    'siparis numarasi':    'orderNo',
+    // Ürün Adı
+    'urun adi':            'productName',
+    'ürün adı':            'productName',
+    'ürün ismi':           'productName',
+    'urun ismi':           'productName',
+    'product name':        'productName',
+    'productname':         'productName',
+    'ürün':                'productName',
+    'urun':                'productName',
+    'name':                'productName',
+    'ürün başlığı':        'productName',
+    'urun basligi':        'productName',
+    // Müşteri
+    'musteri':             'customerName',
+    'müşteri':             'customerName',
+    'müşteri adı':         'customerName',
+    'musteri adi':         'customerName',
+    'customer name':       'customerName',
+    'alıcı adı':           'customerName',
+    // Tutar
+    'tutar':               'totalPrice',
+    'siparis tutari':      'totalPrice',
+    'sipariş tutarı':      'totalPrice',
+    'toplam':              'totalPrice',
+    'total':               'totalPrice',
+    'total price':         'totalPrice',
+    // Merchant SKU / Satıcı Kodu
+    'satici kodu':         'merchantSku',
+    'satıcı kodu':         'merchantSku',
+    'merchant sku':        'merchantSku',
+    'merchantsku':         'merchantSku',
+    'barcode':             'merchantSku',
+    'barkod':              'merchantSku',
+    // HepsiburadaSku
+    'hepsiburadaSku':      'hbSku',
+    'hepsiburada sku':     'hbSku',
+    'hbsku':               'hbSku',
+    // Kargo
+    'kargo takip no':      'cargoTracking',
+    'takip no':            'cargoTracking',
+    'tracking no':         'cargoTracking',
+    'kargo firması':        'cargoCompany',
+    'kargo firmasi':        'cargoCompany',
+    'cargo company':        'cargoCompany',
+  };
+
+  function normalizeHeader(h) {
+    return String(h || '').toLowerCase().trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[İ]/g, 'i').replace(/[Ş]/g, 'ş').replace(/[Ğ]/g, 'ğ')
+      .replace(/[Ç]/g, 'ç').replace(/[Ö]/g, 'ö').replace(/[Ü]/g, 'ü')
+      .replace(/[ı]/g, 'i');
+  }
+
+  function mapHeaders(rawHeaders) {
+    const map = {}; // colIndex → stdKey
+    rawHeaders.forEach((h, i) => {
+      const norm = normalizeHeader(h);
+      const key  = COL_MAP[norm];
+      if (key && !(key in Object.values(map))) map[i] = key;
+    });
+    return map;
+  }
+
+  function rowToObj(cells, colMap) {
+    const obj = {};
+    for (const [idx, key] of Object.entries(colMap)) {
+      const val = String(cells[idx] ?? '').trim();
+      if (val) obj[key] = val;
+    }
+    return obj;
+  }
+
+  router.post('/hb-import-orders', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Dosya yüklenmedi' });
+
+    const ext = (req.file.originalname || '').split('.').pop().toLowerCase();
+    let rows = []; // [{ orderNo, productName, customerName, totalPrice, merchantSku, hbSku }]
+
+    try {
+      if (ext === 'csv') {
+        // ── CSV parse ──────────────────────────────────────────────────────
+        const text = req.file.buffer.toString('utf-8').replace(/^﻿/, ''); // BOM
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (!lines.length) return res.status(400).json({ error: 'CSV boş' });
+
+        // Basit CSV parse (tırnakları handle eder)
+        function parseCsvLine(line) {
+          const result = [];
+          let inQuote = false, cur = '';
+          for (let i = 0; i < line.length; i++) {
+            const c = line[i];
+            if (c === '"') { inQuote = !inQuote; }
+            else if (c === ',' && !inQuote) { result.push(cur); cur = ''; }
+            else cur += c;
+          }
+          result.push(cur);
+          return result.map(s => s.replace(/^"|"$/g, '').trim());
+        }
+
+        const headers = parseCsvLine(lines[0]);
+        const colMap  = mapHeaders(headers);
+        console.log('[HB Import CSV] Headers:', headers.join(' | '));
+        console.log('[HB Import CSV] ColMap:', JSON.stringify(colMap));
+
+        for (let i = 1; i < lines.length; i++) {
+          const cells = parseCsvLine(lines[i]);
+          const obj   = rowToObj(cells, colMap);
+          if (obj.orderNo) rows.push(obj);
+        }
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        // ── Excel parse ────────────────────────────────────────────────────
+        const ExcelJS = require('exceljs');
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(req.file.buffer);
+        const ws = wb.worksheets[0];
+        if (!ws) return res.status(400).json({ error: 'Excel boş' });
+
+        let colMap = null;
+        ws.eachRow((row, rowNum) => {
+          const cells = [];
+          row.eachCell({ includeEmpty: true }, (cell) => {
+            cells.push(cell.text ?? cell.value ?? '');
+          });
+          if (rowNum === 1) {
+            colMap = mapHeaders(cells);
+            console.log('[HB Import XLS] Headers:', cells.join(' | '));
+            console.log('[HB Import XLS] ColMap:', JSON.stringify(colMap));
+          } else if (colMap) {
+            const obj = rowToObj(cells, colMap);
+            if (obj.orderNo) rows.push(obj);
+          }
+        });
+      } else {
+        return res.status(400).json({ error: 'Desteklenmeyen format. CSV, XLSX veya XLS yükleyin.' });
+      }
+
+      console.log(`[HB Import] ${rows.length} satır parse edildi`);
+      if (!rows.length) return res.status(400).json({ error: 'Dosyada sipariş satırı bulunamadı. Sütun adlarını kontrol edin.' });
+
+      // ── Sadece HB siparişlerini DB'de eşleştir ───────────────────────────
+      // Ürün adı eksik olan HB siparişlerini çek
+      const dbRes = await pool.query(`
+        SELECT mo.id AS mo_id, mo.order_number,
+               moi.id AS item_id,
+               moi.product_name, moi.sku, moi.barcode
+        FROM marketplace_orders mo
+        JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
+        WHERE mo.platform = 'hepsiburada'
+          AND (moi.product_name IS NULL OR moi.product_name = '' OR moi.product_name ~ '^[0-9]{8,}$')
+      `);
+      const dbByOrderNum = new Map();
+      for (const r of dbRes.rows) {
+        dbByOrderNum.set(String(r.order_number), r);
+      }
+      console.log(`[HB Import] DB'de ${dbByOrderNum.size} eksik HB siparişi var`);
+
+      let updated = 0, skipped = 0, notFound = 0;
+      const errors = [];
+
+      for (const row of rows) {
+        const orderNo = String(row.orderNo).trim();
+        const dbRow   = dbByOrderNum.get(orderNo);
+
+        if (!dbRow) { notFound++; continue; }
+
+        const productName = (row.productName || '').trim();
+        if (!productName) { skipped++; continue; }
+
+        try {
+          // products tablosunda merchantSku ile eşleştir
+          let productId = null;
+          const merchantSku = (row.merchantSku || '').trim();
+          if (merchantSku) {
+            const pr = await pool.query(
+              `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1`,
+              [merchantSku]
+            );
+            productId = pr.rows[0]?.id || null;
+          }
+
+          const hbSku       = (row.hbSku || '').trim();
+          const totalPrice  = parseFloat((row.totalPrice || '0').replace(',', '.')) || 0;
+          const customerName= (row.customerName || '').trim();
+
+          // marketplace_order_items güncelle
+          await pool.query(
+            `UPDATE marketplace_order_items
+             SET product_name = $1,
+                 sku          = COALESCE(NULLIF($2,''), sku),
+                 product_id   = COALESCE($3, product_id),
+                 barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END,
+                 updated_at   = NOW()
+             WHERE marketplace_order_id = $5
+               AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
+            [productName, hbSku, productId, merchantSku, dbRow.mo_id]
+          );
+
+          // marketplace_orders güncelle (müşteri adı ve tutar)
+          await pool.query(
+            `UPDATE marketplace_orders
+             SET customer_name = CASE WHEN $1 != '' THEN $1 ELSE customer_name END,
+                 total_price   = CASE WHEN $2 > 0 THEN $2 ELSE total_price END,
+                 updated_at    = NOW()
+             WHERE id = $3`,
+            [customerName, totalPrice, dbRow.mo_id]
+          );
+
+          updated++;
+          console.log(`[HB Import] ✓ #${orderNo} → "${productName}"`);
+        } catch (e) {
+          errors.push({ orderNo, error: e.message });
+          console.error(`[HB Import] ✗ #${orderNo}: ${e.message}`);
+        }
+      }
+
+      console.log(`[HB Import] Tamamlandı: ${updated} güncellendi, ${skipped} ürün adı boş, ${notFound} sipariş DB'de yok`);
+      res.json({
+        ok:       true,
+        updated,
+        skipped,
+        notFound,
+        total:    rows.length,
+        errors:   errors.slice(0, 10),
+        message:  `${updated} HB siparişi güncellendi.${notFound ? ` (${notFound} sipariş DB'de bulunamadı)` : ''}`,
+      });
+    } catch (err) {
+      console.error('[HB Import] Hata:', err.message, err.stack);
+      res.status(500).json({ error: err.message });
+    }
+  });
+})();
+
 module.exports = router;
 module.exports.runMarketplaceSync = runMarketplaceSync;
 
