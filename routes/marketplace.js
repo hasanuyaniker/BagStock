@@ -2160,6 +2160,20 @@ router.post('/test-shipping-email', async (req, res) => {
         });
       }
 
+      // ── Komisyon sütunlarını NUMERIC'e zorla (import öncesi güvence) ──────────
+      // Startup migration başarısız olduysa burada tekrar dener; hata olsa bile import devam eder.
+      const _commAlters = [
+        `ALTER TABLE marketplace_order_items ALTER COLUMN commission_amount TYPE NUMERIC(10,4) USING commission_amount::numeric`,
+        `ALTER TABLE marketplace_order_items ALTER COLUMN commission_rate   TYPE NUMERIC(6,2)  USING commission_rate::numeric`,
+        `ALTER TABLE marketplace_orders      ALTER COLUMN commission_amount TYPE NUMERIC(10,4) USING commission_amount::numeric`,
+        `ALTER TABLE marketplace_orders      ALTER COLUMN commission_rate   TYPE NUMERIC(6,2)  USING commission_rate::numeric`,
+      ];
+      for (const _sql of _commAlters) {
+        try { await pool.query(_sql); } catch (_e) {
+          console.warn(`[HB Import] ALTER uyarı: ${_e.message}`);
+        }
+      }
+
       // ── Tüm HB siparişlerini çek (ürün adı dolu/boş fark etmez) ─────────────
       // Ürün adı güncellemesi sadece boşsa yapılır; tutar/komisyon her zaman yazılır.
       const dbRes = await pool.query(`

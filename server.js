@@ -260,7 +260,14 @@ async function runMigrations() {
         `ALTER TABLE marketplace_orders      ALTER COLUMN commission_rate   TYPE NUMERIC(6,2)  USING commission_rate::numeric`,
       ];
       for (const sql of commissionAlters) {
-        try { await pool.query(sql); } catch (e) { /* sütun zaten doğru tipte veya yok */ }
+        try {
+          await pool.query(sql);
+          const tbl = sql.includes('order_items') ? 'order_items' : 'orders';
+          const col = sql.includes('commission_rate') ? 'commission_rate' : 'commission_amount';
+          console.log(`✓ ALTER OK: ${tbl}.${col} → NUMERIC`);
+        } catch (e) {
+          console.error(`✗ ALTER FAILED: ${e.message} | SQL: ${sql.substring(0, 80)}`);
+        }
       }
       console.log('✓ Komisyon sütun tipleri NUMERIC olarak doğrulandı');
     }
