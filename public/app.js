@@ -2331,12 +2331,17 @@ function renderOrders(orders, total) {
         ).join('')
       : '<span style="color:#d1d5db;">—</span>';
 
-    // Barkod kolonu
+    // Barkod kolonu — HB siparişlerde HepsiburadaSKU (sku alanı), diğerlerinde barcode
     const barcodeHtml = items.length > 0
-      ? items.map(item => item.barcode
-          ? `<div style="line-height:1.5;font-size:10px;color:#6b7280;font-family:monospace;">${escHtml(item.barcode)}</div>`
-          : '<div style="line-height:1.5;">—</div>'
-        ).join('')
+      ? items.map(item => {
+          // HB: hepsiburadaSku varsa onu göster (anlamlı stok kodu), yoksa barcode
+          const barcodeDisplay = (order.platform === 'hepsiburada' && item.sku)
+            ? item.sku
+            : item.barcode;
+          return barcodeDisplay
+            ? `<div style="line-height:1.5;font-size:10px;color:#6b7280;font-family:monospace;">${escHtml(barcodeDisplay)}</div>`
+            : '<div style="line-height:1.5;">—</div>';
+        }).join('')
       : '<span style="color:#d1d5db;">—</span>';
 
     // Order-level flag VEYA item-level flag: biri TRUE ise stok düşürülmüş demektir
