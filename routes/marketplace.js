@@ -703,12 +703,12 @@ router.post('/hb-reset-sync', async (req, res) => {
 });
 
 // ── POST /api/marketplace/hb-enrich-orders ───────────────────────────────────
-// Strateji:
-//  1. HB Listing API'den TÜM listeleri çek → barcode→{name,hbSku,merchantSku} haritası
-//  2. DB'deki ürün adı eksik siparişleri bul (order_id = PackageNumber)
-//  3. Her sipariş için /packagenumber/{id} → flat format response → barcode alanını al
-//  4. Bu barkodu listing haritasında ara → ürün adı + hepsiburadaSku bul
-//  5. DB'yi güncelle (product_name, sku = hepsiburadaSku, barcode = merchantSku)
+// Strateji (öncelik sırasına göre):
+//  1. GET /orders/merchantid/{id}/{orderNumber} → tek sipariş detayı (lineItems dahil)
+//     Gönderilmiş siparişler dahil tam bilgi döndürebilir.
+//  2. Listing API haritası — tüm aktif listeler → hbSku/merchantSku → ürün adı
+//     Package barcode veya mevcut barcode ile eşleştirme
+//  3. Products tablosu — barcode ile yerel eşleştirme (fallback)
 router.post('/hb-enrich-orders', async (req, res) => {
   try {
     const credRow = await pool.query("SELECT value FROM app_settings WHERE key = 'marketplace_credentials'");
@@ -723,61 +723,57 @@ router.post('/hb-enrich-orders', async (req, res) => {
     res.json({ ok: true, message: 'HB ürün adı zenginleştirme başlatıldı. 30-60 saniye içinde sipariş listesini yenile.' });
 
     // ── 1. HB Listing API — tüm aktif listeler, barcode haritası ─────────────
-    // Listing API, her ürün için merchantSku (bizim barkodumuz) + hepsiburadaSku
-    // ve hangi HB barkoduna karşılık geldiğini içerir.
-    // Listing response'un barcode alanı HB'nin ürüne atadığı EAN/barkod olabilir;
-    // bunu /packagenumber yanıtındaki barcode ile eşleştiriyoruz.
     const listingBase = creds.environment === 'production'
       ? 'https://listing-external.hepsiburada.com'
       : 'https://listing-external-sit.hepsiburada.com';
 
-    // barcode/hbSku → { name, merchantSku, hbSku }
+    // key (merchantSku / hbSku / hbBarcode) → { name, merchantSku, hbSku }
     const listingMap = new Map();
 
     try {
       let lOffset = 0;
       const lLimit = 100;
+      let listingPage = 0;
       while (true) {
         const lUrl = `${listingBase}/listings/merchantid/${creds.merchantId}?offset=${lOffset}&limit=${lLimit}`;
         console.log(`[HB Enrich] Listing GET ${lUrl}`);
-        const lr = await fetch(lUrl, { headers, signal: AbortSignal.timeout(15000) });
+        let lr;
+        try {
+          lr = await fetch(lUrl, { headers, signal: AbortSignal.timeout(15000) });
+        } catch (fetchErr) {
+          console.warn(`[HB Enrich] Listing fetch hatası: ${fetchErr.message}`);
+          break;
+        }
         console.log(`[HB Enrich] Listing HTTP ${lr.status}`);
-        if (!lr.ok) break;
+        if (!lr.ok) {
+          const errText = await lr.text().catch(() => '');
+          console.warn(`[HB Enrich] Listing hata body: ${errText.substring(0, 300)}`);
+          break;
+        }
 
         const lRaw = await lr.text();
+        if (listingPage === 0) {
+          console.log(`[HB Enrich] Listing ilk yanıt (800): ${lRaw.substring(0, 800)}`);
+        }
         let lData;
         try { lData = JSON.parse(lRaw); } catch { break; }
-
-        // Log first listing to understand response structure
-        if (lOffset === 0) {
-          console.log(`[HB Enrich] Listing ilk yanıt (800 karakter): ${lRaw.substring(0, 800)}`);
-        }
 
         const listings = Array.isArray(lData) ? lData
           : (lData?.listings || lData?.data || lData?.result || lData?.items || []);
 
         if (!listings.length) break;
+        listingPage++;
 
         for (const l of listings) {
-          // HB ürün barkodu — paket yanıtındaki barcode ile eşleşmeli
-          // HB farklı field adları kullanabilir: hepsiburadaBarcode, barcode, id, hepsiburadaSku
-          const hbBarcode   = String(
-            l.hepsiburadaBarcode || l.HepsiburadaBarcode ||
-            l.eanBarcode || l.EanBarcode ||
-            l.barcode || l.Barcode || ''
-          ).trim();
+          const hbBarcode   = String(l.hepsiburadaBarcode || l.HepsiburadaBarcode || l.eanBarcode || l.EanBarcode || l.barcode || l.Barcode || '').trim();
           const hbSku       = String(l.hepsiburadaSku || l.HepsiburadaSku || l.sku || l.Sku || '').trim();
           const merchantSku = String(l.merchantSku || l.MerchantSku || '').trim();
-          const name        = String(
-            l.productName || l.ProductName || l.name || l.Name || l.title || l.Title || ''
-          ).trim();
-
+          const name        = String(l.productName || l.ProductName || l.name || l.Name || l.title || l.Title || '').trim();
           if (!name) continue;
-
-          // Haritaya birden fazla anahtarla ekle
-          if (hbBarcode)   listingMap.set(hbBarcode, { name, merchantSku, hbSku: hbSku || hbBarcode });
-          if (hbSku && hbSku !== hbBarcode) listingMap.set(hbSku, { name, merchantSku, hbSku });
-          if (merchantSku) listingMap.set(merchantSku, { name, merchantSku, hbSku });
+          const entry = { name, merchantSku, hbSku: hbSku || hbBarcode };
+          if (hbBarcode)                     listingMap.set(hbBarcode, entry);
+          if (hbSku && hbSku !== hbBarcode)  listingMap.set(hbSku, entry);
+          if (merchantSku)                   listingMap.set(merchantSku, entry);
         }
 
         if (listings.length < lLimit) break;
@@ -785,13 +781,13 @@ router.post('/hb-enrich-orders', async (req, res) => {
       }
       console.log(`[HB Enrich] Listing haritası: ${listingMap.size} giriş`);
     } catch (listingErr) {
-      console.warn(`[HB Enrich] Listing API hatası: ${listingErr.message.substring(0, 150)}`);
+      console.warn(`[HB Enrich] Listing API hatası: ${listingErr.message.substring(0, 200)}`);
     }
 
     // ── 2. DB'deki ürün adı eksik HB siparişlerini bul ───────────────────────
     const emptyItems = await pool.query(`
       SELECT DISTINCT mo.id AS mo_id, mo.order_id, mo.order_number,
-             moi.barcode AS current_barcode
+             moi.barcode AS current_barcode, moi.sku AS current_sku
       FROM marketplace_orders mo
       JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
       WHERE mo.platform = 'hepsiburada'
@@ -800,125 +796,183 @@ router.post('/hb-enrich-orders', async (req, res) => {
     console.log(`[HB Enrich] Zenginleştirilecek ${emptyItems.rows.length} sipariş bulundu`);
 
     let enriched = 0;
-    const pkgBase = `${base}/packages/merchantid/${creds.merchantId}`;
+    const ordersBase = `${base}/orders/merchantid/${creds.merchantId}`;
+    const pkgBase    = `${base}/packages/merchantid/${creds.merchantId}`;
 
     for (const row of emptyItems.rows) {
-      const { mo_id, order_id, order_number, current_barcode } = row;
+      const { mo_id, order_id, order_number, current_barcode, current_sku } = row;
 
-      // Adım A: DB'deki mevcut barcode ile listing haritasında ara
-      let listingHit = current_barcode ? listingMap.get(current_barcode) : null;
+      // ── Adım A: Tek sipariş detay endpoint'i ─────────────────────────────
+      // GET /orders/merchantid/{id}/{orderNumber} → lineItems ile tam sipariş
+      let enrichedViaOrder = false;
+      const orderNums = [...new Set([order_number, order_id].filter(Boolean))];
+      for (const tryNum of orderNums) {
+        try {
+          const url = `${ordersBase}/${tryNum}`;
+          console.log(`[HB Enrich] Sipariş detay GET ${url}`);
+          const r = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+          console.log(`[HB Enrich] Sipariş detay HTTP ${r.status} (#${tryNum})`);
+          if (!r.ok) continue;
 
-      // Adım B: Bulunamadıysa /packagenumber endpoint'inden paket barkodunu çek
+          const rawText = await r.text();
+          console.log(`[HB Enrich] Sipariş detay yanıt (#${tryNum}): ${rawText.substring(0, 600)}`);
+          let orderData;
+          try { orderData = JSON.parse(rawText); } catch { continue; }
+
+          // Yanıt array veya obje olabilir
+          const ord = Array.isArray(orderData) ? orderData[0] : orderData;
+          if (!ord) continue;
+
+          const lineItems = ord.lineItems || ord.orderLines || ord.lines || ord.items || [];
+          if (!lineItems.length) {
+            console.log(`[HB Enrich] Sipariş detay #${tryNum} lineItems yok. Anahtarlar: ${Object.keys(ord).join(', ')}`);
+            continue;
+          }
+
+          const customerName = ord.customer?.fullName || ord.customerName || '';
+          const totalPrice   = parseFloat(ord.totalPrice?.amount ?? ord.totalPrice ?? ord.grossAmount ?? 0);
+          await _applyHBEnrichment(pool, mo_id, lineItems, customerName, totalPrice);
+          enrichedViaOrder = true;
+          enriched++;
+          console.log(`[HB Enrich] ✓ #${tryNum} sipariş detayıyla zenginleştirildi (${lineItems.length} kalem)`);
+          break;
+        } catch (e) {
+          console.warn(`[HB Enrich] Sipariş detay hata (#${tryNum}): ${e.message.substring(0, 120)}`);
+        }
+      }
+      if (enrichedViaOrder) continue;
+
+      // ── Adım B: Listing haritasında ara ──────────────────────────────────
+      // Önce mevcut barcode/sku ile dene, bulamazsan /packagenumber'dan barkod çek
+      let listingHit = null;
+
+      // B1: Mevcut DB barkodu/sku ile
+      for (const key of [current_sku, current_barcode].filter(Boolean)) {
+        listingHit = listingMap.get(key);
+        if (listingHit) {
+          console.log(`[HB Enrich] Listing DB-key eşleşti: key=${key} → ${listingHit.name}`);
+          break;
+        }
+      }
+
+      // B2: /packagenumber endpoint'inden paket barkodunu çek (HB warehouse barcode)
+      //     Sonra listing haritasında ve tekil listing URL'sinde ara
       if (!listingHit) {
         const pkgIds = [...new Set([order_id, order_number].filter(Boolean))];
         for (const tryId of pkgIds) {
           try {
             const url = `${pkgBase}/packagenumber/${tryId}`;
+            console.log(`[HB Enrich] Paket barkod GET ${url}`);
             const r = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+            console.log(`[HB Enrich] Paket barkod HTTP ${r.status} (#${tryId})`);
             if (!r.ok) continue;
 
             const pkgData = await r.json();
-            // Response bir array: [{"packageNumber":..., "barcode":"62254749357116",...}]
             const pkg = Array.isArray(pkgData) ? pkgData[0] : pkgData;
             if (!pkg) continue;
 
-            const pkgBarcode = (pkg.barcode || pkg.Barcode || '').trim();
-            console.log(`[HB Enrich] pkg #${tryId} → pkgBarcode=${pkgBarcode}`);
+            // Paketten tüm potansiyel barcode alanlarını dene
+            const candidates = [
+              pkg.barcode, pkg.Barcode,
+              pkg.merchantSku, pkg.MerchantSku,
+              pkg.hepsiburadaSku, pkg.HepsiburadaSku,
+            ].filter(Boolean).map(s => String(s).trim()).filter(Boolean);
 
-            if (pkgBarcode) {
-              listingHit = listingMap.get(pkgBarcode);
+            console.log(`[HB Enrich] Paket candidates: ${candidates.join(', ')}`);
+            for (const bc of candidates) {
+              listingHit = listingMap.get(bc);
               if (listingHit) {
-                console.log(`[HB Enrich] ✓ Listing eşleşti: pkgBarcode=${pkgBarcode} → ${listingHit.name}`);
+                console.log(`[HB Enrich] ✓ Listing harita eşleşti: ${bc} → ${listingHit.name}`);
                 break;
               }
+            }
+            if (listingHit) break;
 
-              // Listing haritasında bulunamadı — doğrudan listing URL'si dene
-              // GET /listings/merchantid/{id}/{hepsiburadaSku}
+            // Tekil listing URL'si dene (hbSku veya merchantSku ile)
+            for (const bc of candidates) {
               try {
-                const lUrl = `${listingBase}/listings/merchantid/${creds.merchantId}/${pkgBarcode}`;
-                console.log(`[HB Enrich] Listing tekil GET ${lUrl}`);
-                const lr = await fetch(lUrl, { headers, signal: AbortSignal.timeout(10000) });
-                console.log(`[HB Enrich] Listing tekil HTTP ${lr.status}`);
-                if (lr.ok) {
-                  const lRaw = await lr.text();
-                  console.log(`[HB Enrich] Listing tekil yanıt: ${lRaw.substring(0, 500)}`);
-                  let lData;
-                  try { lData = JSON.parse(lRaw); } catch {}
-                  if (lData) {
-                    const l = Array.isArray(lData) ? lData[0] : lData;
-                    if (l) {
-                      const name = String(l.productName || l.name || l.title || '').trim();
-                      const hbSku = String(l.hepsiburadaSku || l.sku || pkgBarcode).trim();
-                      const merchantSku = String(l.merchantSku || '').trim();
-                      if (name) {
-                        listingHit = { name, merchantSku, hbSku };
-                        console.log(`[HB Enrich] ✓ Tekil listing bulundu: ${name}`);
-                      }
-                    }
-                  }
-                }
+                const lUrl = `${listingBase}/listings/merchantid/${creds.merchantId}/${bc}`;
+                console.log(`[HB Enrich] Tekil listing GET ${lUrl}`);
+                const lr = await fetch(lUrl, { headers, signal: AbortSignal.timeout(8000) });
+                console.log(`[HB Enrich] Tekil listing HTTP ${lr.status}`);
+                if (!lr.ok) continue;
+                const lRaw = await lr.text();
+                let lData; try { lData = JSON.parse(lRaw); } catch { continue; }
+                const l = Array.isArray(lData) ? lData[0] : lData;
+                if (!l) continue;
+                const name = String(l.productName || l.name || l.title || '').trim();
+                if (!name) continue;
+                listingHit = {
+                  name,
+                  merchantSku: String(l.merchantSku || '').trim(),
+                  hbSku:       String(l.hepsiburadaSku || l.sku || bc).trim(),
+                };
+                console.log(`[HB Enrich] ✓ Tekil listing bulundu: ${name}`);
+                break;
               } catch {}
             }
             if (listingHit) break;
           } catch (e) {
-            console.warn(`[HB Enrich] pkg hata (id=${tryId}): ${e.message.substring(0, 100)}`);
+            console.warn(`[HB Enrich] Paket barkod hata (id=${tryId}): ${e.message.substring(0, 100)}`);
           }
         }
       }
 
-      // Adım C: Listing bulunduysa DB'yi güncelle
-      if (listingHit && listingHit.name) {
-        try {
-          const client2 = await pool.connect();
+      // ── Adım C: Products tablosunda yerel eşleştirme ─────────────────────
+      if (!listingHit) {
+        // DB'deki sku veya barcode ile products tablosunda ara
+        for (const bc of [current_sku, current_barcode].filter(Boolean)) {
           try {
-            // Ürün adı ve HB SKU'su ile kalemleri güncelle
-            const { name, merchantSku, hbSku } = listingHit;
-
-            // merchantSku ile products tablosunda ürün ara
-            let productId = null;
-            if (merchantSku) {
-              const pr = await client2.query(
-                `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1`,
-                [merchantSku]
-              );
-              productId = pr.rows[0]?.id || null;
+            const pr = await pool.query(
+              `SELECT name, barcode FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1`,
+              [bc]
+            );
+            if (pr.rows[0]?.name) {
+              listingHit = { name: pr.rows[0].name, merchantSku: pr.rows[0].barcode, hbSku: '' };
+              console.log(`[HB Enrich] ✓ Products tablosu eşleşti: ${bc} → ${pr.rows[0].name}`);
+              break;
             }
+          } catch {}
+        }
+      }
 
-            // marketplace_order_items güncelle
-            const updResult = await client2.query(
-              `UPDATE marketplace_order_items
-               SET product_name = $1,
-                   sku          = COALESCE(NULLIF($2,''), sku),
-                   product_id   = COALESCE($3, product_id),
-                   barcode      = CASE WHEN $4 != '' THEN $4 ELSE barcode END,
-                   updated_at   = NOW()
-               WHERE marketplace_order_id = $5
-                 AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
-              [name, hbSku, productId, merchantSku || '', mo_id]
+      // ── Adım D: Listing/products verisiyle DB'yi güncelle ─────────────────
+      if (listingHit?.name) {
+        try {
+          const { name, merchantSku, hbSku } = listingHit;
+          let productId = null;
+          if (merchantSku) {
+            const pr = await pool.query(
+              `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1`,
+              [merchantSku]
             );
-
-            // marketplace_orders güncelle (customer_name, total_price yok ama updated_at)
-            await client2.query(
-              `UPDATE marketplace_orders SET updated_at = NOW() WHERE id = $1`,
-              [mo_id]
-            );
-
-            enriched++;
-            console.log(`[HB Enrich] ✓ #${order_number || order_id} güncellendi: "${name}" hbSku=${hbSku} rowsAffected=${updResult.rowCount}`);
-          } finally {
-            client2.release();
+            productId = pr.rows[0]?.id || null;
           }
+          const updResult = await pool.query(
+            `UPDATE marketplace_order_items
+             SET product_name = $1,
+                 sku          = COALESCE(NULLIF($2,''), sku),
+                 product_id   = COALESCE($3, product_id),
+                 barcode      = CASE WHEN $4 != '' THEN $4 ELSE barcode END,
+                 updated_at   = NOW()
+             WHERE marketplace_order_id = $5
+               AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
+            [name, hbSku, productId, merchantSku || '', mo_id]
+          );
+          await pool.query(`UPDATE marketplace_orders SET updated_at=NOW() WHERE id=$1`, [mo_id]);
+          enriched++;
+          console.log(`[HB Enrich] ✓ #${order_number||order_id} güncellendi: "${name}" hbSku=${hbSku} rows=${updResult.rowCount}`);
         } catch (dbErr) {
           console.error(`[HB Enrich] DB güncelleme hatası: ${dbErr.message}`);
         }
       } else {
-        console.log(`[HB Enrich] ✗ Listing bulunamadı: order_id=${order_id} current_barcode=${current_barcode}`);
+        console.log(`[HB Enrich] ✗ Bulunamadı: order_id=${order_id} order_number=${order_number} barcode=${current_barcode}`);
       }
     }
 
     console.log(`[HB Enrich] Tamamlandı: ${enriched}/${emptyItems.rows.length} sipariş zenginleştirildi`);
   } catch (err) {
-    console.error('[HB Enrich] Genel hata:', err.message);
+    console.error('[HB Enrich] Genel hata:', err.message, err.stack);
   }
 });
 
