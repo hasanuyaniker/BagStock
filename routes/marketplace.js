@@ -583,9 +583,10 @@ router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
   }
 });
 
-// ── GET /api/marketplace/orders/export ── CSV export ─────────────────────────
+// ── GET /api/marketplace/orders/export ── XLSX export ────────────────────────
 router.get('/orders/export', async (req, res) => {
   try {
+    const ExcelJS = require('exceljs');
     const { platform, status, from, to } = req.query;
     const params = [];
     const conditions = [];
@@ -600,14 +601,16 @@ router.get('/orders/export', async (req, res) => {
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const result = await pool.query(
-      `SELECT mo.platform, mo.order_number, mo.status_tr, mo.raw_status,
+      `SELECT mo.platform, mo.order_number, mo.status, mo.status_tr, mo.raw_status,
               mo.customer_name, mo.order_date, mo.total_price, mo.currency,
               mo.cargo_company, mo.cargo_tracking_number, mo.cargo_desi,
-              mo.commission_amount,
+              mo.commission_amount, mo.commission_rate,
               STRING_AGG(
-                COALESCE(p.name, moi.product_name, moi.barcode) || ' ×' || moi.quantity::text,
-                ' | '
-              ) AS urunler
+                COALESCE(p.name, moi.product_name, '') || '|' ||
+                COALESCE(moi.sku, moi.barcode, '') || '|' ||
+                moi.quantity::text,
+                ';;'
+              ) AS urunler_raw
        FROM marketplace_orders mo
        LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
        LEFT JOIN products p ON p.id = moi.product_id
@@ -622,33 +625,88 @@ router.get('/orders/export', async (req, res) => {
       iptal: 'İptal', iade_bekliyor: 'İade Bekliyor', iade_onaylandi: 'İade Onaylandı', iade: 'İade'
     };
 
-    const header = ['Platform','Sipariş No','Durum','Müşteri','Tarih','Tutar','Kargo Firması','Takip No','Desi','Komisyon','Ürünler'];
-    const rows = result.rows.map(r => {
-      const dateStr = r.order_date ? new Date(r.order_date).toLocaleDateString('tr-TR') : '';
-      const platformLabel = r.platform === 'trendyol' ? 'Trendyol' : r.platform === 'hepsiburada' ? 'Hepsiburada' : r.platform;
-      const statusLabel = r.status_tr || STATUS_TR[r.status] || r.raw_status || '';
-      return [
-        platformLabel,
-        r.order_number || '',
-        statusLabel,
-        r.customer_name || '',
-        dateStr,
-        r.total_price || 0,
-        r.cargo_company || '',
-        r.cargo_tracking_number || '',
-        r.cargo_desi || '',
-        r.commission_amount || '',
-        (r.urunler || '').replace(/"/g, '""')
-      ].map(v => `"${v}"`).join(',');
-    });
+    const workbook  = new ExcelJS.Workbook();
+    const sheetName = platform === 'trendyol' ? 'Trendyol Siparişleri'
+                    : platform === 'hepsiburada' ? 'Hepsiburada Siparişleri'
+                    : 'Tüm Siparişler';
+    const sheet = workbook.addWorksheet(sheetName);
 
-    const csv = '﻿' + [header.map(h => `"${h}"`).join(','), ...rows].join('\r\n');
+    sheet.columns = [
+      { header: 'Platform',     key: 'platform',     width: 14 },
+      { header: 'Sipariş No',   key: 'order_number', width: 18 },
+      { header: 'Tarih',        key: 'order_date',   width: 16 },
+      { header: 'Durum',        key: 'durum',        width: 16 },
+      { header: 'Müşteri',      key: 'customer',     width: 22 },
+      { header: 'Ürün Adı',     key: 'urun_adi',     width: 35 },
+      { header: 'Barkod/SKU',   key: 'barkod',       width: 20 },
+      { header: 'Adet',         key: 'adet',         width: 8  },
+      { header: 'Tutar (₺)',    key: 'tutar',        width: 14 },
+      { header: 'Kom. Oranı %', key: 'kom_oran',     width: 13 },
+      { header: 'Kom. Tutarı ₺',key: 'kom_tutar',    width: 14 },
+      { header: 'Kargo Firması',key: 'kargo_firma',  width: 16 },
+      { header: 'Takip No',     key: 'takip_no',     width: 20 },
+      { header: 'Desi',         key: 'desi',         width: 8  },
+    ];
+
+    // Başlık satırı stillendir
+    const hrow = sheet.getRow(1);
+    hrow.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3F8A' } };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    hrow.height = 26;
+
+    for (const r of result.rows) {
+      const dateStr     = r.order_date ? new Date(r.order_date).toLocaleDateString('tr-TR') : '';
+      const platformLbl = r.platform === 'trendyol' ? 'Trendyol' : r.platform === 'hepsiburada' ? 'Hepsiburada' : r.platform;
+      const statusLbl   = r.status_tr || STATUS_TR[r.status] || r.raw_status || '';
+      const komRate     = parseFloat(r.commission_rate) || 0;
+      const komAmount   = parseFloat(r.commission_amount) || 0;
+      const tutar       = parseFloat(r.total_price) || 0;
+
+      // Her sipariş birden fazla ürün satırı olabilir
+      const items = (r.urunler_raw || '').split(';;').map(seg => {
+        const parts = seg.split('|');
+        return { name: parts[0] || '', sku: parts[1] || '', qty: parseInt(parts[2]) || 1 };
+      });
+
+      items.forEach((item, idx) => {
+        const row = sheet.addRow({
+          platform:    idx === 0 ? platformLbl : '',
+          order_number:idx === 0 ? (r.order_number || '') : '',
+          order_date:  idx === 0 ? dateStr : '',
+          durum:       idx === 0 ? statusLbl : '',
+          customer:    idx === 0 ? (r.customer_name || '') : '',
+          urun_adi:    item.name,
+          barkod:      item.sku,
+          adet:        item.qty,
+          tutar:       idx === 0 ? tutar : '',
+          kom_oran:    idx === 0 ? (komRate || '') : '',
+          kom_tutar:   idx === 0 ? (komAmount || '') : '',
+          kargo_firma: idx === 0 ? (r.cargo_company || '') : '',
+          takip_no:    idx === 0 ? (r.cargo_tracking_number || '') : '',
+          desi:        idx === 0 ? (parseFloat(r.cargo_desi) || '') : '',
+        });
+        // Para formatı
+        if (idx === 0) {
+          row.getCell('tutar').numFmt     = '#,##0.00 ₺';
+          row.getCell('kom_tutar').numFmt = '#,##0.00 ₺';
+        }
+      });
+    }
+
+    // Sütun genişliklerini otomatik ayarla için freeze
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
     const today = new Date().toISOString().split('T')[0];
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=siparisler_${today}.csv`);
-    res.send(csv);
+    const fileName = `siparisler_${platform || 'tum'}_${today}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    await workbook.xlsx.write(res);
+    res.end();
   } catch (err) {
-    console.error('[Marketplace] CSV export hatası:', err);
+    console.error('[Marketplace] XLSX export hatası:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2682,10 +2740,12 @@ async function upsertOrder(db, order) {
                      json_build_object(
                        'item_id',      moi.item_id,
                        'barcode',      moi.barcode,
-                       'product_name', COALESCE(NULLIF(moi.product_name,''), p.name, moi.barcode),
+                       'sku',          moi.sku,
+                       'product_name', COALESCE(NULLIF(moi.product_name,''), p.name),
                        'quantity',     moi.quantity,
                        'price',        moi.price,
-                       'p_name',       p.name
+                       'p_name',       p.name,
+                       'p_barcode',    p.barcode
                      ) ORDER BY moi.id
                    ) FILTER (WHERE moi.id IS NOT NULL),
                    '[]'::json
@@ -2693,7 +2753,7 @@ async function upsertOrder(db, order) {
           FROM marketplace_orders mo
           LEFT JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
           LEFT JOIN LATERAL (
-            SELECT id, name FROM products p2
+            SELECT id, name, barcode FROM products p2
             WHERE p2.id = moi.product_id
                OR (moi.product_id IS NULL AND (p2.barcode = moi.barcode OR p2.barcode2 = moi.barcode OR p2.barcode3 = moi.barcode))
             LIMIT 1

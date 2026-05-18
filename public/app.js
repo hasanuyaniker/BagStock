@@ -908,12 +908,13 @@ function renderSalesProducts(list) {
       <div class="sales-actions">
         <input type="number" class="sales-qty-input" id="saleQty_${p.id}" value="1" min="1">
         <select class="marketplace-select" id="saleMp_${p.id}">
-          <option value="normal">Normal</option>
+          <option value="iade" selected>↩️ İade</option>
           <option value="trendyol">🟠 Trendyol</option>
           <option value="hepsiburada">🔴 Hepsiburada</option>
           <option value="dolap">👗 Dolap</option>
           <option value="amazon">📦 Amazon</option>
           <option value="pttavm">📮 PTT AVM</option>
+          <option value="normal">📋 Diğer</option>
         </select>
         <button class="btn btn-success btn-sm" onclick="confirmSale(${p.id}, 1)">+ Giriş</button>
         <button class="btn btn-danger btn-sm" onclick="confirmSale(${p.id}, -1)">- Çıkış</button>
@@ -2014,8 +2015,8 @@ function renderSalesReport(data) {
   document.getElementById('srResults').innerHTML = html;
 }
 
-function exportOrders() {
-  const platform = document.getElementById('orderPlatformFilter')?.value || '';
+function exportOrders(forcePlatform) {
+  const platform = forcePlatform || document.getElementById('orderPlatformFilter')?.value || '';
   const status   = document.getElementById('orderStatusFilter')?.value   || '';
   const from     = document.getElementById('orderFromDate')?.value        || '';
   const to       = document.getElementById('orderToDate')?.value          || '';
@@ -2026,19 +2027,23 @@ function exportOrders() {
   if (from)     p.set('from', from);
   if (to)       p.set('to', to);
 
-  apiFetch(`/api/marketplace/orders/export?${p}`)
+  const token = localStorage.getItem('token');
+  const url   = `/api/marketplace/orders/export?${p}`;
+
+  fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
     .then(res => {
       if (!res.ok) throw new Error('Export başarısız');
       return res.blob();
     })
     .then(blob => {
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      const today = new Date().toISOString().split('T')[0];
-      a.download = `siparisler_${today}.csv`;
+      const objUrl = URL.createObjectURL(blob);
+      const a      = document.createElement('a');
+      a.href       = objUrl;
+      const today  = new Date().toISOString().split('T')[0];
+      a.download   = `siparisler_${platform || 'tum'}_${today}.xlsx`;
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(objUrl);
+      showToast('Excel indirildi');
     })
     .catch(() => showToast('Export hatası', 'error'));
 }
@@ -2310,7 +2315,7 @@ function renderOrders(orders, total) {
   };
 
   // Toplamlar
-  let sumPrice = 0, sumDesi = 0, validDesiCount = 0;
+  let sumPrice = 0, sumDesi = 0, validDesiCount = 0, sumQty = 0;
 
   const rows = orders.map(order => {
     const items = Array.isArray(order.items) ? order.items.filter(i => i && i.barcode) : [];
@@ -2362,6 +2367,7 @@ function renderOrders(orders, total) {
     const desi         = parseFloat(order.cargo_desi)         || 0;
     sumPrice += price;
     if (desi > 0) { sumDesi += desi; validDesiCount++; }
+    items.forEach(it => { sumQty += (it.quantity || 1); });
 
     // Komisyon oranı: DB'den geliyorsa kullan, yoksa amount/price'dan hesapla
     let commRate = parseFloat(order.commission_rate) || 0;
@@ -2420,10 +2426,13 @@ function renderOrders(orders, total) {
 
   // Toplam satırı
   if (tfoot) {
-    tfoot.innerHTML = `<tr id="ordersTotalsRow">
-      <td colspan="4" style="text-align:right;font-size:11px;">TOPLAM (${total} sipariş)</td>
+    tfoot.innerHTML = `<tr id="ordersTotalsRow" style="background:#f0f4ff;">
+      <td colspan="3" style="text-align:right;font-size:11px;padding:6px 8px;color:#374151;">
+        <strong>${total}</strong> sipariş
+      </td>
+      <td class="col-status"></td>
       <td class="col-product"></td>
-      <td class="col-qty"></td>
+      <td class="col-qty" style="text-align:center;font-weight:800;font-size:12px;">${sumQty}</td>
       <td class="col-barcode"></td>
       <td class="col-price" style="text-align:right;font-weight:800;">${formatCurrency(sumPrice)}</td>
       <td class="col-comm" style="text-align:right;font-weight:700;">—</td>
@@ -2435,7 +2444,7 @@ function renderOrders(orders, total) {
 
   // Özet metin
   if (summaryEl) {
-    const parts = [`${total} sipariş`, `Ciro: ${formatCurrency(sumPrice)}`];
+    const parts = [`${total} sipariş`, `${sumQty} ürün`, `Ciro: ${formatCurrency(sumPrice)}`];
     if (validDesiCount > 0) parts.push(`Ort. Desi: ${avgDesi}`);
     summaryEl.textContent = parts.join(' | ');
   }

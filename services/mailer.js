@@ -20,13 +20,26 @@ function buildShippingHtml(order) {
     ? parseFloat(order.total_price).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })
     : '—';
 
-  const itemRows = (order.items || []).map(i => {
-    const name = i.p_name || i.product_name || i.barcode || 'Bilinmeyen ürün';
+  // Sadece gerçek ürün adı olan satırları göster (kargo barkodunu filtrele)
+  const validItems = (order.items || []).filter(i => {
+    const name = i.p_name || i.product_name || '';
+    // Sadece rakamlardan oluşan 8+ haneli barkod string'i ise gösterme
+    return name && !/^[0-9]{8,}$/.test(name.trim());
+  });
+
+  const itemRows = validItems.map(i => {
+    const name    = escHtml(i.p_name || i.product_name || '');
+    // Gerçek ürün barkodu: products tablosundan gelen p_barcode, yoksa sku (merchant SKU)
+    const barcode = escHtml(i.p_barcode || i.sku || '');
     return `<tr>
       <td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;font-size:13px;">${name}</td>
-      <td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;font-size:13px;text-align:center;">×${i.quantity || 1}</td>
+      <td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;font-family:monospace;">${barcode || '—'}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="2" style="padding:8px;color:#9ca3af;font-size:13px;">—</td></tr>`;
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
 
   const cargoLine = [
     order.cargo_company ? `<strong>Kargo:</strong> ${order.cargo_company}` : '',
@@ -50,8 +63,8 @@ function buildShippingHtml(order) {
     <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">📦 Ürünler</div>
     <table style="width:100%;border-collapse:collapse;">
       <thead><tr style="background:#f9fafb;">
-        <th style="padding:7px 8px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:12px;color:#6b7280;">Ürün</th>
-        <th style="padding:7px 8px;text-align:center;border-bottom:1px solid #e5e7eb;font-size:12px;color:#6b7280;">Adet</th>
+        <th style="padding:7px 8px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:12px;color:#6b7280;">Ürün Adı</th>
+        <th style="padding:7px 8px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:12px;color:#6b7280;">Barkod</th>
       </tr></thead>
       <tbody>${itemRows}</tbody>
     </table>
