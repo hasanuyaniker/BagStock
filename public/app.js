@@ -1913,11 +1913,13 @@ function renderSalesReport(data) {
 
   // Özet kartları
   const totalSold = summary.reduce((s, r) => s + parseInt(r.total_sold || 0), 0);
+  const totalIade = summary.reduce((s, r) => s + parseInt(r.total_in   || 0), 0);
   const totalCost = summary.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
   const uniqueProducts = summary.length;
 
   document.getElementById('srSummary').style.display = '';
-  document.getElementById('srTotalQty').textContent = formatNumber(totalSold);
+  document.getElementById('srTotalQty').textContent  = formatNumber(totalSold);
+  document.getElementById('srTotalIade').textContent = formatNumber(totalIade);
   document.getElementById('srTotalCost').textContent = formatCurrency(totalCost);
   document.getElementById('srUniqueProducts').textContent = uniqueProducts;
 
@@ -1954,11 +1956,11 @@ function renderSalesReport(data) {
   let html = mpHtml;
   html += '<h4 style="font-size:14px;font-weight:700;margin:16px 0 8px;">Ürün Bazlı Satış Özeti</h4>';
   html += '<div class="table-container"><table><thead><tr>';
-  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyet</th><th>Toplam</th><th>Normal</th><th>🟠 TY</th><th>🔴 HB</th><th>👗 Dolap</th><th>📦 Amazon</th><th>📮 PTT</th><th>Toplam Maliyet</th>';
+  html += '<th>Ürün Adı</th><th>Renk</th><th>Barkod</th><th>Alış Maliyet</th><th>Toplam</th><th>Normal</th><th>↩️ İade</th><th>🟠 TY</th><th>🔴 HB</th><th>👗 Dolap</th><th>📦 Amazon</th><th>📮 PTT</th><th>Toplam Maliyet</th>';
   html += '</tr></thead><tbody>';
 
   if (summary.length === 0) {
-    html += '<tr><td colspan="12" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
+    html += '<tr><td colspan="13" style="text-align:center;padding:30px;color:#6b7280;">Bu tarih aralığında satış kaydı bulunamadı</td></tr>';
   } else {
     summary.forEach(row => {
       html += `<tr>
@@ -1968,6 +1970,7 @@ function renderSalesReport(data) {
         <td>${formatCurrency(row.cost_price)}</td>
         <td><strong style="color:var(--red);">${row.total_sold}</strong></td>
         <td>${row.normal_sold || 0}</td>
+        <td style="color:var(--green);font-weight:700;">${row.total_in || 0}</td>
         <td style="color:#c45d09;font-weight:700;">${row.trendyol_sold || 0}</td>
         <td style="color:#b34500;font-weight:700;">${row.hepsiburada_sold || 0}</td>
         <td style="color:#7c3aed;font-weight:700;">${row.dolap_sold || 0}</td>
@@ -1980,7 +1983,9 @@ function renderSalesReport(data) {
     html += `<tr style="background:#f9fafb;font-weight:700;">
       <td colspan="4" style="text-align:right;">TOPLAM</td>
       <td style="color:var(--red);">${totalSold}</td>
-      <td></td><td></td><td></td><td></td><td></td><td></td>
+      <td></td>
+      <td style="color:var(--green);">${totalIade > 0 ? totalIade : ''}</td>
+      <td></td><td></td><td></td><td></td><td></td>
       <td>${formatCurrency(totalCost)}</td>
     </tr>`;
   }

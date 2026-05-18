@@ -166,6 +166,9 @@ router.get('/sales-report', async (req, res) => {
                           AND COALESCE(s.marketplace,'normal') NOT IN ('normal','trendyol','hepsiburada')
                      THEN s.quantity_change ELSE 0 END))
           AS sold_other,
+        -- İade / stoğa giren
+        SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END)
+          AS total_iade,
         -- Toplam maliyet
         ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END))
           * COALESCE(p.cost_price, 0) AS total_cost
@@ -173,7 +176,7 @@ router.get('/sales-report', async (req, res) => {
       JOIN products p ON s.product_id = p.id
       WHERE s.sale_date >= $1 AND s.sale_date <= $2
       GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
-      HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
+      HAVING SUM(quantity_change) != 0
       ORDER BY total_sold DESC
     `, [from, to]);
 
@@ -187,6 +190,7 @@ router.get('/sales-report', async (req, res) => {
       { header: 'Alış Maliyeti',   key: 'cost_price',   width: 15 },
       { header: 'Toplam Satış',    key: 'total_sold',   width: 13 },
       { header: 'Normal',          key: 'sold_normal',  width: 10 },
+      { header: '↩️ İade',         key: 'total_iade',   width: 10 },
       { header: '🟠 Trendyol',     key: 'sold_ty',      width: 13 },
       { header: '🔴 Hepsiburada',  key: 'sold_hb',      width: 15 },
       { header: 'Diğer',           key: 'sold_other',   width: 10 },
@@ -198,43 +202,43 @@ router.get('/sales-report', async (req, res) => {
       color:        row.color,
       barcode:      row.barcode,
       cost_price:   parseFloat(row.cost_price) || 0,
-      total_sold:   parseInt(row.total_sold) || 0,
-      sold_normal:  parseInt(row.sold_normal) || 0,
-      sold_ty:      parseInt(row.sold_ty) || 0,
-      sold_hb:      parseInt(row.sold_hb) || 0,
-      sold_other:   parseInt(row.sold_other) || 0,
+      total_sold:   parseInt(row.total_sold)   || 0,
+      sold_normal:  parseInt(row.sold_normal)  || 0,
+      total_iade:   parseInt(row.total_iade)   || 0,
+      sold_ty:      parseInt(row.sold_ty)      || 0,
+      sold_hb:      parseInt(row.sold_hb)      || 0,
+      sold_other:   parseInt(row.sold_other)   || 0,
       total_cost:   parseFloat(row.total_cost) || 0,
     }));
 
     styleHeaderRow(sheet);
     sheet.getColumn('D').numFmt = CURRENCY_FORMAT;
-    sheet.getColumn('J').numFmt = CURRENCY_FORMAT;
+    sheet.getColumn('K').numFmt = CURRENCY_FORMAT; // Toplam Maliyet artık K sütununda
 
-    // Platform sütunlarına arka plan rengi ver
-    const TY_FILL  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E0' } }; // açık turuncu
-    const HB_FILL  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } }; // açık kırmızı
-    sheet.getColumn('G').eachCell({ includeEmpty: false }, (cell, rowNum) => {
-      if (rowNum > 1) cell.fill = TY_FILL;
-    });
-    sheet.getColumn('H').eachCell({ includeEmpty: false }, (cell, rowNum) => {
-      if (rowNum > 1) cell.fill = HB_FILL;
-    });
+    // Platform + İade sütunlarına arka plan rengi ver
+    const TY_FILL   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E0' } }; // açık turuncu
+    const HB_FILL   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } }; // açık kırmızı
+    const IADE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } }; // açık yeşil
+    sheet.getColumn('G').eachCell({ includeEmpty: false }, (cell, rowNum) => { if (rowNum > 1) cell.fill = IADE_FILL; });
+    sheet.getColumn('H').eachCell({ includeEmpty: false }, (cell, rowNum) => { if (rowNum > 1) cell.fill = TY_FILL; });
+    sheet.getColumn('I').eachCell({ includeEmpty: false }, (cell, rowNum) => { if (rowNum > 1) cell.fill = HB_FILL; });
 
     // Toplam satırı
     const totSold   = result.rows.reduce((s, r) => s + (parseInt(r.total_sold)  || 0), 0);
     const totNormal = result.rows.reduce((s, r) => s + (parseInt(r.sold_normal) || 0), 0);
+    const totIade   = result.rows.reduce((s, r) => s + (parseInt(r.total_iade)  || 0), 0);
     const totTY     = result.rows.reduce((s, r) => s + (parseInt(r.sold_ty)     || 0), 0);
     const totHB     = result.rows.reduce((s, r) => s + (parseInt(r.sold_hb)     || 0), 0);
     const totOther  = result.rows.reduce((s, r) => s + (parseInt(r.sold_other)  || 0), 0);
     const totCost   = result.rows.reduce((s, r) => s + (parseFloat(r.total_cost) || 0), 0);
     const totalRow  = sheet.addRow({
       product_name: 'TOPLAM',
-      total_sold: totSold, sold_normal: totNormal,
+      total_sold: totSold, sold_normal: totNormal, total_iade: totIade,
       sold_ty: totTY, sold_hb: totHB, sold_other: totOther,
       total_cost: totCost
     });
     totalRow.font = { bold: true };
-    totalRow.getCell('J').numFmt = CURRENCY_FORMAT;
+    totalRow.getCell('K').numFmt = CURRENCY_FORMAT;
     totalRow.eachCell(cell => {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
     });
@@ -259,6 +263,7 @@ router.get('/sales-report', async (req, res) => {
       { plat: '🔴 Hepsiburada', qty: totHB,     cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_hb)||0)*(parseFloat(r.cost_price)||0), 0) },
       { plat: 'Normal',          qty: totNormal, cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_normal)||0)*(parseFloat(r.cost_price)||0), 0) },
       { plat: 'Diğer',           qty: totOther,  cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_other)||0)*(parseFloat(r.cost_price)||0), 0) },
+      { plat: '↩️ İade (Stoğa Giren)', qty: totIade, cost: 0 },
       { plat: 'TOPLAM',          qty: totSold,   cost: totCost },
     ];
     platData.forEach((d, i) => {

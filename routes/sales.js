@@ -152,7 +152,7 @@ router.get('/report', async (req, res) => {
       JOIN products p ON s.product_id = p.id
       WHERE s.sale_date >= $1 AND s.sale_date <= $2
       GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
-      HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
+      HAVING SUM(quantity_change) != 0
       ORDER BY total_sold DESC
     `, [from, to]);
 
