@@ -1909,11 +1909,11 @@ async function loadSalesReport() {
 }
 
 function renderSalesReport(data) {
-  const { details, summary, marketplaceSummary } = data;
+  const { details, summary, marketplaceSummary, totalIade: apiTotalIade } = data;
 
   // Özet kartları
   const totalSold = summary.reduce((s, r) => s + parseInt(r.total_sold || 0), 0);
-  const totalIade = summary.reduce((s, r) => s + parseInt(r.total_in   || 0), 0);
+  const totalIade = apiTotalIade || 0;  // API'den gelen gerçek iade sayısı
   const totalCost = summary.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0);
   const uniqueProducts = summary.length;
 

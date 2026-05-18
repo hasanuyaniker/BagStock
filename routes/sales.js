@@ -146,17 +146,22 @@ router.get('/report', async (req, res) => {
              ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'amazon'      THEN s.quantity_change ELSE 0 END)) AS amazon_sold,
              ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'pttavm'      THEN s.quantity_change ELSE 0 END)) AS pttavm_sold,
              ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'normal'      THEN s.quantity_change ELSE 0 END)) AS normal_sold,
-             SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END) AS total_in,
+             -- İade: yalnızca marketplace='iade' ile kaydedilen iadeler (stok girişi ≠ iade)
+             SUM(CASE WHEN s.marketplace = 'iade' AND s.quantity_change > 0
+                      THEN s.quantity_change ELSE 0 END) AS total_in,
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) * COALESCE(p.cost_price, 0) AS total_cost
       FROM sales s
       JOIN products p ON s.product_id = p.id
       WHERE s.sale_date >= $1 AND s.sale_date <= $2
       GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
-      HAVING SUM(quantity_change) != 0
+      -- Satışı olan VEYA iadesi olan ürünleri göster; saf stok girişleri dahil etme
+      HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
+          OR SUM(CASE WHEN s.marketplace = 'iade' AND s.quantity_change > 0
+                      THEN s.quantity_change ELSE 0 END) > 0
       ORDER BY total_sold DESC
     `, [from, to]);
 
-    // Platform bazlı genel özet
+    // Platform bazlı genel özet (sadece satışlar)
     const marketplaceResult = await pool.query(`
       SELECT COALESCE(marketplace, 'normal') AS marketplace,
              ABS(SUM(CASE WHEN quantity_change < 0 THEN quantity_change ELSE 0 END)) AS total_sold
@@ -165,10 +170,20 @@ router.get('/report', async (req, res) => {
       GROUP BY marketplace
     `, [from, to]);
 
+    // Toplam iade adedi (marketplace='iade' ve quantity_change > 0)
+    const iadeResult = await pool.query(`
+      SELECT COALESCE(SUM(quantity_change), 0) AS total_iade
+      FROM sales
+      WHERE sale_date >= $1 AND sale_date <= $2
+        AND marketplace = 'iade'
+        AND quantity_change > 0
+    `, [from, to]);
+
     res.json({
       details: detailResult.rows,
       summary: summaryResult.rows,
       marketplaceSummary: marketplaceResult.rows,
+      totalIade: parseInt(iadeResult.rows[0]?.total_iade || 0),
       period: { from, to }
     });
   } catch (err) {

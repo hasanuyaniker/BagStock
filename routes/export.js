@@ -166,8 +166,9 @@ router.get('/sales-report', async (req, res) => {
                           AND COALESCE(s.marketplace,'normal') NOT IN ('normal','trendyol','hepsiburada')
                      THEN s.quantity_change ELSE 0 END))
           AS sold_other,
-        -- İade / stoğa giren
-        SUM(CASE WHEN s.quantity_change > 0 THEN s.quantity_change ELSE 0 END)
+        -- İade: yalnızca marketplace='iade' ile kaydedilen iadeler (stok girişi ≠ iade)
+        SUM(CASE WHEN s.marketplace = 'iade' AND s.quantity_change > 0
+                 THEN s.quantity_change ELSE 0 END)
           AS total_iade,
         -- Toplam maliyet
         ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END))
@@ -176,7 +177,10 @@ router.get('/sales-report', async (req, res) => {
       JOIN products p ON s.product_id = p.id
       WHERE s.sale_date >= $1 AND s.sale_date <= $2
       GROUP BY p.id, p.name, p.color, p.barcode, p.cost_price
-      HAVING SUM(quantity_change) != 0
+      -- Satışı olan VEYA iadesi olan ürünleri göster; saf stok girişleri dahil etme
+      HAVING SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END) < 0
+          OR SUM(CASE WHEN s.marketplace = 'iade' AND s.quantity_change > 0
+                      THEN s.quantity_change ELSE 0 END) > 0
       ORDER BY total_sold DESC
     `, [from, to]);
 
