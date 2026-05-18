@@ -1114,9 +1114,12 @@ router.post('/hb-enrich-orders', async (req, res) => {
       FROM marketplace_orders mo
       JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id
       WHERE mo.platform = 'hepsiburada'
-        AND (moi.product_name IS NULL OR moi.product_name = '' OR moi.product_name ~ '^[0-9]{8,}$')
+        AND (
+          moi.product_name IS NULL OR moi.product_name = '' OR moi.product_name ~ '^[0-9]{8,}$'
+          OR moi.barcode IS NULL OR moi.barcode = '' OR moi.barcode ~ '^[0-9]{8,}$' OR moi.barcode LIKE 'HBCV%'
+        )
     `);
-    console.log(`[HB Enrich] Zenginleştirilecek ${emptyItems.rows.length} sipariş bulundu`);
+    console.log(`[HB Enrich] Zenginleştirilecek ${emptyItems.rows.length} sipariş bulundu (HBCV barkodlular dahil)`);
 
     let enriched = 0;
     const ordersBase = `${base}/orders/merchantid/${creds.merchantId}`;
@@ -1273,12 +1276,20 @@ router.post('/hb-enrich-orders', async (req, res) => {
           }
           const updResult = await pool.query(
             `UPDATE marketplace_order_items
-             SET product_name = $1,
+             SET product_name = CASE WHEN $1 != '' AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$') THEN $1 ELSE product_name END,
                  sku          = COALESCE(NULLIF($2,''), sku),
                  product_id   = COALESCE($3, product_id),
-                 barcode      = CASE WHEN $4 != '' THEN $4 ELSE barcode END
+                 barcode      = CASE
+                                  WHEN $4 != '' AND $4 NOT LIKE 'HBCV%'
+                                       AND (barcode IS NULL OR barcode = '' OR barcode ~ '^[0-9]{8,}$' OR barcode LIKE 'HBCV%')
+                                  THEN $4
+                                  ELSE barcode
+                                END
              WHERE marketplace_order_id = $5
-               AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
+               AND (
+                 product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$'
+                 OR barcode IS NULL OR barcode = '' OR barcode ~ '^[0-9]{8,}$' OR barcode LIKE 'HBCV%'
+               )`,
             [name, hbSku, productId, merchantSku || '', mo_id]
           );
           await pool.query(`UPDATE marketplace_orders SET updated_at=NOW() WHERE id=$1`, [mo_id]);
@@ -1316,7 +1327,9 @@ async function _applyHBEnrichment(db, moId, lineItems, customerName, totalPrice)
 
     for (const line of lineItems) {
       const productName    = (line.name || line.productName || '').trim();
-      const merchantBarcode= (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim();
+      // merchantSku = Satıcı Stok Kodu (HF00...) — öncelikli barkod
+      // line.barcode = EAN veya HBCV olabilir, fallback olarak kullan
+      const merchantBarcode= (line.merchantSku || line.merchantSkuId || line.barcode || line.merchantBarcode || line.productBarcode || '').trim();
       const hbSku          = (line.hepsiburadaSku || line.hepsiburadaBarcode || line.sku || '').trim();
       if (!productName) continue;
 
@@ -1329,14 +1342,25 @@ async function _applyHBEnrichment(db, moId, lineItems, customerName, totalPrice)
         productId = prod.rows[0]?.id || null;
       }
 
+      // product_name: yalnızca boş/numeric olduğunda güncelle
+      // barcode: merchantSku geçerliyse (HBCV değil) → NULL, boş, numeric veya HBCV olan barkodları güncelle
+      // WHERE: ürün adı eksik VEYA barkod HBCV/boş/numeric olan satırları kapsasın
       await client.query(
         `UPDATE marketplace_order_items
-         SET product_name = $1,
+         SET product_name = CASE WHEN $1 != '' AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$') THEN $1 ELSE product_name END,
              product_id   = COALESCE($2, product_id),
              sku          = COALESCE(NULLIF($3,''), sku),
-             barcode      = CASE WHEN $4 != '' AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$') THEN $4 ELSE barcode END
+             barcode      = CASE
+                              WHEN $4 != '' AND $4 NOT LIKE 'HBCV%' AND $4 !~ '^[0-9]{10,}$'
+                                   AND (barcode IS NULL OR barcode = '' OR barcode ~ '^[0-9]{8,}$' OR barcode LIKE 'HBCV%')
+                              THEN $4
+                              ELSE barcode
+                            END
          WHERE marketplace_order_id = $5
-           AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')`,
+           AND (
+             product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$'
+             OR barcode IS NULL OR barcode = '' OR barcode ~ '^[0-9]{8,}$' OR barcode LIKE 'HBCV%'
+           )`,
         [productName, productId, hbSku, merchantBarcode, moId]
       );
     }
