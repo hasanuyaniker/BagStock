@@ -312,8 +312,8 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
           if (lineItems.length > 0) {
             flatOrder.items = lineItems.map(line => ({
               item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-              barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
-              sku:               line.merchantSku || line.sku || '',
+              barcode:           (line.merchantSku || line.merchantSkuId || line.barcode || line.merchantBarcode || line.productBarcode || '').trim(),
+              sku:               line.hepsiburadaSku || line.sku || line.merchantSku || '',
               product_name:      line.name || line.productName || line.hepsiburadaSku || '',
               quantity:          parseInt(line.quantity || line.requestedQuantity || 1),
               price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? line.salePrice ?? 0),
@@ -547,12 +547,14 @@ function normalizeHBPackage(pkg, forcedRawStatus) {
   let items;
   if (isFlatFormat) {
     // Flat format: /shipped, /delivered, /undelivered endpoint'leri
-    const pkgBarcode = (pkg.Barcode || pkg.barcode || '').trim();
-    const pkgDesi    = parseFloat(pkg.Deci || pkg.deci || 0) || null;
+    // MerchantSku (Satıcı Stok Kodu) öncelikli; yoksa kargo barkodunu kullan (zenginleştirme ile üzerine yazılacak)
+    const merchantSku = (pkg.MerchantSku || pkg.merchantSku || '').trim();
+    const pkgBarcode  = merchantSku || (pkg.Barcode || pkg.barcode || '').trim();
+    const pkgDesi     = parseFloat(pkg.Deci || pkg.deci || 0) || null;
     items = pkgBarcode ? [{
       item_id:           String(pkg.Id || pkg.id || ''),
       barcode:           pkgBarcode,
-      sku:               '',
+      sku:               pkg.HepsiburadaSku || pkg.hepsiburadaSku || '',
       product_name:      '',
       quantity:          1,
       price:             0,

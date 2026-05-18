@@ -35,6 +35,7 @@ async function runMigrations() {
     // Çoklu barkod desteği
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode3 VARCHAR(100)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode4 VARCHAR(100)`);
     // Marketplace sipariş tablosu
     await pool.query(`CREATE TABLE IF NOT EXISTS marketplace_orders (
       id SERIAL PRIMARY KEY,
@@ -306,6 +307,25 @@ async function runMigrations() {
       await pool.query(`INSERT INTO app_settings (key,value) VALUES ('clean_hb_dup_items_v2','true') ON CONFLICT (key) DO NOTHING`);
       if (r.rowCount > 0) console.log(`✓ ${r.rowCount} HB duplicate item silindi (v2 — barcode-based)`);
       else console.log('✓ HB duplicate item kontrolü tamam (v2), silinecek kayıt yok');
+    }
+
+    // ── HB barkod → Satıcı Stok Kodu migrasyonu ──────────────────────────────
+    // Mevcut HB order items'ta barcode alanı SKU/HB barkoduydu.
+    // Artık merchantSku (sku sütunu) kullanıyoruz. Mevcut kayıtları güncelle.
+    const fixHBBarcode = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_hb_barcode_to_merchant_sku_v1'`);
+    if (fixHBBarcode.rows.length === 0) {
+      const r = await pool.query(`
+        UPDATE marketplace_order_items moi
+        SET barcode = moi.sku
+        FROM marketplace_orders mo
+        WHERE moi.marketplace_order_id = mo.id
+          AND mo.platform = 'hepsiburada'
+          AND moi.sku IS NOT NULL AND moi.sku <> ''
+          AND moi.barcode IS DISTINCT FROM moi.sku
+      `);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_hb_barcode_to_merchant_sku_v1','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} HB order item barkodu → Satıcı Stok Kodu olarak güncellendi`);
+      else console.log('✓ HB barkod kontrolü tamam, güncelleme gerekmedi');
     }
 
     // ── sale_date → kargoda_at düzeltmesi ────────────────────────────────────
