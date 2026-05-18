@@ -137,16 +137,38 @@ router.get('/sales', async (req, res) => {
   }
 });
 
-// GET /api/export/sales-report — Ürün bazlı satış özet raporu
+// GET /api/export/sales-report — Ürün bazlı satış özet raporu (platform breakdown dahil)
 router.get('/sales-report', async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'Tarih aralığı gerekli' });
 
     const result = await pool.query(`
-      SELECT p.name AS product_name, p.color, p.barcode, p.cost_price,
-             ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS total_sold,
-             ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) * COALESCE(p.cost_price, 0) AS total_cost
+      SELECT
+        p.name AS product_name,
+        p.color,
+        p.barcode,
+        p.cost_price,
+        -- Toplam satılan
+        ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END))
+          AS total_sold,
+        -- Platform bazlı dağılım
+        ABS(SUM(CASE WHEN s.quantity_change < 0 AND COALESCE(s.marketplace,'normal') = 'normal'
+                     THEN s.quantity_change ELSE 0 END))
+          AS sold_normal,
+        ABS(SUM(CASE WHEN s.quantity_change < 0 AND s.marketplace = 'trendyol'
+                     THEN s.quantity_change ELSE 0 END))
+          AS sold_ty,
+        ABS(SUM(CASE WHEN s.quantity_change < 0 AND s.marketplace = 'hepsiburada'
+                     THEN s.quantity_change ELSE 0 END))
+          AS sold_hb,
+        ABS(SUM(CASE WHEN s.quantity_change < 0
+                          AND COALESCE(s.marketplace,'normal') NOT IN ('normal','trendyol','hepsiburada')
+                     THEN s.quantity_change ELSE 0 END))
+          AS sold_other,
+        -- Toplam maliyet
+        ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END))
+          * COALESCE(p.cost_price, 0) AS total_cost
       FROM sales s
       JOIN products p ON s.product_id = p.id
       WHERE s.sale_date >= $1 AND s.sale_date <= $2
@@ -159,29 +181,96 @@ router.get('/sales-report', async (req, res) => {
     const sheet = workbook.addWorksheet('Satış Özet Raporu');
 
     sheet.columns = [
-      { header: 'Ürün Adı', key: 'product_name', width: 30 },
-      { header: 'Renk', key: 'color', width: 15 },
-      { header: 'Barkod', key: 'barcode', width: 20 },
-      { header: 'Alış Maliyeti', key: 'cost_price', width: 15 },
-      { header: 'Satılan Adet', key: 'total_sold', width: 14 },
-      { header: 'Toplam Maliyet', key: 'total_cost', width: 18 }
+      { header: 'Ürün Adı',        key: 'product_name', width: 30 },
+      { header: 'Renk',            key: 'color',        width: 15 },
+      { header: 'Barkod',          key: 'barcode',      width: 20 },
+      { header: 'Alış Maliyeti',   key: 'cost_price',   width: 15 },
+      { header: 'Toplam Satış',    key: 'total_sold',   width: 13 },
+      { header: 'Normal',          key: 'sold_normal',  width: 10 },
+      { header: '🟠 Trendyol',     key: 'sold_ty',      width: 13 },
+      { header: '🔴 Hepsiburada',  key: 'sold_hb',      width: 15 },
+      { header: 'Diğer',           key: 'sold_other',   width: 10 },
+      { header: 'Toplam Maliyet',  key: 'total_cost',   width: 18 },
     ];
 
-    result.rows.forEach(row => sheet.addRow(row));
-    styleHeaderRow(sheet);
+    result.rows.forEach(row => sheet.addRow({
+      product_name: row.product_name,
+      color:        row.color,
+      barcode:      row.barcode,
+      cost_price:   parseFloat(row.cost_price) || 0,
+      total_sold:   parseInt(row.total_sold) || 0,
+      sold_normal:  parseInt(row.sold_normal) || 0,
+      sold_ty:      parseInt(row.sold_ty) || 0,
+      sold_hb:      parseInt(row.sold_hb) || 0,
+      sold_other:   parseInt(row.sold_other) || 0,
+      total_cost:   parseFloat(row.total_cost) || 0,
+    }));
 
+    styleHeaderRow(sheet);
     sheet.getColumn('D').numFmt = CURRENCY_FORMAT;
-    sheet.getColumn('F').numFmt = CURRENCY_FORMAT;
+    sheet.getColumn('J').numFmt = CURRENCY_FORMAT;
+
+    // Platform sütunlarına arka plan rengi ver
+    const TY_FILL  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E0' } }; // açık turuncu
+    const HB_FILL  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } }; // açık kırmızı
+    sheet.getColumn('G').eachCell({ includeEmpty: false }, (cell, rowNum) => {
+      if (rowNum > 1) cell.fill = TY_FILL;
+    });
+    sheet.getColumn('H').eachCell({ includeEmpty: false }, (cell, rowNum) => {
+      if (rowNum > 1) cell.fill = HB_FILL;
+    });
 
     // Toplam satırı
-    const totalRow = sheet.addRow({
+    const totSold   = result.rows.reduce((s, r) => s + (parseInt(r.total_sold)  || 0), 0);
+    const totNormal = result.rows.reduce((s, r) => s + (parseInt(r.sold_normal) || 0), 0);
+    const totTY     = result.rows.reduce((s, r) => s + (parseInt(r.sold_ty)     || 0), 0);
+    const totHB     = result.rows.reduce((s, r) => s + (parseInt(r.sold_hb)     || 0), 0);
+    const totOther  = result.rows.reduce((s, r) => s + (parseInt(r.sold_other)  || 0), 0);
+    const totCost   = result.rows.reduce((s, r) => s + (parseFloat(r.total_cost) || 0), 0);
+    const totalRow  = sheet.addRow({
       product_name: 'TOPLAM',
-      total_sold: result.rows.reduce((s, r) => s + parseInt(r.total_sold || 0), 0),
-      total_cost: result.rows.reduce((s, r) => s + parseFloat(r.total_cost || 0), 0)
+      total_sold: totSold, sold_normal: totNormal,
+      sold_ty: totTY, sold_hb: totHB, sold_other: totOther,
+      total_cost: totCost
     });
     totalRow.font = { bold: true };
+    totalRow.getCell('J').numFmt = CURRENCY_FORMAT;
+    totalRow.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
+    });
 
-    res.setHeader('Content-Disposition', `attachment; filename=satis_ozet_${from}_${to}.xlsx`);
+    // Özet platform sayfası
+    const sumSheet = workbook.addWorksheet('Platform Özeti');
+    sumSheet.columns = [
+      { header: 'Platform',      key: 'plat',   width: 18 },
+      { header: 'Satılan Adet',  key: 'qty',    width: 14 },
+      { header: 'Maliyet (₺)',   key: 'cost',   width: 16 },
+    ];
+    const sumHeader = sumSheet.getRow(1);
+    sumHeader.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3F8A' } };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    sumHeader.height = 26;
+
+    const platData = [
+      { plat: '🟠 Trendyol',    qty: totTY,     cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_ty)||0)*(parseFloat(r.cost_price)||0), 0) },
+      { plat: '🔴 Hepsiburada', qty: totHB,     cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_hb)||0)*(parseFloat(r.cost_price)||0), 0) },
+      { plat: 'Normal',          qty: totNormal, cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_normal)||0)*(parseFloat(r.cost_price)||0), 0) },
+      { plat: 'Diğer',           qty: totOther,  cost: result.rows.reduce((s,r) => s + (parseInt(r.sold_other)||0)*(parseFloat(r.cost_price)||0), 0) },
+      { plat: 'TOPLAM',          qty: totSold,   cost: totCost },
+    ];
+    platData.forEach((d, i) => {
+      const row = sumSheet.addRow(d);
+      row.getCell('cost').numFmt = CURRENCY_FORMAT;
+      if (i === platData.length - 1) {
+        row.font = { bold: true };
+        row.eachCell(cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } }; });
+      }
+    });
+
+    res.setHeader('Content-Disposition', `attachment; filename=satis_raporu_${from}_${to}.xlsx`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     await workbook.xlsx.write(res);
     res.end();
