@@ -22,6 +22,61 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
+// ── GET /api/marketplace/hb-listings-map — Listings API HBCV→merchantSku haritası (debug) ──
+router.get('/hb-listings-map', async (req, res) => {
+  try {
+    const credRow = await pool.query("SELECT value FROM app_settings WHERE key = 'marketplace_credentials'");
+    const creds = credRow.rows[0] ? JSON.parse(credRow.rows[0].value).hepsiburada : null;
+    if (!creds?.merchantId) return res.status(400).json({ error: 'HB kimlik bilgileri eksik' });
+
+    const { makeHBHeaders } = require('../services/hepsiburada');
+    const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
+    const listingBase = creds.environment === 'production'
+      ? 'https://listing-external.hepsiburada.com'
+      : 'https://listing-external-sit.hepsiburada.com';
+
+    const url = `${listingBase}/listings/merchantid/${creds.merchantId}?offset=0&limit=200`;
+    const lr = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+    const rawText = await lr.text();
+
+    let data;
+    try { data = JSON.parse(rawText); } catch { return res.json({ httpStatus: lr.status, raw: rawText.substring(0, 2000) }); }
+
+    const rows = Array.isArray(data) ? data : (data?.listings || data?.data || data?.result || data?.items || []);
+
+    // İlk 5 listing'in ham verisini göster — field adlarını tespit etmek için
+    const sample = rows.slice(0, 5).map(l => l);
+
+    // HBCV → merchantSku haritası
+    const map = {};
+    for (const l of rows) {
+      const mSku = String(l.merchantSku || l.MerchantSku || '').trim();
+      const hbSku = String(l.hepsiburadaSku || l.HepsiburadaSku || l.sku || l.Sku || '').trim();
+      if (mSku && hbSku) map[hbSku] = mSku;
+    }
+
+    // DB'deki hâlâ HBCV olan item'lar
+    const dbItems = await pool.query(`
+      SELECT moi.barcode, moi.sku, moi.stock_deducted, mo.order_number
+      FROM marketplace_order_items moi
+      JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
+      WHERE mo.platform = 'hepsiburada'
+        AND moi.barcode LIKE 'HBCV%'
+      LIMIT 20
+    `);
+
+    res.json({
+      listingsCount: rows.length,
+      mapSize: Object.keys(map).length,
+      sampleListings: sample,
+      hbcvToMerchantMap: map,
+      dbHbcvItems: dbItems.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/marketplace/hb-test-labelling — Auth gerektirmez (debug) ────────
 router.get('/hb-test-labelling', async (req, res) => {
   try {
@@ -782,12 +837,15 @@ router.post('/sync', async (req, res) => {
 // TÜM HB order items'larının barkodunu HBCV → Satıcı Stok Kodu'na günceller.
 // stock_deducted=TRUE dahil tüm kayıtları düzeltir.
 // Strateji:
-//   1) sku alanında zaten HF00... varsa → barcode = sku (hızlı)
-//   2) sku boş/HBCV ise → HB API'ye sipariş detay sorarak merchantSku çek, barcode'u güncelle
-//   3) API'den de alınamazsa → stock_deducted=FALSE olanları sil (sync ile yeniden eklenecek)
+//   1) Listings API'den HBCV → merchantSku (HF00...) haritası oluştur (en güvenilir)
+//   2) Bu haritayı kullanarak tüm HB order items'larını toplu güncelle
+//   3) Hâlâ HBCV olan ama sku alanında HF00... var olanları sku'dan güncelle
+//   4) Hâlâ HBCV olan stock_deducted=FALSE olanları sil → sync ile doğru barcode'la yeniden eklenecek
+//   5) Hâlâ HBCV olan stock_deducted=TRUE olanların barcode'unu temizle
+//   6) Yeniden sync başlat
 router.post('/hb-fix-barcodes', async (req, res) => {
   // Hemen yanıt ver — işlem arka planda devam eder
-  res.json({ ok: true, message: 'HB barkod düzeltme başlatıldı, arka planda çalışıyor. Birkaç dakika sonra siparişleri yenileyin.' });
+  res.json({ ok: true, message: 'HB barkod düzeltme başlatıldı, arka planda çalışıyor. 15-30 saniye içinde siparişleri yenileyin.' });
 
   try {
     const { getHBBase, makeHBHeaders } = require('../services/hepsiburada');
@@ -799,12 +857,93 @@ router.post('/hb-fix-barcodes', async (req, res) => {
       console.error('[HB Fix Barcodes] HB kimlik bilgileri eksik');
       return;
     }
-    const base    = getHBBase(creds.environment);
-    const headers = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
+    const headers    = makeHBHeaders(creds.merchantId, creds.apiKey, creds.username);
     const merchantId = creds.merchantId;
+    const listingBase = creds.environment === 'production'
+      ? 'https://listing-external.hepsiburada.com'
+      : 'https://listing-external-sit.hepsiburada.com';
 
-    // ── Adım 1: sku alanında gerçek satıcı kodu varsa barcode = sku ──────────
-    const step1 = await pool.query(`
+    // ── Adım 1: Listings API → HBCV barkod haritası ──────────────────────────
+    // GET /listings/merchantid/{merchantId}?offset=N&limit=200
+    // Her listing hem hepsiburadaSku (HBCV...) hem merchantSku (HF00...) içerir
+    const hbcvToMerchant = new Map(); // "HBCV000079MI38" → "HF00114RNKK"
+    try {
+      let offset = 0;
+      const limit = 200;
+      let pageNum = 0;
+      while (true) {
+        const lUrl = `${listingBase}/listings/merchantid/${merchantId}?offset=${offset}&limit=${limit}`;
+        console.log(`[HB Fix Barcodes] Listings sayfa ${pageNum + 1}: GET ${lUrl}`);
+        let lr;
+        try {
+          lr = await fetch(lUrl, { headers, signal: AbortSignal.timeout(15000) });
+        } catch (fetchErr) {
+          console.warn(`[HB Fix Barcodes] Listings fetch hatası: ${fetchErr.message}`);
+          break;
+        }
+        if (!lr.ok) {
+          const errBody = await lr.text().catch(() => '');
+          console.warn(`[HB Fix Barcodes] Listings HTTP ${lr.status}: ${errBody.substring(0, 200)}`);
+          break;
+        }
+        const lRaw = await lr.text();
+        if (pageNum === 0) console.log(`[HB Fix Barcodes] Listings ilk yanıt: ${lRaw.substring(0, 600)}`);
+        let lData;
+        try { lData = JSON.parse(lRaw); } catch { console.warn('[HB Fix Barcodes] Listings JSON parse hatası'); break; }
+
+        const rows = Array.isArray(lData) ? lData
+          : (lData?.listings || lData?.data || lData?.result || lData?.items || []);
+        if (!rows.length) break;
+        pageNum++;
+
+        for (const l of rows) {
+          // merchantSku = HF00... (Satıcı Stok Kodu — bizim kodu)
+          const mSku = String(l.merchantSku || l.MerchantSku || '').trim();
+          if (!mSku || mSku.startsWith('HBCV')) continue; // geçerli bir satıcı kodu olmalı
+
+          // hepsiburadaSku / sku = HBCV... (HB'nin kendi kodu) — tüm olası alan adlarını dene
+          const hbCodes = [
+            l.hepsiburadaSku, l.HepsiburadaSku,
+            l.sku, l.Sku,
+            l.hepsiburadaId, l.HepsiburadaId,
+            l.hepsiburadaBarcode, l.HepsiburadaBarcode,
+          ].map(v => String(v || '').trim()).filter(v => v && v.startsWith('HBCV'));
+
+          for (const code of hbCodes) {
+            hbcvToMerchant.set(code, mSku);
+          }
+        }
+
+        if (rows.length < limit) break;
+        offset += limit;
+      }
+      console.log(`[HB Fix Barcodes] Listings haritası: ${hbcvToMerchant.size} giriş (HBCV → HF00)`);
+    } catch (listingErr) {
+      console.warn(`[HB Fix Barcodes] Listings API kritik hata: ${listingErr.message}`);
+    }
+
+    // ── Adım 2: Listings haritasını kullanarak toplu güncelle ─────────────────
+    let listingsUpdated = 0;
+    for (const [hbcv, mSku] of hbcvToMerchant) {
+      try {
+        const r = await pool.query(
+          `UPDATE marketplace_order_items moi
+           SET barcode = $1
+           FROM marketplace_orders mo
+           WHERE moi.marketplace_order_id = mo.id
+             AND mo.platform = 'hepsiburada'
+             AND moi.barcode = $2`,
+          [mSku, hbcv]
+        );
+        listingsUpdated += r.rowCount;
+      } catch (updErr) {
+        console.warn(`[HB Fix Barcodes] Güncelleme hatası (${hbcv}→${mSku}): ${updErr.message.substring(0, 80)}`);
+      }
+    }
+    console.log(`[HB Fix Barcodes] Adım 2: Listings haritasından ${listingsUpdated} kayıt güncellendi`);
+
+    // ── Adım 3: Hâlâ HBCV — sku alanında HF00... var ise sku'dan al ──────────
+    const step3 = await pool.query(`
       UPDATE marketplace_order_items moi
       SET barcode = moi.sku
       FROM marketplace_orders mo
@@ -814,86 +953,10 @@ router.post('/hb-fix-barcodes', async (req, res) => {
         AND moi.sku NOT LIKE 'HBCV%'
         AND (moi.barcode LIKE 'HBCV%' OR moi.barcode IS NULL OR moi.barcode = '')
     `);
-    console.log(`[HB Fix Barcodes] Adım 1: ${step1.rowCount} kayıt sku'dan güncellendi`);
+    console.log(`[HB Fix Barcodes] Adım 3: sku alanından ${step3.rowCount} kayıt güncellendi`);
 
-    // ── Adım 2: Hâlâ HBCV olan item'lar için API'den merchantSku çek ─────────
-    const remaining = await pool.query(`
-      SELECT DISTINCT mo.order_number, mo.id AS order_db_id,
-             moi.id AS item_id, moi.item_id AS hb_line_id, moi.stock_deducted
-      FROM marketplace_order_items moi
-      JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
-      WHERE mo.platform = 'hepsiburada'
-        AND (moi.barcode LIKE 'HBCV%' OR moi.barcode IS NULL OR moi.barcode = '')
-      ORDER BY mo.order_number
-    `);
-    console.log(`[HB Fix Barcodes] Adım 2: ${remaining.rows.length} item API'den düzeltilecek`);
-
-    // Sipariş numarasına göre grupla
-    const orderGroups = {};
-    for (const row of remaining.rows) {
-      if (!orderGroups[row.order_number]) orderGroups[row.order_number] = [];
-      orderGroups[row.order_number].push(row);
-    }
-
-    let apiFixed = 0, apiNotFound = 0;
-    for (const [orderNumber, items] of Object.entries(orderGroups)) {
-      if (!orderNumber || orderNumber === 'null') continue;
-      try {
-        // Sipariş detay endpoint'i: lineItems içerir (merchantSku dahil)
-        const url = `${base}/orders/merchantid/${merchantId}/ordernumber/${orderNumber}`;
-        const resp = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
-        if (!resp.ok) { apiNotFound += items.length; continue; }
-        const data = await resp.json();
-
-        const lineItems = data?.lineItems || data?.orderLines || data?.lines || data?.items || [];
-        if (lineItems.length === 0) { apiNotFound += items.length; continue; }
-
-        // lineItemId → merchantSku haritası
-        const skuMap = {};
-        for (const line of lineItems) {
-          const lineId = String(line.id || line.lineItemId || line.lineId || '');
-          const merchantSku = (line.merchantSku || line.merchantSkuId || '').trim();
-          if (lineId && merchantSku && !merchantSku.startsWith('HBCV')) {
-            skuMap[lineId] = merchantSku;
-          }
-          // barcode olarak da eşleştir
-          const hbBarcode = (line.barcode || line.hepsiburadaSku || '').trim();
-          if (hbBarcode && merchantSku) skuMap['bc:' + hbBarcode] = merchantSku;
-        }
-
-        for (const item of items) {
-          // Önce lineId ile eşleştir, sonra HBCV barkod ile
-          let merchantSku = skuMap[item.hb_line_id];
-          if (!merchantSku) {
-            // item'ın mevcut barkodunu kontrol et
-            const barcodeRow = await pool.query(
-              `SELECT barcode FROM marketplace_order_items WHERE id = $1`, [item.item_id]
-            );
-            const curBarcode = barcodeRow.rows[0]?.barcode || '';
-            merchantSku = skuMap['bc:' + curBarcode];
-          }
-
-          if (merchantSku) {
-            await pool.query(
-              `UPDATE marketplace_order_items SET barcode = $1 WHERE id = $2`,
-              [merchantSku, item.item_id]
-            );
-            apiFixed++;
-          } else {
-            apiNotFound++;
-          }
-        }
-      } catch (err) {
-        console.warn(`[HB Fix Barcodes] #${orderNumber} API hatası: ${err.message.substring(0, 80)}`);
-        apiNotFound += items.length;
-      }
-      // Rate limit için küçük bekleme
-      await new Promise(r => setTimeout(r, 100));
-    }
-    console.log(`[HB Fix Barcodes] Adım 2: ${apiFixed} API'den güncellendi, ${apiNotFound} bulunamadı`);
-
-    // ── Adım 3: Hâlâ HBCV olan VE stock_deducted=FALSE olanları sil → sync ile yeniden eklenecek
-    const step3 = await pool.query(`
+    // ── Adım 4: Hâlâ HBCV ve stok düşülmemiş → sil (sync ile doğru gelecek) ──
+    const step4 = await pool.query(`
       DELETE FROM marketplace_order_items moi
       USING marketplace_orders mo
       WHERE moi.marketplace_order_id = mo.id
@@ -901,9 +964,21 @@ router.post('/hb-fix-barcodes', async (req, res) => {
         AND (moi.barcode LIKE 'HBCV%' OR moi.barcode IS NULL OR moi.barcode = '')
         AND moi.stock_deducted = FALSE
     `);
-    console.log(`[HB Fix Barcodes] Adım 3: ${step3.rowCount} item silindi (stok düşülmemiş, sync ile yeniden eklenecek)`);
+    console.log(`[HB Fix Barcodes] Adım 4: ${step4.rowCount} stok düşülmemiş HBCV item silindi (sync ile yeniden eklenecek)`);
 
-    // ── Adım 4: Yeniden sync ──────────────────────────────────────────────────
+    // ── Adım 5: Hâlâ HBCV ve stok düşülmüş → barcode temizle (gösterim için) ─
+    const step5 = await pool.query(`
+      UPDATE marketplace_order_items moi
+      SET barcode = ''
+      FROM marketplace_orders mo
+      WHERE moi.marketplace_order_id = mo.id
+        AND mo.platform = 'hepsiburada'
+        AND moi.barcode LIKE 'HBCV%'
+        AND moi.stock_deducted = TRUE
+    `);
+    console.log(`[HB Fix Barcodes] Adım 5: ${step5.rowCount} stok düşülmüş HBCV item temizlendi`);
+
+    // ── Adım 6: Yeniden sync ──────────────────────────────────────────────────
     await runMarketplaceSync(pool);
     console.log('[HB Fix Barcodes] Tüm adımlar tamamlandı ✓');
   } catch (err) {

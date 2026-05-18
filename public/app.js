@@ -2514,9 +2514,8 @@ async function hbFixBarcodes() {
   try {
     const res = await apiFetch('/api/marketplace/hb-fix-barcodes', { method: 'POST' });
     if (res && res.ok) {
-      const data = await res.json();
-      showToast(`✓ ${data.updated} barkod güncellendi, ${data.deleted} kayıt yeniden sync için silindi. Sync başlatıldı.`);
-      setTimeout(() => { loadOrders(_ordersPage); loadSyncStatus(); }, 8000);
+      showToast('✓ HB barkod düzeltme başlatıldı. Listings API üzerinden HBCV → Satıcı Stok Kodu güncelleniyor. 20-30 saniye içinde yenile.');
+      setTimeout(() => { loadOrders(_ordersPage); loadSyncStatus(); }, 25000);
     } else {
       showToast('Hata oluştu', 'error');
     }
