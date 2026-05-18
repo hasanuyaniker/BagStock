@@ -272,32 +272,40 @@ async function runMigrations() {
       console.log('✓ Komisyon sütun tipleri NUMERIC olarak doğrulandı');
     }
 
-    // ── Tekrar eden (duplicate) HB flat-format item'ları temizle ─────────────
-    // Kargo barkodundan oluşan sentetik satırlar (ürün adı boş + 8+ haneli numerik barkod)
-    // zenginleştirme sonrası oluşan gerçek item'larla çiftleniyor. Tek seferlik temizle.
-    const cleanDupItems = await pool.query(`SELECT value FROM app_settings WHERE key = 'clean_hb_dup_items_v1'`);
-    if (cleanDupItems.rows.length === 0) {
+    // ── Tekrar eden (duplicate) HB item'ları temizle (v2 — tüm barkod tipleri) ──
+    // Kök neden: aynı sipariş full-format (item_id=lineItemId) VE flat-format (item_id=pkg.Id)
+    // ile gelince ON CONFLICT (marketplace_order_id, item_id) çalışmaz → aynı barkodda 2 kayıt.
+    // ROW_NUMBER() ile (marketplace_order_id, barcode) başına TEK en iyi kaydı tut, gerisini sil.
+    const cleanDupV2 = await pool.query(`SELECT value FROM app_settings WHERE key = 'clean_hb_dup_items_v2'`);
+    if (cleanDupV2.rows.length === 0) {
       const r = await pool.query(`
-        DELETE FROM marketplace_order_items
-        WHERE id IN (
-          SELECT moi.id
+        WITH ranked AS (
+          SELECT
+            moi.id,
+            ROW_NUMBER() OVER (
+              PARTITION BY moi.marketplace_order_id, moi.barcode
+              ORDER BY
+                -- Gerçek ürün adı olan kaydı önce tut
+                CASE WHEN moi.product_name IS NOT NULL
+                          AND moi.product_name <> ''
+                          AND moi.product_name !~ '^[0-9]{8,}$'
+                     THEN 0 ELSE 1 END ASC,
+                -- Daha erken eklenen kaydı önce tut
+                moi.id ASC
+            ) AS rn
           FROM marketplace_order_items moi
           JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
           WHERE mo.platform = 'hepsiburada'
-            AND (moi.product_name IS NULL OR moi.product_name = '' OR moi.product_name ~ '^[0-9]{8,}$')
-            AND (moi.barcode IS NULL OR moi.barcode ~ '^[0-9]{8,}$' OR moi.barcode = '')
-            AND moi.stock_deducted = FALSE
-            AND EXISTS (
-              SELECT 1 FROM marketplace_order_items moi2
-              WHERE moi2.marketplace_order_id = moi.marketplace_order_id
-                AND moi2.id <> moi.id
-                AND moi2.product_name IS NOT NULL AND moi2.product_name <> ''
-                AND moi2.product_name !~ '^[0-9]{8,}$'
-            )
+            AND moi.barcode IS NOT NULL
+            AND moi.barcode <> ''
         )
+        DELETE FROM marketplace_order_items
+        WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+          AND stock_deducted = FALSE
       `);
-      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('clean_hb_dup_items_v1','true') ON CONFLICT (key) DO NOTHING`);
-      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} HB flat-format tekrar item silindi`);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('clean_hb_dup_items_v2','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} HB duplicate item silindi (v2 — barcode-based)`);
+      else console.log('✓ HB duplicate item kontrolü tamam (v2), silinecek kayıt yok');
     }
 
     // ── sale_date → kargoda_at düzeltmesi ────────────────────────────────────

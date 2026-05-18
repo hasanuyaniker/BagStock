@@ -2323,6 +2323,25 @@ async function upsertOrder(db, order) {
     // Bu sayede her deploy/sync'te aynı sipariş tekrar düşüm yapmaz.
     if (orderAlreadyDeducted) {
       // Yine de item meta-verilerini güncelle (durum, komisyon, vb.) ama stok dokunma
+      // Önce: duplicate barcode temizle (aynı barkod farklı item_id)
+      const incomingItemsD = (order.items || []).filter(i =>
+        i.product_name && i.product_name.trim() !== '' && !/^[0-9]{8,}$/.test(i.product_name.trim())
+      );
+      if (incomingItemsD.length > 0) {
+        const incomingBarcodesD = [...new Set(incomingItemsD.map(i => i.barcode).filter(Boolean))];
+        const incomingItemIdsD  = incomingItemsD.map(i =>
+          i.item_id || (i.barcode + '_' + (i.sku || ''))
+        ).filter(Boolean);
+        if (incomingBarcodesD.length > 0 && incomingItemIdsD.length > 0) {
+          await client.query(
+            `DELETE FROM marketplace_order_items
+             WHERE marketplace_order_id = $1
+               AND barcode = ANY($2::text[])
+               AND item_id <> ALL($3::text[])`,
+            [orderId, incomingBarcodesD, incomingItemIdsD]
+          );
+        }
+      }
       for (const item of (order.items || [])) {
         if (!item.barcode && !item.item_id) continue;
         const productResult = await client.query(
@@ -2370,10 +2389,30 @@ async function upsertOrder(db, order) {
       }
       await client.query('COMMIT');
     } else {
-      // ── Eski flat-format / sentetik item'ları temizle ──────────────────────
-      // Kargo/teslimat barkodundan oluşturulan geçici satırları sil:
-      // ürün adı boş VE barkod yalnızca rakam (kargo barkodu = 8+ hane).
-      // Bu sayede zenginleştirme sonrası eklenen gerçek item'lar çiftlenmiyor.
+      // ── Duplicate item'ları temizle (kök neden: aynı sipariş full + flat format ile gelince
+      //    item_id farklı, barcode aynı → ON CONFLICT çalışmaz → çift kayıt oluşur) ─────────
+      // Çözüm: Yeni sync gelirken gerçek ürün adı olan item'ların barkodlarına göre,
+      // aynı barkodla farklı item_id'ye sahip ESKİ kayıtları sil.
+      const incomingItems = (order.items || []).filter(i =>
+        i.product_name && i.product_name.trim() !== '' && !/^[0-9]{8,}$/.test(i.product_name.trim())
+      );
+      if (incomingItems.length > 0) {
+        const incomingBarcodes = [...new Set(incomingItems.map(i => i.barcode).filter(Boolean))];
+        const incomingItemIds  = incomingItems.map(i =>
+          i.item_id || (i.barcode + '_' + (i.sku || ''))
+        ).filter(Boolean);
+        if (incomingBarcodes.length > 0 && incomingItemIds.length > 0) {
+          await client.query(
+            `DELETE FROM marketplace_order_items
+             WHERE marketplace_order_id = $1
+               AND stock_deducted = FALSE
+               AND barcode = ANY($2::text[])
+               AND item_id <> ALL($3::text[])`,
+            [orderId, incomingBarcodes, incomingItemIds]
+          );
+        }
+      }
+      // Ayrıca: yalnızca sayısal barkod/kargo barkodu olan (ürün adı boş/sayısal) eski satırları da temizle
       await client.query(`
         DELETE FROM marketplace_order_items
         WHERE marketplace_order_id = $1
