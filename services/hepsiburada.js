@@ -292,50 +292,82 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
       }
     }
 
-    // Adım 2: Hâlâ eksik olanlar için HB API'den paket detayı çek
-    // GET /packages/merchantid/{id}/packagenumber/{pkgNum} → lineItems ile tam paket
+    // Adım 2: Hâlâ eksik olanlar için sipariş detay endpoint'ini dene
+    // GET /orders/merchantid/{id}/ordernumber/{orderNumber} → lineItems, komisyon, müşteri adı dahil
     const stillFlat = flatToEnrich.filter(o => o.items.every(i => !i.product_name));
     if (stillFlat.length > 0) {
-      console.log(`[HepsiB] ${stillFlat.length} paket için API'den detay çekiliyor...`);
+      console.log(`[HepsiB] ${stillFlat.length} paket için sipariş detay API'si çekiliyor...`);
       for (const flatOrder of stillFlat) {
+        const orderNum = flatOrder.order_number || flatOrder.order_id;
+        if (!orderNum) continue;
         try {
-          const detailUrl = `${pkgBase}/packagenumber/${flatOrder.order_id}`;
-          console.log(`[HepsiB] Paket detay GET ${detailUrl}`);
+          const detailUrl = `${base}/orders/merchantid/${merchantId}/ordernumber/${orderNum}`;
+          console.log(`[HepsiB] Sipariş detay GET ${detailUrl}`);
           const res = await fetch(detailUrl, { headers, signal: AbortSignal.timeout(10000) });
-          console.log(`[HepsiB] Paket detay HTTP ${res.status}`);
+          console.log(`[HepsiB] Sipariş detay HTTP ${res.status}`);
           if (!res.ok) continue;
 
-          const pkgData = await res.json();
-          const lineItems = pkgData?.lineItems || pkgData?.lines || pkgData?.items || [];
+          const orderData = await res.json();
+          const lineItems = orderData?.lineItems || orderData?.orderLines || orderData?.lines || orderData?.items || [];
           if (lineItems.length > 0) {
             flatOrder.items = lineItems.map(line => ({
               item_id:           String(line.id || line.lineItemId || line.lineId || ''),
               barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
               sku:               line.merchantSku || line.sku || '',
               product_name:      line.name || line.productName || line.hepsiburadaSku || '',
-              quantity:          parseInt(line.quantity || 1),
-              price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? 0),
+              quantity:          parseInt(line.quantity || line.requestedQuantity || 1),
+              price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? line.salePrice ?? 0),
               raw_status:        flatOrder.raw_status,
               status:            flatOrder.status,
               status_tr:         flatOrder.status_tr,
               should_deduct:     HB_DEDUCT_STATUSES.has(flatOrder.raw_status),
-              commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? 0) || null,
-              commission_rate:   parseFloat(line.commissionRate ?? 0) || null,
+              commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? line.merchantCommissionAmount ?? 0) || null,
+              commission_rate:   parseFloat(line.commissionRate ?? line.merchantCommissionRate ?? 0) || null,
               cargo_desi:        null,
             }));
-            if (!flatOrder.customer_name && pkgData?.customer?.fullName) {
-              flatOrder.customer_name = pkgData.customer.fullName;
+            if (!flatOrder.customer_name) {
+              flatOrder.customer_name = orderData?.customer?.fullName || orderData?.customerName || '';
             }
             if (!flatOrder.total_price || flatOrder.total_price === 0) {
-              flatOrder.total_price = parseFloat(pkgData?.totalPrice?.amount ?? pkgData?.totalPrice ?? 0) || 0;
+              flatOrder.total_price = parseFloat(orderData?.totalPrice?.amount ?? orderData?.totalPrice ?? orderData?.grossAmount ?? 0) || 0;
             }
-            console.log(`[HepsiB] ✓ #${flatOrder.order_id} API zenginleştirme başarılı (${lineItems.length} ürün)`);
+            console.log(`[HepsiB] ✓ #${orderNum} sipariş detay zenginleştirme başarılı (${lineItems.length} ürün)`);
           } else {
-            // lineItems yok ama yanıt geldi — ham veriyi logla
-            console.log(`[HepsiB] ⚠ #${flatOrder.order_id} detay yanıtı lineItems içermiyor: ${JSON.stringify(pkgData).substring(0, 300)}`);
+            // lineItems yok — paket detay endpoint'ini dene (kargo bilgisi endpoint'i)
+            try {
+              const pkgDetailUrl = `${pkgBase}/packagenumber/${flatOrder.order_id}`;
+              console.log(`[HepsiB] Paket detay GET ${pkgDetailUrl}`);
+              const pr = await fetch(pkgDetailUrl, { headers, signal: AbortSignal.timeout(10000) });
+              console.log(`[HepsiB] Paket detay HTTP ${pr.status}`);
+              if (!pr.ok) continue;
+              const pkgData = await pr.json();
+              const pkgLines = pkgData?.lineItems || pkgData?.lines || pkgData?.items || [];
+              if (pkgLines.length > 0) {
+                flatOrder.items = pkgLines.map(line => ({
+                  item_id:           String(line.id || line.lineItemId || line.lineId || ''),
+                  barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
+                  sku:               line.merchantSku || line.sku || '',
+                  product_name:      line.name || line.productName || line.hepsiburadaSku || '',
+                  quantity:          parseInt(line.quantity || 1),
+                  price:             parseFloat(line.price?.amount ?? line.price ?? line.unitPrice?.amount ?? 0),
+                  raw_status:        flatOrder.raw_status,
+                  status:            flatOrder.status,
+                  status_tr:         flatOrder.status_tr,
+                  should_deduct:     HB_DEDUCT_STATUSES.has(flatOrder.raw_status),
+                  commission_amount: parseFloat(line.commission?.amount ?? line.commissionAmount ?? 0) || null,
+                  commission_rate:   parseFloat(line.commissionRate ?? 0) || null,
+                  cargo_desi:        null,
+                }));
+                console.log(`[HepsiB] ✓ #${flatOrder.order_id} paket detay zenginleştirme başarılı (${pkgLines.length} ürün)`);
+              } else {
+                console.log(`[HepsiB] ⚠ #${flatOrder.order_id} hiçbir endpoint lineItems döndürmedi: ${JSON.stringify(orderData).substring(0, 200)}`);
+              }
+            } catch (pkgErr) {
+              console.warn(`[HepsiB] #${flatOrder.order_id} paket detay hatası: ${pkgErr.message.substring(0, 100)}`);
+            }
           }
         } catch (enrichErr) {
-          console.warn(`[HepsiB] #${flatOrder.order_id} zenginleştirme hatası: ${enrichErr.message.substring(0, 100)}`);
+          console.warn(`[HepsiB] #${orderNum} zenginleştirme hatası: ${enrichErr.message.substring(0, 100)}`);
         }
       }
     }

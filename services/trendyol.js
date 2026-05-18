@@ -185,13 +185,15 @@ function mapOrder(order) {
       line.volumetricWeight || line.desi || line.packageDesi || 0
     ) || pkgDesi;
 
-    // Komisyon — orders API'de varsa alınır, yoksa finance API tamamlar
-    const lineComm = parseFloat(
-      line.commissionFee || line.commissionAmount || line.commission || 0
-    ) || null;
+    // Komisyon — TY API'de lines[].commission = komisyon ORANI (%, örn. 13)
+    // Parasal tutar: commissionFee/commissionAmount varsa doğrudan al, yoksa orandan hesapla
     const lineCommRate = parseFloat(
-      line.commissionRate || line.commissionRatio || 0
+      line.commissionRate || line.commissionRatio || line.commission || 0
     ) || null;
+    const _linePrice = parseFloat(line.price || line.amount || line.linePrice || line.salePrice || 0);
+    const _lineQty   = parseInt(line.quantity) || 1;
+    const lineComm = parseFloat(line.commissionFee || line.commissionAmount || 0) ||
+      (lineCommRate ? Math.round(_linePrice * _lineQty * lineCommRate / 100 * 100) / 100 : null);
 
     return {
       item_id:           String(line.id || line.lineItemId || line.orderLineId || ''),

@@ -2519,54 +2519,6 @@ async function hbEnrichOrders() {
   }
 }
 
-// HB satıcı panelinden indirilen CSV/Excel dosyasını içe aktar
-function hbImportOrders() {
-  const input = document.getElementById('hbImportFileInput');
-  if (input) input.click();
-}
-
-async function hbImportFileSelected(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  const btn = document.getElementById('hbImportBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Yükleniyor...'; }
-
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const token = localStorage.getItem('token');
-    const res = await fetch('/api/marketplace/hb-import-orders', {
-      method: 'POST',
-      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-      body: formData,
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      showToast('Hata: ' + (data.error || 'Bilinmeyen hata'), 'error');
-      return;
-    }
-
-    if (data.updated > 0) {
-      showToast(`✅ ${data.updated} HB siparişi güncellendi!`, 'success');
-      setTimeout(() => loadOrders(), 1500);
-    } else {
-      // Yüklenen dosyada ürün adı yoksa kullanıcıya açıklama ver
-      const msg = data.updated === 0 && data.total > 0
-        ? `Dosyada ${data.total} satır bulundu ama ürün adı sütunu boş veya eşleşen sipariş yok. HB satıcı panelinden doğru raporu indirin: merchant.hepsiburada.com → Siparişler → Dışa Aktar`
-        : (data.message || 'Güncellenecek sipariş bulunamadı.');
-      showToast(msg, 'warning');
-    }
-  } catch (err) {
-    showToast('Yükleme hatası: ' + err.message, 'error');
-  } finally {
-    input.value = ''; // input'u sıfırla (aynı dosyayı tekrar seçebilsin)
-    if (btn) { btn.disabled = false; btn.textContent = '📂 HB Panel Excel İçe Aktar'; }
-  }
-}
 
 // HB verilerini sıfırla ve API'den yeniden çek
 async function hbResetSync() {
