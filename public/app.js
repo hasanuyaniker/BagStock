@@ -1843,7 +1843,7 @@ async function saveDailyReportTime() {
   if (!time) { showToast('Lütfen bir saat seçin', 'error'); return; }
   const res = await apiFetch('/api/settings/daily-report-time', { method: 'POST', body: { time } });
   if (res?.ok) {
-    showToast(`Günlük rapor saati ${time} olarak kaydedildi`);
+    showToast(`Günlük kargo raporu saati ${time} olarak kaydedildi`);
     loadEmailSettings();
   }
 }
@@ -1853,7 +1853,7 @@ async function clearDailyReportTime() {
   if (res?.ok) {
     document.getElementById('dailyReportTime').value = '';
     document.getElementById('dailyReportStatus').textContent = 'Otomatik gönderim kapalı';
-    showToast('Günlük rapor otomatik gönderimi kapatıldı');
+    showToast('Günlük kargo raporu otomatik gönderimi kapatıldı');
   }
 }
 
@@ -2499,47 +2499,6 @@ async function saveDesi(orderId, desiValue) {
   }
 }
 
-// HB siparişlerindeki eksik ürün adlarını API'den çek (DB'yi güncelle)
-async function hbEnrichOrders() {
-  const btn = document.getElementById('hbEnrichBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ürün adları çekiliyor...'; }
-  try {
-    const res = await apiFetch('/api/marketplace/hb-enrich-orders', { method: 'POST' });
-    if (!res) return;
-    const data = await res.json();
-    showToast(data.message || 'HB ürün adları güncelleniyor. 20 saniye sonra yenile.', 'success');
-    // 20 saniye sonra otomatik yenile (işlem arka planda)
-    setTimeout(() => { loadOrders(); }, 20000);
-  } catch (err) {
-    showToast('Hata: ' + err.message, 'error');
-  } finally {
-    setTimeout(() => {
-      if (btn) { btn.disabled = false; btn.textContent = '🏷️ HB Ürün Adlarını Çek'; }
-    }, 25000);
-  }
-}
-
-
-// HB verilerini sıfırla ve API'den yeniden çek
-async function hbResetSync() {
-  const btn = document.getElementById('hbResetBtn');
-  if (!confirm('Tüm Hepsiburada siparişleri silinip API\'den yeniden çekilecek. Devam et?')) return;
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sıfırlanıyor...'; }
-  try {
-    const res = await apiFetch('/api/marketplace/hb-reset-sync', { method: 'POST' });
-    if (!res) return;
-    const data = await res.json();
-    showToast(data.message || 'HB sıfırlandı. 15 saniye sonra sayfayı yenileyin.', 'success');
-    // 15 saniye sonra otomatik yenile
-    setTimeout(() => { loadOrders(); }, 15000);
-  } catch (err) {
-    showToast('Hata: ' + err.message, 'error');
-  } finally {
-    setTimeout(() => {
-      if (btn) { btn.disabled = false; btn.textContent = '🗑️ HB Sıfırla & Yenile'; }
-    }, 20000);
-  }
-}
 
 async function syncMarketplace() {
   const btn = document.getElementById('syncBtn');

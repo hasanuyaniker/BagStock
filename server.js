@@ -272,6 +272,51 @@ async function runMigrations() {
       console.log('✓ Komisyon sütun tipleri NUMERIC olarak doğrulandı');
     }
 
+    // ── Tekrar eden (duplicate) HB flat-format item'ları temizle ─────────────
+    // Kargo barkodundan oluşan sentetik satırlar (ürün adı boş + 8+ haneli numerik barkod)
+    // zenginleştirme sonrası oluşan gerçek item'larla çiftleniyor. Tek seferlik temizle.
+    const cleanDupItems = await pool.query(`SELECT value FROM app_settings WHERE key = 'clean_hb_dup_items_v1'`);
+    if (cleanDupItems.rows.length === 0) {
+      const r = await pool.query(`
+        DELETE FROM marketplace_order_items
+        WHERE id IN (
+          SELECT moi.id
+          FROM marketplace_order_items moi
+          JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
+          WHERE mo.platform = 'hepsiburada'
+            AND (moi.product_name IS NULL OR moi.product_name = '' OR moi.product_name ~ '^[0-9]{8,}$')
+            AND (moi.barcode IS NULL OR moi.barcode ~ '^[0-9]{8,}$' OR moi.barcode = '')
+            AND moi.stock_deducted = FALSE
+            AND EXISTS (
+              SELECT 1 FROM marketplace_order_items moi2
+              WHERE moi2.marketplace_order_id = moi.marketplace_order_id
+                AND moi2.id <> moi.id
+                AND moi2.product_name IS NOT NULL AND moi2.product_name <> ''
+                AND moi2.product_name !~ '^[0-9]{8,}$'
+            )
+        )
+      `);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('clean_hb_dup_items_v1','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} HB flat-format tekrar item silindi`);
+    }
+
+    // ── sale_date → kargoda_at düzeltmesi ────────────────────────────────────
+    // Marketplace satışlarında sale_date sipariş tarihine set ediliyordu. Düzelt:
+    // Marketplace'ten gelen satışları kargoda_at tarihine güncelle.
+    const fixSaleDates = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_sale_date_to_kargoda_at_v1'`);
+    if (fixSaleDates.rows.length === 0) {
+      const r = await pool.query(`
+        UPDATE sales s
+        SET sale_date = DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul')
+        FROM marketplace_orders mo
+        WHERE s.note LIKE 'Marketplace #' || mo.order_number
+          AND mo.kargoda_at IS NOT NULL
+          AND s.sale_date != DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul')
+      `);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_sale_date_to_kargoda_at_v1','true') ON CONFLICT (key) DO NOTHING`);
+      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} satış kaydının tarihi kargoda_at ile güncellendi`);
+    }
+
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);

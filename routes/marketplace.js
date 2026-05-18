@@ -93,9 +93,10 @@ router.get('/orders', async (req, res) => {
     } else if (status) {
       conditions.push(`mo.status = $${params.push(status)}`);
     }
-    // DATE() karşılaştırması — saat farkını ortadan kaldırır
-    if (from) { conditions.push(`DATE(mo.order_date) >= $${params.push(from)}`); }
-    if (to)   { conditions.push(`DATE(mo.order_date) <= $${params.push(to)}`); }
+    // Tarih filtresi: kargoya verilme tarihi (kargoda_at) öncelikli
+    // kargoda_at null ise sipariş tarihine (order_date) düş
+    if (from) { conditions.push(`DATE(COALESCE(mo.kargoda_at, mo.order_date) AT TIME ZONE 'Europe/Istanbul') >= $${params.push(from)}`); }
+    if (to)   { conditions.push(`DATE(COALESCE(mo.kargoda_at, mo.order_date) AT TIME ZONE 'Europe/Istanbul') <= $${params.push(to)}`); }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
@@ -596,13 +597,13 @@ router.get('/orders/export', async (req, res) => {
     } else if (status) {
       conditions.push(`mo.status = $${params.push(status)}`);
     }
-    if (from) conditions.push(`DATE(mo.order_date) >= $${params.push(from)}`);
-    if (to)   conditions.push(`DATE(mo.order_date) <= $${params.push(to)}`);
+    if (from) conditions.push(`DATE(COALESCE(mo.kargoda_at, mo.order_date) AT TIME ZONE 'Europe/Istanbul') >= $${params.push(from)}`);
+    if (to)   conditions.push(`DATE(COALESCE(mo.kargoda_at, mo.order_date) AT TIME ZONE 'Europe/Istanbul') <= $${params.push(to)}`);
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const result = await pool.query(
       `SELECT mo.platform, mo.order_number, mo.status, mo.status_tr, mo.raw_status,
-              mo.customer_name, mo.order_date, mo.total_price, mo.currency,
+              mo.customer_name, mo.order_date, mo.kargoda_at, mo.total_price, mo.currency,
               mo.cargo_company, mo.cargo_tracking_number, mo.cargo_desi,
               mo.commission_amount, mo.commission_rate,
               STRING_AGG(
@@ -658,7 +659,9 @@ router.get('/orders/export', async (req, res) => {
     hrow.height = 26;
 
     for (const r of result.rows) {
-      const dateStr     = r.order_date ? new Date(r.order_date).toLocaleDateString('tr-TR') : '';
+      // Kargoya verilen siparişlerde kargoda_at tarihini göster, yoksa sipariş tarihi
+      const displayDate = r.kargoda_at || r.order_date;
+      const dateStr     = displayDate ? new Date(displayDate).toLocaleDateString('tr-TR') : '';
       const platformLbl = r.platform === 'trendyol' ? 'Trendyol' : r.platform === 'hepsiburada' ? 'Hepsiburada' : r.platform;
       const statusLbl   = r.status_tr || STATUS_TR[r.status] || r.raw_status || '';
       const komRate     = parseFloat(r.commission_rate) || 0;
@@ -698,6 +701,60 @@ router.get('/orders/export', async (req, res) => {
 
     // Sütun genişliklerini otomatik ayarla için freeze
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    // ── Platform Özet Tablosu ────────────────────────────────────────────────
+    // Platform başına: sipariş adedi, toplam ürün adedi, ciro, komisyon
+    const summaryMap = {};
+    for (const r of result.rows) {
+      const plat = r.platform || 'diger';
+      if (!summaryMap[plat]) summaryMap[plat] = { count: 0, qty: 0, revenue: 0, commission: 0 };
+      summaryMap[plat].count++;
+      summaryMap[plat].revenue    += parseFloat(r.total_price) || 0;
+      summaryMap[plat].commission += parseFloat(r.commission_amount) || 0;
+      // Ürün adedi: tüm item'ların qty toplamı
+      (r.urunler_raw || '').split(';;').forEach(seg => {
+        const parts = seg.split('|');
+        summaryMap[plat].qty += parseInt(parts[2]) || 1;
+      });
+    }
+
+    // Özet sayfası ekle
+    const sumSheet = workbook.addWorksheet('Özet');
+    sumSheet.columns = [
+      { header: 'Platform',      key: 'plat',   width: 16 },
+      { header: 'Sipariş Adedi', key: 'count',  width: 16 },
+      { header: 'Toplam Ürün',   key: 'qty',    width: 14 },
+      { header: 'Ciro (₺)',      key: 'revenue',width: 16 },
+      { header: 'Komisyon (₺)',  key: 'comm',   width: 16 },
+    ];
+    const sumHeader = sumSheet.getRow(1);
+    sumHeader.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3F8A' } };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    sumHeader.height = 26;
+
+    const PLAT_LABEL = { trendyol: 'Trendyol', hepsiburada: 'Hepsiburada', diger: 'Diğer' };
+    let totCount = 0, totQty = 0, totRev = 0, totComm = 0;
+    for (const [plat, d] of Object.entries(summaryMap)) {
+      const row = sumSheet.addRow({
+        plat:    PLAT_LABEL[plat] || plat,
+        count:   d.count,
+        qty:     d.qty,
+        revenue: d.revenue,
+        comm:    d.commission,
+      });
+      row.getCell('revenue').numFmt = '#,##0.00 ₺';
+      row.getCell('comm').numFmt    = '#,##0.00 ₺';
+      totCount += d.count; totQty += d.qty; totRev += d.revenue; totComm += d.commission;
+    }
+    // Toplam satırı
+    const totRow = sumSheet.addRow({ plat: 'TOPLAM', count: totCount, qty: totQty, revenue: totRev, comm: totComm });
+    totRow.eachCell(cell => { cell.font = { bold: true }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } }; });
+    totRow.getCell('revenue').numFmt = '#,##0.00 ₺';
+    totRow.getCell('comm').numFmt    = '#,##0.00 ₺';
+    // ────────────────────────────────────────────────────────────────────────
 
     const today = new Date().toISOString().split('T')[0];
     const fileName = `siparisler_${platform || 'tum'}_${today}.xlsx`;
@@ -2313,6 +2370,18 @@ async function upsertOrder(db, order) {
       }
       await client.query('COMMIT');
     } else {
+      // ── Eski flat-format / sentetik item'ları temizle ──────────────────────
+      // Kargo/teslimat barkodundan oluşturulan geçici satırları sil:
+      // ürün adı boş VE barkod yalnızca rakam (kargo barkodu = 8+ hane).
+      // Bu sayede zenginleştirme sonrası eklenen gerçek item'lar çiftlenmiyor.
+      await client.query(`
+        DELETE FROM marketplace_order_items
+        WHERE marketplace_order_id = $1
+          AND (product_name IS NULL OR product_name = '' OR product_name ~ '^[0-9]{8,}$')
+          AND (barcode IS NULL OR barcode ~ '^[0-9]{8,}$' OR barcode = '')
+          AND stock_deducted = FALSE
+      `, [orderId]);
+
       // Order items upsert + stok düşümü (yeni sipariş)
       for (const item of (order.items || [])) {
         if (!item.barcode && !item.item_id) continue;
@@ -2379,9 +2448,9 @@ async function upsertOrder(db, order) {
             [itemRow.id]
           );
           // Satış raporlarına da ekle (marketplace kaynağı ile)
-          const saleDate = order.order_date
-            ? new Date(order.order_date).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
+          // sale_date = KARGOYA VERİLME tarihi (sipariş tarihi değil)
+          // Stok düşümü kargoda geçişinde yapılır → o anın tarihi kullanılır
+          const saleDate = new Date().toISOString().split('T')[0];
           await client.query(
             `INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
              VALUES ($1, $2, $3, $4, $5)`,

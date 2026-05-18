@@ -188,21 +188,23 @@ async function buildStockAlertHtml(outOfStock, critical) {
   return html + emailFooter();
 }
 
-// ── Günlük satış raporu emaili HTML ──────────────────────────────────────
+// ── Günlük kargo raporu emaili HTML ──────────────────────────────────────
 async function buildDailySalesHtml(sales, date) {
   const logoUrl = await getLogoUrl();
   const dateStr = new Date(date + 'T00:00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
 
+  // sold = stoktan çıkan (kargoya verilen + manuel satış)
+  // received = stoğa giren (iade + manuel giriş)
   let totalOut = 0, totalIn = 0;
   sales.forEach(s => { totalOut += Number(s.sold || 0); totalIn += Number(s.received || 0); });
 
-  let html = emailHeader(logoUrl, '📊 Günlük Satış Raporu', dateStr);
+  let html = emailHeader(logoUrl, '🚚 Günlük Kargo Raporu', dateStr);
 
   if (sales.length === 0) {
     html += `
     <div style="text-align:center;padding:32px 20px;">
       <div style="font-size:36px;margin-bottom:12px;">📭</div>
-      <p style="color:#6b7280;font-size:15px;font-weight:600;margin:0;">Bugün satış kaydı bulunmuyor.</p>
+      <p style="color:#6b7280;font-size:15px;font-weight:600;margin:0;">Bugün kargo hareketi bulunmuyor.</p>
       <p style="color:#9ca3af;font-size:13px;margin-top:6px;">Stok girişi veya çıkışı yapılmadı.</p>
     </div>`;
     return html + emailFooter();
@@ -215,8 +217,8 @@ async function buildDailySalesHtml(sales, date) {
       <th style="padding:10px 8px;text-align:left;border-bottom:2px solid #dbeafe;">Ürün Adı</th>
       <th style="padding:10px 8px;text-align:left;border-bottom:2px solid #dbeafe;">Renk</th>
       <th style="padding:10px 8px;text-align:left;border-bottom:2px solid #dbeafe;">Barkod</th>
-      <th style="padding:10px 8px;text-align:center;border-bottom:2px solid #dbeafe;">Çıkış</th>
-      <th style="padding:10px 8px;text-align:center;border-bottom:2px solid #dbeafe;">Giriş</th>
+      <th style="padding:10px 8px;text-align:center;border-bottom:2px solid #dbeafe;">🚚 Kargoya Verilen</th>
+      <th style="padding:10px 8px;text-align:center;border-bottom:2px solid #dbeafe;">📦 Stoka Giren</th>
     </tr></thead><tbody>`;
 
   sales.forEach(s => {
@@ -225,15 +227,15 @@ async function buildDailySalesHtml(sales, date) {
       <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-weight:600;">${s.name}</td>
       <td style="padding:8px;border-bottom:1px solid #f3f4f6;">${s.color || '-'}</td>
       <td style="padding:8px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:12px;">${s.barcode || '-'}</td>
-      <td style="padding:8px;border-bottom:1px solid #f3f4f6;text-align:center;color:#dc2626;font-weight:600;">${Number(s.sold) > 0 ? '-' + s.sold : '-'}</td>
-      <td style="padding:8px;border-bottom:1px solid #f3f4f6;text-align:center;color:#16a34a;font-weight:600;">${Number(s.received) > 0 ? '+' + s.received : '-'}</td>
+      <td style="padding:8px;border-bottom:1px solid #f3f4f6;text-align:center;color:#dc2626;font-weight:700;">${Number(s.sold) > 0 ? '-' + s.sold + ' adet' : '-'}</td>
+      <td style="padding:8px;border-bottom:1px solid #f3f4f6;text-align:center;color:#16a34a;font-weight:700;">${Number(s.received) > 0 ? '+' + s.received + ' adet' : '-'}</td>
     </tr>`;
   });
 
   html += `</tbody></table>
-  <div style="margin-top:16px;padding:12px 16px;background:#f9fafb;border-radius:8px;display:flex;gap:24px;font-size:13px;">
-    <span style="color:#dc2626;font-weight:600;">Toplam Çıkış: ${totalOut} adet</span>
-    <span style="color:#16a34a;font-weight:600;">Toplam Giriş: ${totalIn} adet</span>
+  <div style="margin-top:16px;padding:12px 16px;background:#f9fafb;border-radius:8px;display:flex;gap:24px;font-size:13px;flex-wrap:wrap;">
+    <span style="color:#dc2626;font-weight:600;">🚚 Toplam Kargoya Verilen: ${totalOut} adet</span>
+    <span style="color:#16a34a;font-weight:600;">📦 Toplam Stoka Giren: ${totalIn} adet</span>
   </div>`;
 
   return html + emailFooter();
@@ -275,7 +277,7 @@ async function sendStockAlert(products) {
   }
 }
 
-// ── Günlük satış raporu gönder ────────────────────────────────────────────
+// ── Günlük kargo raporu gönder ────────────────────────────────────────────
 async function sendDailySalesReport() {
   if (!process.env.RESEND_API_KEY) { console.log('[Günlük Rapor] RESEND_API_KEY eksik'); return; }
 
@@ -283,6 +285,9 @@ async function sendDailySalesReport() {
   console.log(`[Günlük Rapor] ${date} raporu hazırlanıyor...`);
 
   try {
+    // ── Stoktan düşülen: kargoya verilen siparişler (sale_date = bugün) ──────
+    // Marketplace satışları: sale_date kargoya verilme gününe göre set edilir
+    // Manuel satışlar: sale_date = hareketin yapıldığı gün
     const result = await pool.query(`
       SELECT p.id, p.name, p.color, p.barcode, p.product_image_url,
              ABS(SUM(CASE WHEN s.quantity_change < 0 THEN s.quantity_change ELSE 0 END)) AS sold,
@@ -295,10 +300,10 @@ async function sendDailySalesReport() {
     `, [date]);
 
     const sales = result.rows;
-    // Satış olmasa da rapor gönderilir (boş rapor)
+    // Hareket olmasa da rapor gönderilir (boş rapor)
 
     const html = await buildDailySalesHtml(sales, date);
-    const subject = `HUFlex Günlük Satış Bilgilendirme — ${new Date(date + 'T00:00:00').toLocaleDateString('tr-TR')}`;
+    const subject = `🚚 HUFlex Günlük Kargo Raporu — ${new Date(date + 'T00:00:00').toLocaleDateString('tr-TR')}`;
 
     const recipients = await getRecipients();
     for (const user of recipients) {
