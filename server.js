@@ -328,8 +328,7 @@ async function runMigrations() {
           AND moi.sku NOT LIKE 'HBCV%'
           AND moi.barcode LIKE 'HBCV%'
       `);
-      // Adım 2: barcode HBCV... ama sku da boş/HBCV → item'ı sil (stok düşülmediyse),
-      //         sonraki sync yeni kodla doğru barkod ekler
+      // Adım 2a: barcode HBCV... + sku boş/HBCV + stock_deducted=FALSE → sil (sync ile yeniden eklenecek)
       const r2 = await pool.query(`
         DELETE FROM marketplace_order_items moi
         USING marketplace_orders mo
@@ -339,8 +338,19 @@ async function runMigrations() {
           AND (moi.sku IS NULL OR moi.sku = '' OR moi.sku LIKE 'HBCV%')
           AND moi.stock_deducted = FALSE
       `);
+      // Adım 2b: stock_deducted=TRUE ama barcode HBCV → barcode = '' yap (temiz görünüm; API fix endpoint tamamlar)
+      const r3 = await pool.query(`
+        UPDATE marketplace_order_items moi
+        SET barcode = ''
+        FROM marketplace_orders mo
+        WHERE moi.marketplace_order_id = mo.id
+          AND mo.platform = 'hepsiburada'
+          AND moi.barcode LIKE 'HBCV%'
+          AND (moi.sku IS NULL OR moi.sku = '' OR moi.sku LIKE 'HBCV%')
+          AND moi.stock_deducted = TRUE
+      `);
       await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_hb_barcode_to_merchant_sku_v2','true') ON CONFLICT (key) DO NOTHING`);
-      console.log(`✓ HB barkod v2: ${r1.rowCount} kayıt güncellendi, ${r2.rowCount} kayıt yeniden sync için silindi`);
+      console.log(`✓ HB barkod v2: ${r1.rowCount} güncellendi, ${r2.rowCount} silindi, ${r3.rowCount} temizlendi (API fix gerekiyor)`);
     }
 
     // ── sale_date → kargoda_at düzeltmesi ────────────────────────────────────
