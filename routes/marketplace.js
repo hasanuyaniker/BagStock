@@ -778,6 +778,58 @@ router.post('/sync', async (req, res) => {
   }
 });
 
+// ── POST /api/marketplace/hb-fix-barcodes ────────────────────────────────────
+// HBCV barkodlu HB item'larını Satıcı Stok Kodu'na günceller ve yeniden sync yapar.
+// stock_deducted=FALSE olanları siler (bir sonraki sync doğru barkodla ekler).
+// stock_deducted=TRUE olanları sku üzerinden günceller (mümkünse).
+router.post('/hb-fix-barcodes', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1) sku = HF... (gerçek satıcı kodu) → barcode = sku (stock_deducted bağımsız)
+    const r1 = await client.query(`
+      UPDATE marketplace_order_items moi
+      SET barcode = moi.sku
+      FROM marketplace_orders mo
+      WHERE moi.marketplace_order_id = mo.id
+        AND mo.platform = 'hepsiburada'
+        AND moi.sku IS NOT NULL AND moi.sku <> ''
+        AND moi.sku NOT LIKE 'HBCV%'
+        AND moi.barcode LIKE 'HBCV%'
+    `);
+
+    // 2) barcode HBCV... ama sku de boş/HBCV → sil (stok düşülmediyse), bir sonraki sync doğru ekler
+    const r2 = await client.query(`
+      DELETE FROM marketplace_order_items moi
+      USING marketplace_orders mo
+      WHERE moi.marketplace_order_id = mo.id
+        AND mo.platform = 'hepsiburada'
+        AND moi.barcode LIKE 'HBCV%'
+        AND (moi.sku IS NULL OR moi.sku = '' OR moi.sku LIKE 'HBCV%')
+        AND moi.stock_deducted = FALSE
+    `);
+
+    await client.query('COMMIT');
+    console.log(`[HB Fix Barcodes] ${r1.rowCount} güncellendi, ${r2.rowCount} silindi`);
+    res.json({ ok: true, updated: r1.rowCount, deleted: r2.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[HB Fix Barcodes] Hata:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+
+  // Arka planda yeniden sync başlat (response zaten gönderildi)
+  try {
+    await runMarketplaceSync(pool);
+    console.log('[HB Fix Barcodes] Yeniden sync tamamlandı');
+  } catch (syncErr) {
+    console.error('[HB Fix Barcodes] Sync hatası:', syncErr.message);
+  }
+});
+
 // ── POST /api/marketplace/hb-reset-sync ──────────────────────────────────────
 // HB siparişlerini DB'den tamamen siler ve API'den sıfırdan çeker.
 // Bekliyor(/packages), Kargoda(/shipped), Teslim Edildi(/delivered) hepsini getirir.

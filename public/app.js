@@ -2507,6 +2507,28 @@ async function saveDesi(orderId, desiValue) {
 }
 
 
+async function hbFixBarcodes() {
+  const btn = document.getElementById('hbFixBarcodesBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Düzeltiliyor...'; }
+
+  try {
+    const res = await apiFetch('/api/marketplace/hb-fix-barcodes', { method: 'POST' });
+    if (res && res.ok) {
+      const data = await res.json();
+      showToast(`✓ ${data.updated} barkod güncellendi, ${data.deleted} kayıt yeniden sync için silindi. Sync başlatıldı.`);
+      setTimeout(() => { loadOrders(_ordersPage); loadSyncStatus(); }, 8000);
+    } else {
+      showToast('Hata oluştu', 'error');
+    }
+  } catch (err) {
+    showToast('Hata: ' + err.message, 'error');
+  } finally {
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '🔴 HB Barkod Düzelt'; }
+    }, 10000);
+  }
+}
+
 async function syncMarketplace() {
   const btn = document.getElementById('syncBtn');
   if (btn) { btn.disabled = true; btn.textContent = '🔄 Senkronize ediliyor...'; }

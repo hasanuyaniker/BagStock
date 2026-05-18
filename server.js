@@ -309,23 +309,38 @@ async function runMigrations() {
       else console.log('✓ HB duplicate item kontrolü tamam (v2), silinecek kayıt yok');
     }
 
-    // ── HB barkod → Satıcı Stok Kodu migrasyonu ──────────────────────────────
-    // Mevcut HB order items'ta barcode alanı SKU/HB barkoduydu.
-    // Artık merchantSku (sku sütunu) kullanıyoruz. Mevcut kayıtları güncelle.
-    const fixHBBarcode = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_hb_barcode_to_merchant_sku_v1'`);
-    if (fixHBBarcode.rows.length === 0) {
-      const r = await pool.query(`
+    // ── HB barkod → Satıcı Stok Kodu migrasyonu (v2) ────────────────────────
+    // v1: sadece sku != barcode olanları güncelliyordu — sku boş/HBCV olanları atlıyordu.
+    // v2: İki adım:
+    //   1) sku = HF... gibi gerçek satıcı kodu içeriyorsa barcode = sku olarak güncelle
+    //   2) barcode HBCV... içeriyor ama sku boş/HBCV ise → o item'ı sil (stok düşülmediyse),
+    //      bir sonraki sync yeni kod (merchantSku öncelikli) ile doğru barkodla ekler.
+    const fixHBBarcodeV2 = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_hb_barcode_to_merchant_sku_v2'`);
+    if (fixHBBarcodeV2.rows.length === 0) {
+      // Adım 1: sku'da gerçek satıcı kodu varsa (HBCV ile başlamıyor, boş değil) barcode'u güncelle
+      const r1 = await pool.query(`
         UPDATE marketplace_order_items moi
         SET barcode = moi.sku
         FROM marketplace_orders mo
         WHERE moi.marketplace_order_id = mo.id
           AND mo.platform = 'hepsiburada'
           AND moi.sku IS NOT NULL AND moi.sku <> ''
-          AND moi.barcode IS DISTINCT FROM moi.sku
+          AND moi.sku NOT LIKE 'HBCV%'
+          AND moi.barcode LIKE 'HBCV%'
       `);
-      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_hb_barcode_to_merchant_sku_v1','true') ON CONFLICT (key) DO NOTHING`);
-      if (r.rowCount > 0) console.log(`✓ ${r.rowCount} HB order item barkodu → Satıcı Stok Kodu olarak güncellendi`);
-      else console.log('✓ HB barkod kontrolü tamam, güncelleme gerekmedi');
+      // Adım 2: barcode HBCV... ama sku da boş/HBCV → item'ı sil (stok düşülmediyse),
+      //         sonraki sync yeni kodla doğru barkod ekler
+      const r2 = await pool.query(`
+        DELETE FROM marketplace_order_items moi
+        USING marketplace_orders mo
+        WHERE moi.marketplace_order_id = mo.id
+          AND mo.platform = 'hepsiburada'
+          AND moi.barcode LIKE 'HBCV%'
+          AND (moi.sku IS NULL OR moi.sku = '' OR moi.sku LIKE 'HBCV%')
+          AND moi.stock_deducted = FALSE
+      `);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_hb_barcode_to_merchant_sku_v2','true') ON CONFLICT (key) DO NOTHING`);
+      console.log(`✓ HB barkod v2: ${r1.rowCount} kayıt güncellendi, ${r2.rowCount} kayıt yeniden sync için silindi`);
     }
 
     // ── sale_date → kargoda_at düzeltmesi ────────────────────────────────────
