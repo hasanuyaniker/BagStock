@@ -16,11 +16,11 @@ const DEFAULT_COLUMNS = [
   { key: 'active_indicator', label: '●', visible: true, width: 28 },
   { key: 'name', label: 'Ürün Adı', visible: true, width: 160 },
   { key: 'color', label: 'Renk', visible: true, width: 80 },
+  { key: 'stock_quantity', label: 'Stok', visible: true, width: 55 },
   { key: 'product_type_name', label: 'Ürün Tipi', visible: true, width: 90 },
   { key: 'material_name', label: 'Materyal', visible: true, width: 90 },
   { key: 'barcode', label: 'Barkod', visible: true, width: 105 },
   { key: 'supplier_name', label: 'Tedarikçi', visible: true, width: 100 },
-  { key: 'stock_quantity', label: 'Stok', visible: true, width: 55 },
   { key: 'cost_price', label: 'Alış (₺)', visible: true, width: 75 },
   { key: 'critical_stock', label: 'Krit.', visible: true, width: 50 },
   { key: 'trendyol_price', label: 'TY Fiyat', visible: true, width: 75 },
@@ -442,6 +442,25 @@ async function loadColumnSettings() {
     if (!res) return;
     const saved = await res.json();
     if (saved.length > 0) {
+      // Migrasyon: Stok sütunu Renk'ten hemen sonra değilse yeni sırayı kaydet
+      const colorSaved = saved.find(s => s.column_key === 'color');
+      const stockSaved = saved.find(s => s.column_key === 'stock_quantity');
+      const colorOrder = colorSaved?.column_order ?? -1;
+      const stockOrder = stockSaved?.column_order ?? -1;
+      if (stockOrder !== colorOrder + 1) {
+        // Yeni varsayılan sırayı DB'ye yaz, mevcut genişlikleri koru
+        const widthMap = {};
+        saved.forEach(s => { widthMap[s.column_key] = s.column_width; });
+        const data = DEFAULT_COLUMNS.map((col, i) => ({
+          column_key: col.key,
+          is_visible: saved.find(s => s.column_key === col.key)?.is_visible ?? col.visible,
+          column_order: i,
+          column_width: widthMap[col.key] || col.width
+        }));
+        await apiFetch('/api/columns/inventory', { method: 'PUT', body: data });
+        columnSettings = [];
+        return;
+      }
       columnSettings = saved;
     }
   } catch (e) {}
@@ -664,9 +683,9 @@ async function resetColumnSettings() {
     const def = [
       { key: 'image', width: 52 }, { key: 'active_indicator', width: 28 },
       { key: 'name', width: 160 }, { key: 'color', width: 80 },
-      { key: 'product_type_name', width: 90 }, { key: 'material_name', width: 90 },
-      { key: 'barcode', width: 105 }, { key: 'supplier_name', width: 100 },
-      { key: 'stock_quantity', width: 55 }, { key: 'cost_price', width: 75 },
+      { key: 'stock_quantity', width: 55 }, { key: 'product_type_name', width: 90 },
+      { key: 'material_name', width: 90 }, { key: 'barcode', width: 105 },
+      { key: 'supplier_name', width: 100 }, { key: 'cost_price', width: 75 },
       { key: 'critical_stock', width: 50 }, { key: 'trendyol_price', width: 75 },
       { key: 'trendyol_commission', width: 65 }, { key: 'hepsiburada_price', width: 75 },
       { key: 'hepsiburada_commission', width: 65 }, { key: 'status', width: 70 },
