@@ -170,7 +170,9 @@
             <div class="toolbar-right" style="position:relative;">
               <button class="btn btn-secondary" onclick="toggleColumnPanel()">Sütunlar</button>
               <div class="column-panel" id="columnPanel"></div>
-              <button class="btn btn-success" onclick="exportExcel('products')">Excel İndir</button>
+              <input type="file" id="importExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="importProductsExcel(this)">
+              <button class="btn btn-secondary" onclick="document.getElementById('importExcelInput').click()">📥 Excel Yükle</button>
+              <button class="btn btn-success" onclick="exportExcel('products')">📤 Excel İndir</button>
               <button class="btn btn-primary" onclick="openProductModal()">+ Ürün Ekle</button>
             </div>
           </div>
@@ -682,10 +684,6 @@
         <div class="form-group">
           <label>Barkod 3</label>
           <input type="text" id="pBarcode3" placeholder="Opsiyonel">
-        </div>
-        <div class="form-group">
-          <label>Barkod 4 <span style="font-size:11px;color:#f59e0b;">🔴 HB Satıcı Stok Kodu</span></label>
-          <input type="text" id="pBarcode4" placeholder="Hepsiburada Satıcı Stok Kodu (opsiyonel)">
         </div>
         <div class="form-group">
           <label>Ürün Tipi</label>

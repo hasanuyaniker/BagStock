@@ -1,12 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const ExcelJS = require('exceljs');
+const multer = require('multer');
 const { Pool } = require('pg');
 const authMiddleware = require('../middleware/auth');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
+
+const xlsxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.includes('spreadsheet') || file.originalname.match(/\.(xlsx|xls)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Sadece .xlsx veya .xls dosyaları kabul edilir'));
+    }
+  }
 });
 
 router.use(authMiddleware);
@@ -35,41 +48,60 @@ function formatDate(d) {
   return `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.${dt.getFullYear()}`;
 }
 
-// GET /api/export/products
+// ── GET /api/export/products ─────────────────────────────────────────────────
+// Envanter Excel indirme. Aynı format Excel Yükle ile import edilebilir.
+// Sütun sırası ve başlık adları import endpoint'iyle eşleşmelidir.
 router.get('/products', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT p.name, pt.name AS product_type, p.barcode, p.supplier_name,
-              p.stock_quantity, p.cost_price, p.critical_stock,
+      `SELECT p.name, pt.name AS product_type, m.name AS material,
+              p.color, p.barcode, p.barcode2, p.barcode3,
+              p.supplier_name, p.stock_quantity, p.cost_price, p.critical_stock,
               p.trendyol_price, p.trendyol_commission,
-              p.hepsiburada_price, p.hepsiburada_commission
-       FROM products p LEFT JOIN product_types pt ON p.product_type_id = pt.id
+              p.hepsiburada_price, p.hepsiburada_commission,
+              CASE WHEN p.is_active THEN 'Evet' ELSE 'Hayır' END AS is_active
+       FROM products p
+       LEFT JOIN product_types pt ON p.product_type_id = pt.id
+       LEFT JOIN materials m ON p.material_id = m.id
        ORDER BY p.name`
     );
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Envanter');
 
+    // ÖNEMLİ: Sütun sırası ve başlık adları, import endpoint'iyle birebir eşleşmeli
     sheet.columns = [
-      { header: 'Ürün Adı', key: 'name', width: 30 },
-      { header: 'Ürün Tipi', key: 'product_type', width: 15 },
-      { header: 'Barkod', key: 'barcode', width: 20 },
-      { header: 'Tedarikçi', key: 'supplier_name', width: 20 },
-      { header: 'Stok', key: 'stock_quantity', width: 10 },
-      { header: 'Alış Fiyatı', key: 'cost_price', width: 15 },
-      { header: 'Kritik Stok', key: 'critical_stock', width: 12 },
-      { header: 'TY Fiyat', key: 'trendyol_price', width: 15 },
-      { header: 'TY Komisyon %', key: 'trendyol_commission', width: 13 },
-      { header: 'HB Fiyat', key: 'hepsiburada_price', width: 15 },
-      { header: 'HB Komisyon %', key: 'hepsiburada_commission', width: 13 }
+      { header: 'Ürün Adı',       key: 'name',                   width: 32 },
+      { header: 'Ürün Tipi',      key: 'product_type',            width: 15 },
+      { header: 'Materyal',       key: 'material',                width: 15 },
+      { header: 'Renk',           key: 'color',                   width: 12 },
+      { header: 'Barkod',         key: 'barcode',                 width: 20 },
+      { header: 'Barkod 2',       key: 'barcode2',                width: 20 },
+      { header: 'Barkod 3',       key: 'barcode3',                width: 20 },
+      { header: 'Tedarikçi',      key: 'supplier_name',           width: 20 },
+      { header: 'Stok',           key: 'stock_quantity',          width: 10 },
+      { header: 'Alış Fiyatı',    key: 'cost_price',              width: 15 },
+      { header: 'Kritik Stok',    key: 'critical_stock',          width: 12 },
+      { header: 'TY Fiyat',       key: 'trendyol_price',          width: 15 },
+      { header: 'TY Komisyon %',  key: 'trendyol_commission',     width: 13 },
+      { header: 'HB Fiyat',       key: 'hepsiburada_price',       width: 15 },
+      { header: 'HB Komisyon %',  key: 'hepsiburada_commission',  width: 13 },
+      { header: 'Satışta mı?',    key: 'is_active',               width: 12 },
     ];
 
     result.rows.forEach(row => sheet.addRow(row));
     styleHeaderRow(sheet);
 
-    ['F','H','J'].forEach(col => {
+    // Para birimi formatı: Alış Fiyatı (J), TY Fiyat (L), HB Fiyat (N)
+    ['J', 'L', 'N'].forEach(col => {
       sheet.getColumn(col).numFmt = CURRENCY_FORMAT;
     });
+
+    // Bilgi notu — ikinci satır olarak ekle (gri, italik)
+    const noteRow = sheet.insertRow(2, ['⚠ Bu dosyayı düzenleyip "Excel Yükle" butonu ile yükleyebilirsiniz. Barkod zorunludur. Mevcut barkod varsa güncellenir, yoksa yeni ürün eklenir.']);
+    noteRow.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' }, size: 10 };
+    noteRow.getCell(1).alignment = { horizontal: 'left' };
+    sheet.mergeCells(`A2:P2`);
 
     const today = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Disposition', `attachment; filename=envanter_${today}.xlsx`);
@@ -79,6 +111,145 @@ router.get('/products', async (req, res) => {
   } catch (err) {
     console.error('Excel export hatası:', err);
     res.status(500).json({ error: 'Excel oluşturulamadı' });
+  }
+});
+
+// ── POST /api/export/import-products ─────────────────────────────────────────
+// Envanter Excel yükleme: mevcut barkod varsa günceller, yoksa yeni ekler.
+// Beklenen sütun başlıkları (export ile aynı):
+//   Ürün Adı | Ürün Tipi | Materyal | Renk | Barkod | Barkod 2 | Barkod 3
+//   Tedarikçi | Stok | Alış Fiyatı | Kritik Stok | TY Fiyat | TY Komisyon %
+//   HB Fiyat | HB Komisyon % | Satışta mı?
+router.post('/import-products', xlsxUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Dosya bulunamadı' });
+
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(req.file.buffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return res.status(400).json({ error: 'Excel sayfası bulunamadı' });
+
+    // İlk satırı başlık olarak oku — sütun sırası yerine başlık adına göre eşleştir
+    const headerRow = sheet.getRow(1);
+    const colMap = {};
+    headerRow.eachCell((cell, colNumber) => {
+      const h = String(cell.value || '').trim();
+      if (h) colMap[h] = colNumber;
+    });
+
+    const get = (row, header) => {
+      const col = colMap[header];
+      if (!col) return null;
+      const v = row.getCell(col).value;
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'object' && v.result !== undefined) return v.result; // formula cell
+      return v;
+    };
+    const str = (row, h) => { const v = get(row, h); return v !== null ? String(v).trim() : null; };
+    const num = (row, h) => { const v = get(row, h); const n = parseFloat(v); return isNaN(n) ? null : n; };
+    const int = (row, h) => { const v = get(row, h); const n = parseInt(v); return isNaN(n) ? null : n; };
+
+    // Ürün tipi ve materyal adlarını DB'den çek (isim → id)
+    const [typeRows, matRows] = await Promise.all([
+      pool.query('SELECT id, name FROM product_types'),
+      pool.query('SELECT id, name FROM materials')
+    ]);
+    const typeMap = {};
+    typeRows.rows.forEach(r => { typeMap[r.name.trim().toLowerCase()] = r.id; });
+    const matMap  = {};
+    matRows.rows.forEach(r => { matMap[r.name.trim().toLowerCase()]  = r.id; });
+
+    let inserted = 0, updated = 0, errors = 0;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (let i = 2; i <= sheet.rowCount; i++) {
+        const row = sheet.getRow(i);
+        // Boş satırları atla (bilgi notu satırı dahil)
+        const firstCell = String(row.getCell(1).value || '').trim();
+        if (!firstCell || firstCell.startsWith('⚠')) continue;
+
+        const barcode = str(row, 'Barkod');
+        if (!barcode) { errors++; continue; } // Barkod zorunlu
+
+        const name         = str(row, 'Ürün Adı');
+        const typeName     = str(row, 'Ürün Tipi');
+        const matName      = str(row, 'Materyal');
+        const color        = str(row, 'Renk');
+        const barcode2     = str(row, 'Barkod 2');
+        const barcode3     = str(row, 'Barkod 3');
+        const supplier     = str(row, 'Tedarikçi');
+        const stock        = int(row, 'Stok') ?? 0;
+        const costPrice    = num(row, 'Alış Fiyatı');
+        const critStock    = int(row, 'Kritik Stok') ?? 5;
+        const tyPrice      = num(row, 'TY Fiyat');
+        const tyComm       = num(row, 'TY Komisyon %');
+        const hbPrice      = num(row, 'HB Fiyat');
+        const hbComm       = num(row, 'HB Komisyon %');
+        const activeRaw    = str(row, 'Satışta mı?');
+        const isActive     = activeRaw === null ? true : !['hayır','no','false','0'].includes(activeRaw.toLowerCase());
+
+        const typeId = typeName ? (typeMap[typeName.toLowerCase()] || null) : null;
+        const matId  = matName  ? (matMap[matName.toLowerCase()]   || null) : null;
+
+        try {
+          // Mevcut barkod var mı kontrol et (barcode veya barcode2 veya barcode3)
+          const existing = await client.query(
+            'SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1',
+            [barcode]
+          );
+
+          if (existing.rows.length > 0) {
+            // Güncelle
+            await client.query(
+              `UPDATE products SET
+                name=$1, product_type_id=$2, material_id=$3, color=$4,
+                barcode2=$5, barcode3=$6, supplier_name=$7,
+                stock_quantity=$8, cost_price=$9, critical_stock=$10,
+                trendyol_price=$11, trendyol_commission=$12,
+                hepsiburada_price=$13, hepsiburada_commission=$14,
+                is_active=$15, updated_at=NOW()
+               WHERE id=$16`,
+              [name, typeId, matId, color, barcode2, barcode3, supplier,
+               stock, costPrice, critStock, tyPrice, tyComm, hbPrice, hbComm,
+               isActive, existing.rows[0].id]
+            );
+            updated++;
+          } else {
+            // Yeni ekle
+            await client.query(
+              `INSERT INTO products
+                (name, product_type_id, material_id, color, barcode, barcode2, barcode3,
+                 supplier_name, stock_quantity, cost_price, critical_stock,
+                 trendyol_price, trendyol_commission,
+                 hepsiburada_price, hepsiburada_commission, is_active)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+              [name, typeId, matId, color, barcode, barcode2, barcode3,
+               supplier, stock, costPrice, critStock, tyPrice, tyComm,
+               hbPrice, hbComm, isActive]
+            );
+            inserted++;
+          }
+        } catch (rowErr) {
+          console.warn(`[Import] Satır ${i} hata: ${rowErr.message.substring(0, 100)}`);
+          errors++;
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    console.log(`[Import] Tamamlandı: ${inserted} eklendi, ${updated} güncellendi, ${errors} hata`);
+    res.json({ ok: true, inserted, updated, errors });
+  } catch (err) {
+    console.error('[Import] Kritik hata:', err.message);
+    res.status(500).json({ error: 'Import başarısız: ' + err.message.substring(0, 200) });
   }
 });
 

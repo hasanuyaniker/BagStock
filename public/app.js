@@ -700,7 +700,6 @@ function openProductModal(product = null) {
     document.getElementById('pBarcode').value = product.barcode || '';
     document.getElementById('pBarcode2').value = product.barcode2 || '';
     document.getElementById('pBarcode3').value = product.barcode3 || '';
-    document.getElementById('pBarcode4').value = product.barcode4 || '';
     document.getElementById('pType').value = product.product_type_id || '';
     document.getElementById('pMaterial').value = product.material_id || '';
     document.getElementById('pColor').value = product.color || '';
@@ -724,7 +723,7 @@ function openProductModal(product = null) {
       preview.style.display = 'none';
     }
   } else {
-    ['pName','pBarcode','pBarcode2','pBarcode3','pBarcode4','pColor','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
+    ['pName','pBarcode','pBarcode2','pBarcode3','pColor','pSupplier','pCost','pTYPrice','pTYComm','pHBPrice','pHBComm'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('pStock').value = 0;
     document.getElementById('pCritical').value = 5;
     document.getElementById('pIsActive').checked = true;
@@ -756,7 +755,6 @@ async function saveProduct() {
     barcode: document.getElementById('pBarcode').value.trim(),
     barcode2: document.getElementById('pBarcode2').value.trim() || null,
     barcode3: document.getElementById('pBarcode3').value.trim() || null,
-    barcode4: document.getElementById('pBarcode4').value.trim() || null,
     product_type_id: document.getElementById('pType').value || null,
     material_id: document.getElementById('pMaterial').value || null,
     color: document.getElementById('pColor').value.trim() || null,
@@ -2506,6 +2504,35 @@ async function saveDesi(orderId, desiValue) {
   }
 }
 
+
+// ── Excel ile ürün içe aktarma ────────────────────────────────────────────────
+async function importProductsExcel(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = ''; // Aynı dosyayı tekrar seçebilmek için sıfırla
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  showToast('⏳ Excel yükleniyor...');
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/export/import-products', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      body: formData
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Yükleme başarısız', 'error');
+      return;
+    }
+    showToast(`✓ ${data.inserted} ürün eklendi, ${data.updated} ürün güncellendi${data.errors > 0 ? ', ' + data.errors + ' hata' : ''}.`);
+    loadProducts();
+  } catch (err) {
+    showToast('Yükleme hatası: ' + err.message, 'error');
+  }
+}
 
 async function hbFixBarcodes() {
   const btn = document.getElementById('hbFixBarcodesBtn');
