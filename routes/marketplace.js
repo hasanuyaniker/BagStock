@@ -581,7 +581,7 @@ router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
         if (!item.barcode || item.stock_deducted) continue;
         const prodRow = await client.query(
           `SELECT id, name, stock_quantity FROM products
-           WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 LIMIT 1`,
+           WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
           [item.barcode]
         );
         if (!prodRow.rows.length) continue;
@@ -1250,7 +1250,7 @@ router.post('/hb-enrich-orders', async (req, res) => {
         for (const bc of [current_sku, current_barcode].filter(Boolean)) {
           try {
             const pr = await pool.query(
-              `SELECT name, barcode FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 LIMIT 1`,
+              `SELECT name, barcode FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
               [bc]
             );
             if (pr.rows[0]?.name) {
@@ -1269,7 +1269,7 @@ router.post('/hb-enrich-orders', async (req, res) => {
           let productId = null;
           if (merchantSku) {
             const pr = await pool.query(
-              `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 LIMIT 1`,
+              `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
               [merchantSku]
             );
             productId = pr.rows[0]?.id || null;
@@ -1336,7 +1336,7 @@ async function _applyHBEnrichment(db, moId, lineItems, customerName, totalPrice)
       let productId = null;
       if (merchantBarcode) {
         const prod = await client.query(
-          `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 LIMIT 1`,
+          `SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
           [merchantBarcode]
         );
         productId = prod.rows[0]?.id || null;
@@ -1572,7 +1572,7 @@ router.post('/create-test-hb-order', async (req, res) => {
         let price = l.price || 0;
         if (price <= 0 && l.merchantSku) {
           const mRes = await client.query(
-            `SELECT cost_price FROM products WHERE barcode=$1 OR barcode2=$1 LIMIT 1`,
+            `SELECT cost_price FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
             [l.merchantSku]
           );
           price = parseFloat(mRes.rows[0]?.cost_price || 0) * 1.3;
@@ -1738,7 +1738,7 @@ router.post('/create-test-hb-order', async (req, res) => {
 
         // Eşleşen local ürünü barkod üzerinden ara (stok düşme için, zorunlu değil)
         const matchRes = await client.query(
-          `SELECT id FROM products WHERE barcode = $1 OR barcode2 = $1 LIMIT 1`,
+          `SELECT id FROM products WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1 OR barcode4 = $1 OR barcode5 = $1 OR barcode6 = $1 LIMIT 1`,
           [l.merchantSku]
         );
         const localProductId = matchRes.rows[0]?.id || null;
@@ -1947,7 +1947,7 @@ router.post('/hb-update-stock-price', async (req, res) => {
       if (l.merchantSku) {
         const match = await client.query(
           `SELECT stock_quantity, cost_price
-           FROM products WHERE barcode = $1 OR barcode2 = $1 LIMIT 1`,
+           FROM products WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1 OR barcode4 = $1 OR barcode5 = $1 OR barcode6 = $1 LIMIT 1`,
           [l.merchantSku]
         );
         if (match.rows.length) {
@@ -2577,7 +2577,7 @@ async function upsertOrder(db, order) {
       for (const item of (order.items || [])) {
         if (!item.barcode && !item.item_id) continue;
         const productResult = await client.query(
-          `SELECT id FROM products WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1 OR barcode4 = $1 LIMIT 1`,
+          `SELECT id FROM products WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1 OR barcode4 = $1 OR barcode5 = $1 OR barcode6 = $1 LIMIT 1`,
           [item.barcode || '']
         );
         const productId = productResult.rows[0]?.id || null;
@@ -2657,10 +2657,11 @@ async function upsertOrder(db, order) {
       for (const item of (order.items || [])) {
         if (!item.barcode && !item.item_id) continue;
 
-        // Ürünü barkodla eşleştir (4 barkod alanı — barcode4 = HB Satıcı Stok Kodu için kullanılabilir)
+        // Ürünü barkodla eşleştir (6 barkod alanı)
         const productResult = await client.query(
           `SELECT id, name, stock_quantity FROM products
-           WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1 OR barcode4 = $1
+           WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1
+              OR barcode4 = $1 OR barcode5 = $1 OR barcode6 = $1
            LIMIT 1`,
           [item.barcode || '']
         );

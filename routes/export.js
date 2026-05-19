@@ -55,7 +55,7 @@ router.get('/products', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT p.name, pt.name AS product_type, m.name AS material,
-              p.color, p.barcode, p.barcode2, p.barcode3,
+              p.color, p.barcode, p.barcode2, p.barcode3, p.barcode4, p.barcode5, p.barcode6,
               p.supplier_name, p.stock_quantity, p.cost_price, p.critical_stock,
               p.trendyol_price, p.trendyol_commission,
               p.hepsiburada_price, p.hepsiburada_commission,
@@ -78,6 +78,9 @@ router.get('/products', async (req, res) => {
       { header: 'Barkod',         key: 'barcode',                 width: 20 },
       { header: 'Barkod 2',       key: 'barcode2',                width: 20 },
       { header: 'Barkod 3',       key: 'barcode3',                width: 20 },
+      { header: 'Barkod 4',       key: 'barcode4',                width: 20 },
+      { header: 'Barkod 5',       key: 'barcode5',                width: 20 },
+      { header: 'Barkod 6',       key: 'barcode6',                width: 20 },
       { header: 'Tedarikçi',      key: 'supplier_name',           width: 20 },
       { header: 'Stok',           key: 'stock_quantity',          width: 10 },
       { header: 'Alış Fiyatı',    key: 'cost_price',              width: 15 },
@@ -92,8 +95,8 @@ router.get('/products', async (req, res) => {
     result.rows.forEach(row => sheet.addRow(row));
     styleHeaderRow(sheet);
 
-    // Para birimi formatı: Alış Fiyatı (J), TY Fiyat (L), HB Fiyat (N)
-    ['J', 'L', 'N'].forEach(col => {
+    // Para birimi formatı: Alış Fiyatı (M), TY Fiyat (O), HB Fiyat (Q)
+    ['M', 'O', 'Q'].forEach(col => {
       sheet.getColumn(col).numFmt = CURRENCY_FORMAT;
     });
 
@@ -101,7 +104,7 @@ router.get('/products', async (req, res) => {
     const noteRow = sheet.insertRow(2, ['⚠ Bu dosyayı düzenleyip "Excel Yükle" butonu ile yükleyebilirsiniz. Barkod zorunludur. Mevcut barkod varsa güncellenir, yoksa yeni ürün eklenir.']);
     noteRow.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' }, size: 10 };
     noteRow.getCell(1).alignment = { horizontal: 'left' };
-    sheet.mergeCells(`A2:P2`);
+    sheet.mergeCells(`A2:S2`);
 
     const today = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Disposition', `attachment; filename=envanter_${today}.xlsx`);
@@ -179,6 +182,9 @@ router.post('/import-products', xlsxUpload.single('file'), async (req, res) => {
         const color        = str(row, 'Renk');
         const barcode2     = str(row, 'Barkod 2');
         const barcode3     = str(row, 'Barkod 3');
+        const barcode4     = str(row, 'Barkod 4');
+        const barcode5     = str(row, 'Barkod 5');
+        const barcode6     = str(row, 'Barkod 6');
         const supplier     = str(row, 'Tedarikçi');
         const stock        = int(row, 'Stok') ?? 0;
         const costPrice    = num(row, 'Alış Fiyatı');
@@ -194,9 +200,11 @@ router.post('/import-products', xlsxUpload.single('file'), async (req, res) => {
         const matId  = matName  ? (matMap[matName.toLowerCase()]   || null) : null;
 
         try {
-          // Mevcut barkod var mı kontrol et (barcode veya barcode2 veya barcode3)
+          // Mevcut barkod var mı kontrol et (6 barkod alanının hepsine bak)
           const existing = await client.query(
-            'SELECT id FROM products WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 LIMIT 1',
+            `SELECT id FROM products
+             WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1
+                OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
             [barcode]
           );
 
@@ -205,14 +213,16 @@ router.post('/import-products', xlsxUpload.single('file'), async (req, res) => {
             await client.query(
               `UPDATE products SET
                 name=$1, product_type_id=$2, material_id=$3, color=$4,
-                barcode2=$5, barcode3=$6, supplier_name=$7,
-                stock_quantity=$8, cost_price=$9, critical_stock=$10,
-                trendyol_price=$11, trendyol_commission=$12,
-                hepsiburada_price=$13, hepsiburada_commission=$14,
-                is_active=$15, updated_at=NOW()
-               WHERE id=$16`,
-              [name, typeId, matId, color, barcode2, barcode3, supplier,
-               stock, costPrice, critStock, tyPrice, tyComm, hbPrice, hbComm,
+                barcode2=$5, barcode3=$6, barcode4=$7, barcode5=$8, barcode6=$9,
+                supplier_name=$10, stock_quantity=$11, cost_price=$12, critical_stock=$13,
+                trendyol_price=$14, trendyol_commission=$15,
+                hepsiburada_price=$16, hepsiburada_commission=$17,
+                is_active=$18, updated_at=NOW()
+               WHERE id=$19`,
+              [name, typeId, matId, color,
+               barcode2, barcode3, barcode4, barcode5, barcode6,
+               supplier, stock, costPrice, critStock,
+               tyPrice, tyComm, hbPrice, hbComm,
                isActive, existing.rows[0].id]
             );
             updated++;
@@ -220,14 +230,16 @@ router.post('/import-products', xlsxUpload.single('file'), async (req, res) => {
             // Yeni ekle
             await client.query(
               `INSERT INTO products
-                (name, product_type_id, material_id, color, barcode, barcode2, barcode3,
+                (name, product_type_id, material_id, color,
+                 barcode, barcode2, barcode3, barcode4, barcode5, barcode6,
                  supplier_name, stock_quantity, cost_price, critical_stock,
                  trendyol_price, trendyol_commission,
                  hepsiburada_price, hepsiburada_commission, is_active)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-              [name, typeId, matId, color, barcode, barcode2, barcode3,
-               supplier, stock, costPrice, critStock, tyPrice, tyComm,
-               hbPrice, hbComm, isActive]
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+              [name, typeId, matId, color,
+               barcode, barcode2, barcode3, barcode4, barcode5, barcode6,
+               supplier, stock, costPrice, critStock,
+               tyPrice, tyComm, hbPrice, hbComm, isActive]
             );
             inserted++;
           }

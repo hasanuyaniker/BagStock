@@ -36,6 +36,8 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode3 VARCHAR(100)`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode4 VARCHAR(100)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode5 VARCHAR(100)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode6 VARCHAR(100)`);
     // Marketplace sipariş tablosu
     await pool.query(`CREATE TABLE IF NOT EXISTS marketplace_orders (
       id SERIAL PRIMARY KEY,
