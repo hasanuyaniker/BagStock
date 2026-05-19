@@ -596,7 +596,7 @@ router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
           'UPDATE marketplace_order_items SET stock_deducted=TRUE WHERE id=$1',
           [item.id]
         );
-        const saleDate = new Date().toISOString().split('T')[0];
+        const saleDate = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).split(' ')[0];
         await client.query(
           `INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
            VALUES ($1,$2,$3,$4,$5)`,
@@ -2507,7 +2507,7 @@ async function upsertOrder(db, order) {
          return_reason        = COALESCE(EXCLUDED.return_reason, marketplace_orders.return_reason),
          return_date          = COALESCE(EXCLUDED.return_date, marketplace_orders.return_date),
          updated_at           = NOW()
-       RETURNING id, stock_deducted`,
+       RETURNING id, stock_deducted, kargoda_at`,
       [
         order.platform, order.order_id, order.order_number,
         order.status, order.status_tr || order.raw_status, order.raw_status,
@@ -2529,6 +2529,11 @@ async function upsertOrder(db, order) {
 
     const orderId              = orderResult.rows[0].id;
     const orderAlreadyDeducted = orderResult.rows[0].stock_deducted === true;
+    // Satış tarihi: kargoya verilme günü (İstanbul saatiyle), yoksa bugün
+    const _kargodaAtRaw = orderResult.rows[0].kargoda_at || kargodaAtInsert;
+    const orderSaleDate = _kargodaAtRaw
+      ? new Date(_kargodaAtRaw).toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).split(' ')[0]
+      : new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).split(' ')[0];
 
     // ── HB Çapraz-Güncelleme: PackageNumber → OrderNumber köprüsü ────────────
     // order_id = PackageNumber, order_number = OrderNumber (sipariş numarası).
@@ -2720,13 +2725,11 @@ async function upsertOrder(db, order) {
             [itemRow.id]
           );
           // Satış raporlarına da ekle (marketplace kaynağı ile)
-          // sale_date = KARGOYA VERİLME tarihi (sipariş tarihi değil)
-          // Stok düşümü kargoda geçişinde yapılır → o anın tarihi kullanılır
-          const saleDate = new Date().toISOString().split('T')[0];
+          // sale_date = KARGOYA VERİLME tarihi İstanbul saatiyle (sipariş tarihi değil)
           await client.query(
             `INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
              VALUES ($1, $2, $3, $4, $5)`,
-            [product.id, -item.quantity, saleDate,
+            [product.id, -item.quantity, orderSaleDate,
              `Marketplace #${order.order_number}`, order.platform]
           );
           deductCount++;
