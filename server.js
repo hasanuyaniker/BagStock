@@ -375,6 +375,36 @@ async function runMigrations() {
     // ── sales tablosuna updated_at kolonu ekle ───────────────────────────────
     await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
 
+    // ── HB teslim_edildi siparişleri için kargoda_at düzeltmesi ─────────────
+    // init_kargoda_at_v1 yalnızca status='kargoda' olanları güncelledi.
+    // teslim_edildi statusündeki eski HB siparişleri kargoda_at=NULL kaldı.
+    // NULL kargoda_at → orderSaleDate bugün → satış raporunda yanlış tarih.
+    // Düzeltme: kargoda_at = order_date (en iyi yaklaşım, gerçek kargo tarihi değil).
+    const fixHBKargodaAtV1 = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_hb_kargoda_at_teslim_v1'`);
+    if (fixHBKargodaAtV1.rows.length === 0) {
+      const r1 = await pool.query(`
+        UPDATE marketplace_orders
+        SET kargoda_at = COALESCE(order_date, created_at, NOW()),
+            updated_at = NOW()
+        WHERE platform = 'hepsiburada'
+          AND status IN ('teslim_edildi', 'kargoda')
+          AND kargoda_at IS NULL
+      `);
+      // Bugün yanlış yazılan satış kayıtlarını düzelt: kargoda_at != bugün ise tarihi güncelle
+      const r2 = await pool.query(`
+        UPDATE sales s
+        SET sale_date = DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul')
+        FROM marketplace_orders mo
+        WHERE s.note = 'Marketplace #' || mo.order_number
+          AND mo.platform = 'hepsiburada'
+          AND mo.kargoda_at IS NOT NULL
+          AND DATE(s.sale_date AT TIME ZONE 'Europe/Istanbul') = DATE(NOW() AT TIME ZONE 'Europe/Istanbul')
+          AND DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul') != DATE(NOW() AT TIME ZONE 'Europe/Istanbul')
+      `);
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_hb_kargoda_at_teslim_v1','true') ON CONFLICT (key) DO NOTHING`);
+      console.log(`✓ HB kargoda_at düzeltmesi: ${r1.rowCount} sipariş güncellendi, ${r2.rowCount} satış tarihi düzeltildi`);
+    }
+
     // ── Yanlış stock_deducted=TRUE düzeltmesi (v1) ───────────────────────────
     // Eski kod, orderAlreadyDeducted dalında ürün eşleşmese bile (product_id=NULL)
     // marketplace_order_items.stock_deducted = TRUE yapıyordu.
