@@ -345,7 +345,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
               if (pkgLines.length > 0) {
                 flatOrder.items = pkgLines.map(line => ({
                   item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-                  barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
+                  barcode:           (line.merchantSku || line.merchantSkuId || line.barcode || line.merchantBarcode || line.productBarcode || '').trim(),
                   sku:               line.merchantSku || line.sku || '',
                   product_name:      line.name || line.productName || line.hepsiburadaSku || '',
                   quantity:          parseInt(line.quantity || 1),
@@ -459,7 +459,7 @@ function normalizeHBOpenOrder(order) {
 
   const items = (order.lineItems || order.orderLines || order.lines || order.items || []).map(line => ({
     item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-    barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
+    barcode:           (line.merchantSku || line.merchantSkuId || line.barcode || line.merchantBarcode || line.productBarcode || '').trim(),
     sku:               line.merchantSku || line.sku || '',
     product_name:      line.name || line.productName || line.hepsiburadaSku || '',
     quantity:          parseInt(line.quantity || line.requestedQuantity || 1),
@@ -572,7 +572,7 @@ function normalizeHBPackage(pkg, forcedRawStatus) {
       const lineStatus = line.status || rawStatus;
       return {
         item_id:           String(line.id || line.lineItemId || line.lineId || ''),
-        barcode:           (line.barcode || line.merchantBarcode || line.productBarcode || line.merchantSku || '').trim(),
+        barcode:           (line.merchantSku || line.merchantSkuId || line.barcode || line.merchantBarcode || line.productBarcode || '').trim(),
         sku:               line.merchantSku || line.sku || '',
         product_name:      line.name || line.productName || line.hepsiburadaSku || '',
         quantity:          parseInt(line.quantity || 1),

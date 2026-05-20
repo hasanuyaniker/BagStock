@@ -2556,10 +2556,9 @@ async function upsertOrder(db, order) {
     }
 
     // ── Order-level guard ─────────────────────────────────────────────────────
-    // Sipariş daha önce tam olarak işlendiyse stok düşümünü tamamen atla.
-    // Bu sayede her deploy/sync'te aynı sipariş tekrar düşüm yapmaz.
+    // Sipariş daha önce kısmen işlendiyse (bazı ürünler düşüldü, bazıları düşülmedi):
+    // Kaçırılan ürünleri de düşmeye çalış (barkod o anda eşleşmemişse sonraki sync'te tekrar dene).
     if (orderAlreadyDeducted) {
-      // Yine de item meta-verilerini güncelle (durum, komisyon, vb.) ama stok dokunma
       // Önce: duplicate barcode temizle (aynı barkod farklı item_id)
       const incomingItemsD = (order.items || []).filter(i =>
         i.product_name && i.product_name.trim() !== '' && !/^[0-9]{8,}$/.test(i.product_name.trim())
@@ -2581,22 +2580,26 @@ async function upsertOrder(db, order) {
       }
       for (const item of (order.items || [])) {
         if (!item.barcode && !item.item_id) continue;
+        // Ürünü barkodla eşleştir (stok_quantity de gerekli — kaçırılan düşüm için)
         const productResult = await client.query(
-          `SELECT id FROM products WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1 OR barcode4 = $1 OR barcode5 = $1 OR barcode6 = $1 LIMIT 1`,
+          `SELECT id, name, stock_quantity FROM products
+           WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
           [item.barcode || '']
         );
-        const productId = productResult.rows[0]?.id || null;
-        await client.query(
+        const product   = productResult.rows[0] || null;
+        const productId = product?.id || null;
+
+        // Item upsert — stock_deducted'ı ZORLA TRUE YAPMIYORUZ, mevcut değeri koru
+        const itemResultD = await client.query(
           `INSERT INTO marketplace_order_items
              (marketplace_order_id, item_id, barcode, product_id, product_name, sku,
               quantity, price, status, raw_status, status_tr,
               commission_amount, commission_rate, cargo_desi, stock_deducted)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, TRUE)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, FALSE)
            ON CONFLICT (marketplace_order_id, item_id) DO UPDATE SET
              status            = EXCLUDED.status,
              raw_status        = EXCLUDED.raw_status,
              status_tr         = EXCLUDED.status_tr,
-             -- Flat format'tan gelen boş/sıfır değerler mevcut veriyi silmesin
              product_id        = COALESCE(EXCLUDED.product_id,        marketplace_order_items.product_id),
              product_name      = COALESCE(NULLIF(EXCLUDED.product_name,''), marketplace_order_items.product_name),
              barcode           = COALESCE(NULLIF(EXCLUDED.barcode,''),      marketplace_order_items.barcode),
@@ -2604,8 +2607,9 @@ async function upsertOrder(db, order) {
              price             = COALESCE(NULLIF(EXCLUDED.price,0),         marketplace_order_items.price),
              commission_amount = COALESCE(EXCLUDED.commission_amount, marketplace_order_items.commission_amount),
              commission_rate   = COALESCE(EXCLUDED.commission_rate,   marketplace_order_items.commission_rate),
-             cargo_desi        = COALESCE(EXCLUDED.cargo_desi,        marketplace_order_items.cargo_desi),
-             stock_deducted    = TRUE`,
+             cargo_desi        = COALESCE(EXCLUDED.cargo_desi,        marketplace_order_items.cargo_desi)
+             -- stock_deducted: burada değiştirme — aşağıdaki stok düşümü adımı kontrol eder
+           RETURNING id, stock_deducted`,
           [
             orderId,
             item.item_id || (item.barcode + '_' + (item.sku || '')),
@@ -2623,6 +2627,29 @@ async function upsertOrder(db, order) {
             item.cargo_desi        || null
           ]
         );
+
+        const itemRowD = itemResultD.rows[0];
+
+        // Kaçırılan stok düşümü: sipariş deducted ama bu item henüz düşülmemişse
+        if (item.should_deduct && !itemRowD.stock_deducted && product) {
+          const newStock = Math.max(0, product.stock_quantity - item.quantity);
+          await client.query(
+            'UPDATE products SET stock_quantity=$1, updated_at=NOW() WHERE id=$2',
+            [newStock, product.id]
+          );
+          await client.query(
+            'UPDATE marketplace_order_items SET stock_deducted=TRUE WHERE id=$1',
+            [itemRowD.id]
+          );
+          await client.query(
+            `INSERT INTO sales (product_id, quantity_change, sale_date, note, marketplace)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [product.id, -item.quantity, orderSaleDate,
+             `Marketplace #${order.order_number}`, order.platform]
+          );
+          deductCount++;
+          console.log(`[Marketplace] Kaçırılan stok düşüldü: ${product.name} (${item.barcode}) ${product.stock_quantity}→${newStock} [${order.platform} #${order.order_number}]`);
+        }
       }
       await client.query('COMMIT');
     } else {
