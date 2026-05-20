@@ -372,6 +372,39 @@ async function runMigrations() {
       if (r.rowCount > 0) console.log(`✓ ${r.rowCount} satış kaydının tarihi kargoda_at ile güncellendi`);
     }
 
+    // ── Yanlış stock_deducted=TRUE düzeltmesi (v1) ───────────────────────────
+    // Eski kod, orderAlreadyDeducted dalında ürün eşleşmese bile (product_id=NULL)
+    // marketplace_order_items.stock_deducted = TRUE yapıyordu.
+    // Bu item'lar aslında HİÇ düşülmedi — bayrak sıfırlanınca bir sonraki sync düzeltir.
+    // Güvenlik: product_id IS NULL → stok tablosunda hiçbir şey değişmemiş demektir.
+    const fixFalseDeducted = await pool.query(`SELECT value FROM app_settings WHERE key = 'fix_false_stock_deducted_v1'`);
+    if (fixFalseDeducted.rows.length === 0) {
+      // 1. Hiç ürün eşleşmemiş ama stock_deducted=TRUE olan item'ları sıfırla
+      const itemFix = await pool.query(`
+        UPDATE marketplace_order_items
+        SET stock_deducted = FALSE
+        WHERE stock_deducted = TRUE
+          AND product_id IS NULL
+      `);
+      // 2. Tüm item'ları sıfırlanan siparişlerin order-level bayrağını da sıfırla
+      //    (böylece yeni kod orderAlreadyDeducted=FALSE olarak işler ve stok düşer)
+      let orderFix = { rowCount: 0 };
+      if (itemFix.rowCount > 0) {
+        orderFix = await pool.query(`
+          UPDATE marketplace_orders mo
+          SET stock_deducted = FALSE, updated_at = NOW()
+          WHERE mo.stock_deducted = TRUE
+            AND NOT EXISTS (
+              SELECT 1 FROM marketplace_order_items moi
+              WHERE moi.marketplace_order_id = mo.id
+                AND moi.stock_deducted = TRUE
+            )
+        `);
+      }
+      await pool.query(`INSERT INTO app_settings (key,value) VALUES ('fix_false_stock_deducted_v1','true') ON CONFLICT (key) DO NOTHING`);
+      console.log(`✓ Yanlış stock_deducted düzeltmesi: ${itemFix.rowCount} item + ${orderFix.rowCount} sipariş sıfırlandı (product_id=NULL olanlar)`);
+    }
+
     console.log('✓ Migration tamam');
   } catch (err) {
     console.error('Migration hatası (kritik değil):', err.message);

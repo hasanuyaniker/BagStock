@@ -332,6 +332,9 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
               flatOrder.total_price = parseFloat(orderData?.totalPrice?.amount ?? orderData?.totalPrice ?? orderData?.grossAmount ?? 0) || 0;
             }
             console.log(`[HepsiB] ✓ #${orderNum} sipariş detay zenginleştirme başarılı (${lineItems.length} ürün)`);
+            flatOrder.items.forEach(i => {
+              console.log(`[HepsiB]   ↳ barcode="${i.barcode}" product_name="${i.product_name}" should_deduct=${i.should_deduct} qty=${i.quantity}`);
+            });
           } else {
             // lineItems yok — paket detay endpoint'ini dene (kargo bilgisi endpoint'i)
             try {
@@ -359,6 +362,9 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
                   cargo_desi:        null,
                 }));
                 console.log(`[HepsiB] ✓ #${flatOrder.order_id} paket detay zenginleştirme başarılı (${pkgLines.length} ürün)`);
+                flatOrder.items.forEach(i => {
+                  console.log(`[HepsiB]   ↳ barcode="${i.barcode}" product_name="${i.product_name}" should_deduct=${i.should_deduct} qty=${i.quantity}`);
+                });
               } else {
                 console.log(`[HepsiB] ⚠ #${flatOrder.order_id} hiçbir endpoint lineItems döndürmedi: ${JSON.stringify(orderData).substring(0, 200)}`);
               }

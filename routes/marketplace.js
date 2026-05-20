@@ -2649,6 +2649,13 @@ async function upsertOrder(db, order) {
           );
           deductCount++;
           console.log(`[Marketplace] Kaçırılan stok düşüldü: ${product.name} (${item.barcode}) ${product.stock_quantity}→${newStock} [${order.platform} #${order.order_number}]`);
+        } else if (item.should_deduct) {
+          // Neden düşülmedi? — debug
+          if (itemRowD.stock_deducted) {
+            console.log(`[Marketplace] ✓ Zaten düşülmüş: barcode=${item.barcode||'?'} item_id=${itemRowD.id} [${order.platform} #${order.order_number}]`);
+          } else if (!product) {
+            console.warn(`[Marketplace] ✗ Ürün bulunamadı: barcode="${item.barcode||''}" product_name="${item.product_name||''}" [${order.platform} #${order.order_number}]`);
+          }
         }
       }
       await client.query('COMMIT');
@@ -2761,6 +2768,15 @@ async function upsertOrder(db, order) {
           );
           deductCount++;
           console.log(`[Marketplace] Stok düşüldü: ${product.name} (${item.barcode}) ${product.stock_quantity}→${newStock} [${order.platform} #${order.order_number}]`);
+        } else if (item.should_deduct) {
+          // Neden düşülmedi? — debug
+          if (itemRow.stock_deducted) {
+            console.log(`[Marketplace] ✓ Zaten düşülmüş: barcode=${item.barcode||'?'} item_id=${itemRow.id} [${order.platform} #${order.order_number}]`);
+          } else if (!product) {
+            console.warn(`[Marketplace] ✗ Ürün bulunamadı: barcode="${item.barcode||''}" product_name="${item.product_name||''}" [${order.platform} #${order.order_number}]`);
+          }
+        } else if (!item.should_deduct) {
+          console.log(`[Marketplace] — Stok düşümü gerekmiyor: barcode=${item.barcode||'?'} status=${item.raw_status||'?'} [${order.platform} #${order.order_number}]`);
         }
       }
 
