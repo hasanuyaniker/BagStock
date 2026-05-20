@@ -379,6 +379,55 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     }
   }
 
+  // ── Listings API barkod haritası: 6225.../HBCV... → merchantSku (HF00...) ───────
+  // HB sipariş detay API'si lineItems'ta merchantSku döndürmüyor.
+  // Listings API'sinden ürün barkodu → satıcı SKU haritası oluşturup uyguluyoruz.
+  try {
+    const listingBase = environment === 'production'
+      ? 'https://listing-external.hepsiburada.com'
+      : 'https://listing-external-sit.hepsiburada.com';
+    const lUrl = `${listingBase}/listings/merchantid/${merchantId}?offset=0&limit=1000`;
+    console.log(`[HepsiB] Listings haritası çekiliyor: ${lUrl}`);
+    const lRes = await fetch(lUrl, { headers, signal: AbortSignal.timeout(15000) });
+    if (lRes.ok) {
+      const lData = await lRes.json();
+      const rows = Array.isArray(lData) ? lData : (lData.listings || lData.data || lData.result || lData.items || []);
+      const listingsMap = {}; // { "6225..." → "HF00...", "HBCV..." → "HF00..." }
+      for (const l of rows) {
+        const mSku = String(l.merchantSku || l.MerchantSku || '').trim();
+        if (!mSku) continue;
+        // Tüm olası barkod/sku alanlarını haritaya ekle
+        for (const field of ['barcode', 'Barcode', 'productBarcode', 'ProductBarcode',
+                              'gtin', 'ean', 'EAN', 'upc', 'hepsiburadaSku', 'HepsiburadaSku', 'sku', 'Sku']) {
+          const val = String(l[field] || '').trim();
+          if (val && val !== mSku) listingsMap[val] = mSku;
+        }
+      }
+      const mapSize = Object.keys(listingsMap).length;
+      console.log(`[HepsiB] Listings haritası: ${rows.length} listing → ${mapSize} barkod eşleşmesi`);
+      if (mapSize > 0) {
+        // Tüm siparişlerdeki barkodları harita ile çevir
+        let converted = 0;
+        for (const order of allOrders) {
+          for (const item of (order.items || [])) {
+            if (item.barcode && listingsMap[item.barcode]) {
+              const oldBarcode = item.barcode;
+              item.barcode = listingsMap[item.barcode];
+              console.log(`[HepsiB] Barkod çevrildi: "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
+              converted++;
+            }
+          }
+        }
+        if (converted > 0) console.log(`[HepsiB] Toplam ${converted} item barkodu satıcı SKU'ya çevrildi`);
+        else console.log(`[HepsiB] Listings haritasında eşleşen barkod bulunamadı (harita örnekleri: ${JSON.stringify(Object.entries(listingsMap).slice(0, 3))})`);
+      }
+    } else {
+      console.warn(`[HepsiB] Listings API hatası: HTTP ${lRes.status}`);
+    }
+  } catch (listErr) {
+    console.warn(`[HepsiB] Listings haritası çekilemedi (kritik değil): ${listErr.message.substring(0, 100)}`);
+  }
+
   console.log(`[HepsiB] Zenginleştirme tamamlandı. Döndürülen sipariş: ${allOrders.length}`);
   return allOrders;
 }

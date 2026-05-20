@@ -372,6 +372,9 @@ async function runMigrations() {
       if (r.rowCount > 0) console.log(`✓ ${r.rowCount} satış kaydının tarihi kargoda_at ile güncellendi`);
     }
 
+    // ── sales tablosuna updated_at kolonu ekle ───────────────────────────────
+    await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+
     // ── Yanlış stock_deducted=TRUE düzeltmesi (v1) ───────────────────────────
     // Eski kod, orderAlreadyDeducted dalında ürün eşleşmese bile (product_id=NULL)
     // marketplace_order_items.stock_deducted = TRUE yapıyordu.
