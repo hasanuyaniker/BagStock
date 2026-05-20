@@ -581,8 +581,9 @@ router.patch('/orders/:id/status', authMiddleware, async (req, res) => {
         if (!item.barcode || item.stock_deducted) continue;
         const prodRow = await client.query(
           `SELECT id, name, stock_quantity FROM products
-           WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
-          [item.barcode]
+           WHERE LOWER(TRIM(barcode))=$1 OR LOWER(TRIM(barcode2))=$1 OR LOWER(TRIM(barcode3))=$1
+              OR LOWER(TRIM(barcode4))=$1 OR LOWER(TRIM(barcode5))=$1 OR LOWER(TRIM(barcode6))=$1 LIMIT 1`,
+          [String(item.barcode || '').toLowerCase().trim()]
         );
         if (!prodRow.rows.length) continue;
         const product = prodRow.rows[0];
@@ -2324,6 +2325,57 @@ router.post('/test-shipping-email', async (req, res) => {
 // Hepsiburada: /orders + /packages + /orders/ordernumber/{num} sipariş detayı
 
 
+// ── GET  /api/marketplace/hb-sku-overrides  — Manuel HBCV → Barkod eşleştirmeleri ──
+// ── POST /api/marketplace/hb-sku-overrides  — Override ekle/güncelle/sil ──────────
+// Listings API'sinde görünmeyen HB listing'leri için kullanılır.
+// Body: { hbcv: "HBCV00004G4627", barcode: "HF00106RNKK" }  (sil: barcode: "")
+router.get('/hb-sku-overrides', authMiddleware, async (req, res) => {
+  try {
+    const row = await pool.query("SELECT value FROM app_settings WHERE key = 'hb_sku_overrides'");
+    const overrides = row.rows[0]?.value ? JSON.parse(row.rows[0].value) : {};
+    // Bilinmeyen HBCV kodlarını da listele (son 30 günlük siparişlerden)
+    const unknownResult = await pool.query(`
+      SELECT DISTINCT moi.sku, COUNT(*) AS order_count,
+             MAX(mo.order_date) AS last_seen,
+             MAX(moi.product_name) AS product_name
+      FROM marketplace_order_items moi
+      JOIN marketplace_orders mo ON mo.id = moi.marketplace_order_id
+      WHERE mo.platform = 'hepsiburada'
+        AND moi.sku LIKE 'HBCV%'
+        AND moi.product_id IS NULL
+        AND mo.order_date > NOW() - INTERVAL '90 days'
+      GROUP BY moi.sku
+      ORDER BY last_seen DESC
+      LIMIT 50
+    `);
+    res.json({ overrides, unknown: unknownResult.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/hb-sku-overrides', authMiddleware, async (req, res) => {
+  try {
+    const { hbcv, barcode } = req.body;
+    if (!hbcv) return res.status(400).json({ error: 'hbcv gerekli' });
+    const row = await pool.query("SELECT value FROM app_settings WHERE key = 'hb_sku_overrides'");
+    const overrides = row.rows[0]?.value ? JSON.parse(row.rows[0].value) : {};
+    if (barcode && barcode.trim()) {
+      overrides[hbcv.trim()] = barcode.trim();
+    } else {
+      delete overrides[hbcv.trim()];
+    }
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ('hb_sku_overrides', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [JSON.stringify(overrides)]
+    );
+    res.json({ ok: true, overrides });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.runMarketplaceSync = runMarketplaceSync;
 
@@ -2383,7 +2435,13 @@ async function syncPlatform(db, platform, creds) {
       orders = await fetchTrendyolOrders(creds, 30);
     } else if (platform === 'hepsiburada') {
       const { fetchHepsiburadaOrders } = require('../services/hepsiburada');
-      orders = await fetchHepsiburadaOrders(creds, 30);
+      // Manuel HBCV→barkod overrides'ı oku (Listings API'de olmayan listing'ler için)
+      let skuOverrides = {};
+      try {
+        const overrideRow = await db.query("SELECT value FROM app_settings WHERE key = 'hb_sku_overrides'");
+        if (overrideRow.rows[0]?.value) skuOverrides = JSON.parse(overrideRow.rows[0].value);
+      } catch {}
+      orders = await fetchHepsiburadaOrders(creds, 30, skuOverrides);
     }
 
     let upserted = 0, deducted = 0;
@@ -2583,8 +2641,9 @@ async function upsertOrder(db, order) {
         // Ürünü barkodla eşleştir (stok_quantity de gerekli — kaçırılan düşüm için)
         const productResult = await client.query(
           `SELECT id, name, stock_quantity FROM products
-           WHERE barcode=$1 OR barcode2=$1 OR barcode3=$1 OR barcode4=$1 OR barcode5=$1 OR barcode6=$1 LIMIT 1`,
-          [item.barcode || '']
+           WHERE LOWER(TRIM(barcode))=$1 OR LOWER(TRIM(barcode2))=$1 OR LOWER(TRIM(barcode3))=$1
+              OR LOWER(TRIM(barcode4))=$1 OR LOWER(TRIM(barcode5))=$1 OR LOWER(TRIM(barcode6))=$1 LIMIT 1`,
+          [String(item.barcode || '').toLowerCase().trim()]
         );
         const product   = productResult.rows[0] || null;
         const productId = product?.id || null;
@@ -2699,10 +2758,9 @@ async function upsertOrder(db, order) {
         // Ürünü barkodla eşleştir (6 barkod alanı)
         const productResult = await client.query(
           `SELECT id, name, stock_quantity FROM products
-           WHERE barcode = $1 OR barcode2 = $1 OR barcode3 = $1
-              OR barcode4 = $1 OR barcode5 = $1 OR barcode6 = $1
-           LIMIT 1`,
-          [item.barcode || '']
+           WHERE LOWER(TRIM(barcode))=$1 OR LOWER(TRIM(barcode2))=$1 OR LOWER(TRIM(barcode3))=$1
+              OR LOWER(TRIM(barcode4))=$1 OR LOWER(TRIM(barcode5))=$1 OR LOWER(TRIM(barcode6))=$1 LIMIT 1`,
+          [String(item.barcode || '').toLowerCase().trim()]
         );
         const product = productResult.rows[0] || null;
 

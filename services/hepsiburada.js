@@ -120,7 +120,7 @@ function makeHBHeaders(merchantId, apiKey, developerUsername) {
  * @param {object} creds - { merchantId, username, apiKey, environment }
  * @param {number} days  - Kaç gün geriye git (varsayılan: 30)
  */
-async function fetchHepsiburadaOrders(creds, days = 30) {
+async function fetchHepsiburadaOrders(creds, days = 30, skuOverrides = {}) {
   const { merchantId, username, apiKey, environment } = creds;
   if (!merchantId || !apiKey) {
     throw new Error('Hepsiburada kimlik bilgileri eksik (merchantId, apiKey)');
@@ -381,58 +381,81 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
 
   // ── Listings API barkod haritası: 6225.../HBCV... → merchantSku (HF00...) ───────
   // HB sipariş detay API'si lineItems'ta merchantSku döndürmüyor.
-  // Listings API'sinden ürün barkodu → satıcı SKU haritası oluşturup uyguluyoruz.
+  // Listings API'sinden tüm sayfalarda ürün barkodu → satıcı SKU haritası oluşturulur.
+  // Manuel overrides (app_settings'ten) haritaya eklenerek eksik listing'ler kapanır.
   try {
     const listingBase = environment === 'production'
       ? 'https://listing-external.hepsiburada.com'
       : 'https://listing-external-sit.hepsiburada.com';
-    const lUrl = `${listingBase}/listings/merchantid/${merchantId}?offset=0&limit=1000`;
-    console.log(`[HepsiB] Listings haritası çekiliyor: ${lUrl}`);
-    const lRes = await fetch(lUrl, { headers, signal: AbortSignal.timeout(15000) });
-    if (lRes.ok) {
+
+    // Sayfalı çekme: HB API limit isteğine rağmen daha az dönebilir (50-100 üst sınır)
+    const allListingRows = [];
+    const lPageSize = 100;
+    let lOffset = 0;
+    let lPageCount = 0;
+    while (lPageCount < 20) { // Maks 20 sayfa (2000 listing)
+      const lUrl = `${listingBase}/listings/merchantid/${merchantId}?offset=${lOffset}&limit=${lPageSize}`;
+      if (lOffset === 0) console.log(`[HepsiB] Listings haritası çekiliyor (sayfalı): ${lUrl}`);
+      const lRes = await fetch(lUrl, { headers, signal: AbortSignal.timeout(15000) });
+      if (!lRes.ok) { console.warn(`[HepsiB] Listings API hatası: HTTP ${lRes.status}`); break; }
       const lData = await lRes.json();
       const rows = Array.isArray(lData) ? lData : (lData.listings || lData.data || lData.result || lData.items || []);
-      const listingsMap = {}; // { "6225..." → "HF00...", "HBCV..." → "HF00..." }
-      for (const l of rows) {
-        const mSku = String(l.merchantSku || l.MerchantSku || '').trim();
-        if (!mSku) continue;
-        // Tüm olası barkod/sku alanlarını haritaya ekle
-        for (const field of ['barcode', 'Barcode', 'productBarcode', 'ProductBarcode',
-                              'gtin', 'ean', 'EAN', 'upc', 'hepsiburadaSku', 'HepsiburadaSku', 'sku', 'Sku']) {
-          const val = String(l[field] || '').trim();
-          if (val && val !== mSku) listingsMap[val] = mSku;
-        }
+      if (rows.length === 0) break;
+      allListingRows.push(...rows);
+      if (rows.length < lPageSize) break; // Son sayfa
+      lOffset += lPageSize;
+      lPageCount++;
+    }
+
+    const listingsMap = {}; // { "HBCV..." → "HF00...", "6225..." → "HF00..." }
+    for (const l of allListingRows) {
+      const mSku = String(l.merchantSku || l.MerchantSku || '').trim();
+      if (!mSku) continue;
+      for (const field of ['barcode', 'Barcode', 'productBarcode', 'ProductBarcode',
+                            'gtin', 'ean', 'EAN', 'upc', 'hepsiburadaSku', 'HepsiburadaSku', 'sku', 'Sku']) {
+        const val = String(l[field] || '').trim();
+        if (val && val !== mSku) listingsMap[val] = mSku;
       }
-      const mapSize = Object.keys(listingsMap).length;
-      console.log(`[HepsiB] Listings haritası: ${rows.length} listing → ${mapSize} barkod eşleşmesi`);
-      if (mapSize > 0) {
-        // Tüm siparişlerdeki barkodları harita ile çevir
-        // Önce item.barcode ile dene (6225... veya HBCV... direkt eşleşirse)
-        // Sonra item.sku ile dene — zenginleştirme hepsiburadaSku'yu sku'ya atar (HBCV...)
-        // ve Listings haritası HBCV → HF00... biliyor.
-        let converted = 0;
-        for (const order of allOrders) {
-          for (const item of (order.items || [])) {
-            if (item.barcode && listingsMap[item.barcode]) {
-              // Direkt barcode eşleşmesi
-              const oldBarcode = item.barcode;
-              item.barcode = listingsMap[item.barcode];
-              console.log(`[HepsiB] Barkod çevrildi (barcode): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
-              converted++;
-            } else if (item.sku && listingsMap[item.sku]) {
-              // sku (hepsiburadaSku = HBCV...) üzerinden eşleşme
-              const oldBarcode = item.barcode;
-              item.barcode = listingsMap[item.sku];
-              console.log(`[HepsiB] Barkod çevrildi (sku="${item.sku}"): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
-              converted++;
-            }
+    }
+
+    // Manuel overrides'ı haritaya ekle (Listings API'sinde olmayan listing'ler için)
+    // skuOverrides: { "HBCV00004G4627": "HF00106RNKK", ... }
+    let overrideCount = 0;
+    for (const [hbcv, merchantSku] of Object.entries(skuOverrides || {})) {
+      if (hbcv && merchantSku) {
+        listingsMap[hbcv.trim()] = merchantSku.trim();
+        overrideCount++;
+      }
+    }
+
+    const mapSize = Object.keys(listingsMap).length;
+    console.log(`[HepsiB] Listings haritası: ${allListingRows.length} listing → ${mapSize} eşleşme (${overrideCount} manuel override)`);
+
+    if (mapSize > 0) {
+      let converted = 0;
+      const unmapped = new Set();
+      for (const order of allOrders) {
+        for (const item of (order.items || [])) {
+          if (!item.should_deduct) continue; // Stok düşülmeyecek item'ları atla
+          if (item.barcode && listingsMap[item.barcode]) {
+            const oldBarcode = item.barcode;
+            item.barcode = listingsMap[item.barcode];
+            console.log(`[HepsiB] Barkod çevrildi (barcode): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
+            converted++;
+          } else if (item.sku && listingsMap[item.sku]) {
+            // sku = hepsiburadaSku = HBCV... → haritada var
+            const oldBarcode = item.barcode;
+            item.barcode = listingsMap[item.sku];
+            console.log(`[HepsiB] Barkod çevrildi (sku="${item.sku}"): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
+            converted++;
+          } else if (item.sku && item.sku.startsWith('HBCV')) {
+            // Haritada olmayan HBCV — manuel override gerekiyor
+            unmapped.add(item.sku);
           }
         }
-        if (converted > 0) console.log(`[HepsiB] Toplam ${converted} item barkodu satıcı SKU'ya çevrildi`);
-        else console.log(`[HepsiB] Listings haritasında eşleşen barkod bulunamadı (harita örnekleri: ${JSON.stringify(Object.entries(listingsMap).slice(0, 3))})`);
       }
-    } else {
-      console.warn(`[HepsiB] Listings API hatası: HTTP ${lRes.status}`);
+      if (converted > 0) console.log(`[HepsiB] Toplam ${converted} item barkodu satıcı SKU'ya çevrildi`);
+      if (unmapped.size > 0) console.warn(`[HepsiB] ⚠ Manuel override gerekli (haritada yok): ${[...unmapped].join(', ')}`);
     }
   } catch (listErr) {
     console.warn(`[HepsiB] Listings haritası çekilemedi (kritik değil): ${listErr.message.substring(0, 100)}`);
