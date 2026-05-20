@@ -333,7 +333,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
             }
             console.log(`[HepsiB] ✓ #${orderNum} sipariş detay zenginleştirme başarılı (${lineItems.length} ürün)`);
             flatOrder.items.forEach(i => {
-              console.log(`[HepsiB]   ↳ barcode="${i.barcode}" product_name="${i.product_name}" should_deduct=${i.should_deduct} qty=${i.quantity}`);
+              console.log(`[HepsiB]   ↳ barcode="${i.barcode}" sku="${i.sku}" product_name="${i.product_name}" should_deduct=${i.should_deduct} qty=${i.quantity}`);
             });
           } else {
             // lineItems yok — paket detay endpoint'ini dene (kargo bilgisi endpoint'i)
@@ -363,7 +363,7 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
                 }));
                 console.log(`[HepsiB] ✓ #${flatOrder.order_id} paket detay zenginleştirme başarılı (${pkgLines.length} ürün)`);
                 flatOrder.items.forEach(i => {
-                  console.log(`[HepsiB]   ↳ barcode="${i.barcode}" product_name="${i.product_name}" should_deduct=${i.should_deduct} qty=${i.quantity}`);
+                  console.log(`[HepsiB]   ↳ barcode="${i.barcode}" sku="${i.sku}" product_name="${i.product_name}" should_deduct=${i.should_deduct} qty=${i.quantity}`);
                 });
               } else {
                 console.log(`[HepsiB] ⚠ #${flatOrder.order_id} hiçbir endpoint lineItems döndürmedi: ${JSON.stringify(orderData).substring(0, 200)}`);
@@ -407,13 +407,23 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
       console.log(`[HepsiB] Listings haritası: ${rows.length} listing → ${mapSize} barkod eşleşmesi`);
       if (mapSize > 0) {
         // Tüm siparişlerdeki barkodları harita ile çevir
+        // Önce item.barcode ile dene (6225... veya HBCV... direkt eşleşirse)
+        // Sonra item.sku ile dene — zenginleştirme hepsiburadaSku'yu sku'ya atar (HBCV...)
+        // ve Listings haritası HBCV → HF00... biliyor.
         let converted = 0;
         for (const order of allOrders) {
           for (const item of (order.items || [])) {
             if (item.barcode && listingsMap[item.barcode]) {
+              // Direkt barcode eşleşmesi
               const oldBarcode = item.barcode;
               item.barcode = listingsMap[item.barcode];
-              console.log(`[HepsiB] Barkod çevrildi: "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
+              console.log(`[HepsiB] Barkod çevrildi (barcode): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
+              converted++;
+            } else if (item.sku && listingsMap[item.sku]) {
+              // sku (hepsiburadaSku = HBCV...) üzerinden eşleşme
+              const oldBarcode = item.barcode;
+              item.barcode = listingsMap[item.sku];
+              console.log(`[HepsiB] Barkod çevrildi (sku="${item.sku}"): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
               converted++;
             }
           }
