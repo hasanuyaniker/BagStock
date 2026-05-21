@@ -518,7 +518,7 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 // Gecici tani endpoint
-app.get('/api/tani', require('./middleware/auth'), async (req, res) => {
+app.get('/api/tani', async (req, res) => {
   try {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
