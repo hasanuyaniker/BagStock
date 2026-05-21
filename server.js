@@ -522,28 +522,35 @@ app.get('/api/tani', async (req, res) => {
   try {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
-    const tarih = req.query.tarih || '2026-05-21';
+    const baslangic = req.query.baslangic || '2026-05-20';
+    // 1. Verilen tarihten itibaren tüm satışlar
     const satislar = await pool.query(
-      'SELECT s.id, s.sale_date, s.quantity_change, s.note, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date = $1 ORDER BY s.created_at',
-      [tarih]
+      'SELECT s.id, s.sale_date, s.quantity_change, s.note, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date >= $1 ORDER BY s.sale_date, s.created_at',
+      [baslangic]
     );
+    // 2. Anlık stok değeri
     const stokDeger = await pool.query('SELECT COALESCE(SUM(cost_price * stock_quantity), 0) AS toplam FROM products WHERE is_active = TRUE');
+    // 3. Verilen tarihten itibaren stok düşülen tüm marketplace siparişleri
     const kargoSiparisleri = await pool.query(
-      "SELECT mo.order_number, mo.platform, mo.status, mo.kargoda_at, moi.sku, moi.barcode, moi.quantity, moi.stock_deducted, moi.product_id, p.name AS urun_adi, p.cost_price FROM marketplace_orders mo JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id LEFT JOIN products p ON p.id = moi.product_id WHERE DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul') = $1 ORDER BY mo.kargoda_at",
-      [tarih]
+      "SELECT mo.order_number, mo.platform, mo.status, mo.kargoda_at, moi.sku, moi.barcode, moi.quantity, moi.stock_deducted, moi.product_id, p.name AS urun_adi, p.cost_price FROM marketplace_orders mo JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id LEFT JOIN products p ON p.id = moi.product_id WHERE mo.kargoda_at >= $1 AND moi.stock_deducted = TRUE ORDER BY mo.kargoda_at",
+      [baslangic]
     );
-    const toplamMaliyet = satislar.rows.reduce((acc, r) => acc + (parseFloat(r.maliyet_etkisi) || 0), 0);
+    // 4. Stok hareketi toplamı (sales tablosundan)
+    const toplamSatisMaliyet = satislar.rows.reduce((acc, r) => acc + (parseFloat(r.maliyet_etkisi) || 0), 0);
+    // 5. Marketplace stok düşüm toplamı
+    const toplamKargoMaliyet = kargoSiparisleri.rows.reduce((acc, r) => acc + (parseFloat(r.cost_price) || 0) * (parseInt(r.quantity) || 0), 0);
     res.json({
-      tarih,
+      baslangic_tarihi: baslangic,
       anlik_stok_degeri_tl: parseFloat(stokDeger.rows[0].toplam).toFixed(2),
       satis_kayitlari: {
         toplam_adet: satislar.rows.length,
-        toplam_maliyet_etkisi_tl: toplamMaliyet.toFixed(2),
-        satirlar: satislar.rows.map(function(r) { return { urun: r.name, barkod: r.barcode, alis_fiyati: r.cost_price, adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), not: r.note }; })
+        toplam_maliyet_etkisi_tl: toplamSatisMaliyet.toFixed(2),
+        satirlar: satislar.rows.map(function(r) { return { tarih: r.sale_date, urun: r.name, barkod: r.barcode, alis_fiyati: parseFloat(r.cost_price).toFixed(2), adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), not: r.note }; })
       },
-      kargo_siparisleri: {
-        toplam: kargoSiparisleri.rows.length,
-        satirlar: kargoSiparisleri.rows.map(function(r) { return { siparis_no: r.order_number, platform: r.platform, barkod: r.barcode, urun_adi: r.urun_adi, alis_fiyati: r.cost_price, adet: r.quantity, stok_dusuldu: r.stock_deducted, kargoda_at: r.kargoda_at }; })
+      marketplace_stok_dusumler: {
+        toplam_kalem: kargoSiparisleri.rows.length,
+        toplam_maliyet_tl: toplamKargoMaliyet.toFixed(2),
+        satirlar: kargoSiparisleri.rows.map(function(r) { return { siparis_no: r.order_number, platform: r.platform, barkod: r.barcode, urun_adi: r.urun_adi, alis_fiyati: parseFloat(r.cost_price || 0).toFixed(2), adet: r.quantity, kargoda_at: r.kargoda_at }; })
       }
     });
     await pool.end();
