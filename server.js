@@ -517,6 +517,39 @@ app.get('/', (req, res) => {
 app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
+// Gecici tani endpoint
+app.get('/api/tani', require('./middleware/auth'), async (req, res) => {
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
+    const tarih = req.query.tarih || '2026-05-21';
+    const satislar = await pool.query(
+      'SELECT s.id, s.sale_date, s.quantity_change, s.notes, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date = $1 ORDER BY s.created_at',
+      [tarih]
+    );
+    const stokDeger = await pool.query('SELECT COALESCE(SUM(cost_price * stock_quantity), 0) AS toplam FROM products WHERE is_active = TRUE');
+    const kargoSiparisleri = await pool.query(
+      "SELECT mo.order_number, mo.platform, mo.status, mo.kargoda_at, moi.sku, moi.barcode, moi.quantity, moi.stock_deducted, moi.product_id, p.name AS urun_adi, p.cost_price FROM marketplace_orders mo JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id LEFT JOIN products p ON p.id = moi.product_id WHERE DATE(mo.kargoda_at AT TIME ZONE 'Europe/Istanbul') = $1 ORDER BY mo.kargoda_at",
+      [tarih]
+    );
+    const toplamMaliyet = satislar.rows.reduce((acc, r) => acc + (parseFloat(r.maliyet_etkisi) || 0), 0);
+    res.json({
+      tarih,
+      anlik_stok_degeri_tl: parseFloat(stokDeger.rows[0].toplam).toFixed(2),
+      satis_kayitlari: {
+        toplam_adet: satislar.rows.length,
+        toplam_maliyet_etkisi_tl: toplamMaliyet.toFixed(2),
+        satirlar: satislar.rows.map(function(r) { return { urun: r.name, barkod: r.barcode, alis_fiyati: r.cost_price, adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), notlar: r.notes }; })
+      },
+      kargo_siparisleri: {
+        toplam: kargoSiparisleri.rows.length,
+        satirlar: kargoSiparisleri.rows.map(function(r) { return { siparis_no: r.order_number, platform: r.platform, barkod: r.barcode, urun_adi: r.urun_adi, alis_fiyati: r.cost_price, adet: r.quantity, stok_dusuldu: r.stock_deducted, kargoda_at: r.kargoda_at }; })
+      }
+    });
+    await pool.end();
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 
 // Hata yakalama
 app.use((err, req, res, next) => {
