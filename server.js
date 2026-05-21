@@ -524,7 +524,7 @@ app.get('/api/tani', async (req, res) => {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
     const tarih = req.query.tarih || '2026-05-21';
     const satislar = await pool.query(
-      'SELECT s.id, s.sale_date, s.quantity_change, s.source, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date = $1 ORDER BY s.created_at',
+      'SELECT s.id, s.sale_date, s.quantity_change, s.note, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date = $1 ORDER BY s.created_at',
       [tarih]
     );
     const stokDeger = await pool.query('SELECT COALESCE(SUM(cost_price * stock_quantity), 0) AS toplam FROM products WHERE is_active = TRUE');
@@ -539,7 +539,7 @@ app.get('/api/tani', async (req, res) => {
       satis_kayitlari: {
         toplam_adet: satislar.rows.length,
         toplam_maliyet_etkisi_tl: toplamMaliyet.toFixed(2),
-        satirlar: satislar.rows.map(function(r) { return { urun: r.name, barkod: r.barcode, alis_fiyati: r.cost_price, adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), kaynak: r.source }; })
+        satirlar: satislar.rows.map(function(r) { return { urun: r.name, barkod: r.barcode, alis_fiyati: r.cost_price, adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), not: r.note }; })
       },
       kargo_siparisleri: {
         toplam: kargoSiparisleri.rows.length,
