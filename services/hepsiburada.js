@@ -120,7 +120,7 @@ function makeHBHeaders(merchantId, apiKey, developerUsername) {
  * @param {object} creds - { merchantId, username, apiKey, environment }
  * @param {number} days  - Kaç gün geriye git (varsayılan: 30)
  */
-async function fetchHepsiburadaOrders(creds, days = 30, skuOverrides = {}) {
+async function fetchHepsiburadaOrders(creds, days = 30) {
   const { merchantId, username, apiKey, environment } = creds;
   if (!merchantId || !apiKey) {
     throw new Error('Hepsiburada kimlik bilgileri eksik (merchantId, apiKey)');
@@ -418,18 +418,8 @@ async function fetchHepsiburadaOrders(creds, days = 30, skuOverrides = {}) {
       }
     }
 
-    // Manuel overrides'ı haritaya ekle (Listings API'sinde olmayan listing'ler için)
-    // skuOverrides: { "HBCV00004G4627": "HF00106RNKK", ... }
-    let overrideCount = 0;
-    for (const [hbcv, merchantSku] of Object.entries(skuOverrides || {})) {
-      if (hbcv && merchantSku) {
-        listingsMap[hbcv.trim()] = merchantSku.trim();
-        overrideCount++;
-      }
-    }
-
     const mapSize = Object.keys(listingsMap).length;
-    console.log(`[HepsiB] Listings haritası: ${allListingRows.length} listing → ${mapSize} eşleşme (${overrideCount} manuel override)`);
+    console.log(`[HepsiB] Listings haritası: ${allListingRows.length} listing → ${mapSize} eşleşme`);
 
     if (mapSize > 0) {
       let converted = 0;
@@ -449,13 +439,12 @@ async function fetchHepsiburadaOrders(creds, days = 30, skuOverrides = {}) {
             console.log(`[HepsiB] Barkod çevrildi (sku="${item.sku}"): "${oldBarcode}" → "${item.barcode}" [#${order.order_number || order.order_id}]`);
             converted++;
           } else if (item.sku && item.sku.startsWith('HBCV')) {
-            // Haritada olmayan HBCV — manuel override gerekiyor
             unmapped.add(item.sku);
           }
         }
       }
       if (converted > 0) console.log(`[HepsiB] Toplam ${converted} item barkodu satıcı SKU'ya çevrildi`);
-      if (unmapped.size > 0) console.warn(`[HepsiB] ⚠ Manuel override gerekli (haritada yok): ${[...unmapped].join(', ')}`);
+      if (unmapped.size > 0) console.warn(`[HepsiB] ⚠ Listings haritasında eşleşme yok: ${[...unmapped].join(', ')}`);
     }
   } catch (listErr) {
     console.warn(`[HepsiB] Listings haritası çekilemedi (kritik değil): ${listErr.message.substring(0, 100)}`);
@@ -1020,3 +1009,4 @@ module.exports = {
   HB_DEDUCT_STATUSES,
   formatHBDate,
 };
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    

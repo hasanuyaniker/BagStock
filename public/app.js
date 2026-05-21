@@ -1376,7 +1376,7 @@ function switchSettingsTab(tab) {
   if (tab === 'materials') loadMaterialsPanel();
   if (tab === 'media') loadMediaPanel();
   if (tab === 'email') loadEmailSettings();
-  if (tab === 'apiintegration') { loadMarketplaceCredentials(); loadSyncStatus(); loadHBSkuOverrides(); }
+  if (tab === 'apiintegration') { loadMarketplaceCredentials(); loadSyncStatus(); }
 }
 
 async function loadSettings() {
@@ -2689,103 +2689,6 @@ async function loadMarketplaceCredentials() {
   }
 }
 
-// ── HB SKU Override yönetimi ─────────────────────────────────────────────────
-async function loadHBSkuOverrides() {
-  const el = document.getElementById('hbSkuOverridePanel');
-  if (!el) return;
-  try {
-    const res = await apiFetch('/api/marketplace/hb-sku-overrides');
-    if (!res) return;
-    const data = await res.json();
-    const overrides = data.overrides || {};
-    const unknown   = data.unknown   || [];
-
-    let html = `<div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px;">
-      Manuel HBCV → Satıcı Barkod Eşleştirmeleri
-      <span style="font-size:11px;font-weight:400;color:#6b7280;margin-left:6px;">Listings API'de görünmeyen ürünler için</span>
-    </div>`;
-
-    // Mevcut override'lar
-    if (Object.keys(overrides).length > 0) {
-      html += `<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:13px;">
-        <tr style="background:#f9fafb;"><th style="padding:6px 8px;text-align:left;border-bottom:1px solid #e5e7eb;">HBCV Kodu</th>
-        <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #e5e7eb;">Barkod</th>
-        <th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;"></th></tr>`;
-      for (const [hbcv, bc] of Object.entries(overrides)) {
-        html += `<tr>
-          <td style="padding:6px 8px;font-family:monospace;font-size:12px;color:#4338ca;">${escHtml(hbcv)}</td>
-          <td style="padding:6px 8px;font-family:monospace;font-size:12px;color:#059669;">${escHtml(bc)}</td>
-          <td style="padding:6px 8px;"><button onclick="deleteHBSkuOverride('${escHtml(hbcv)}')"
-            style="font-size:11px;color:#dc2626;border:none;background:none;cursor:pointer;">✕ Sil</button></td>
-        </tr>`;
-      }
-      html += `</table>`;
-    } else {
-      html += `<div style="color:#9ca3af;font-size:12px;margin-bottom:12px;">Henüz manuel eşleştirme yok.</div>`;
-    }
-
-    // Yeni eşleştirme ekleme formu
-    html += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-      <input id="hbOverrideHBCV" placeholder="HBCV kodu (örn: HBCV00004G4627)"
-        style="flex:1;min-width:200px;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:monospace;">
-      <input id="hbOverrideBarcode" placeholder="Satıcı barkod (örn: HF00106RNKK)"
-        style="flex:1;min-width:160px;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:monospace;">
-      <button onclick="addHBSkuOverride()"
-        style="padding:6px 14px;background:#4f46e5;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;">+ Ekle</button>
-    </div>
-    <div id="hbOverrideMsg" style="font-size:12px;min-height:16px;"></div>`;
-
-    // Bilinmeyen HBCV kodları (ürün eşleşmemiş)
-    if (unknown.length > 0) {
-      html += `<div style="font-size:12px;font-weight:600;color:#b45309;margin:12px 0 6px;">
-        ⚠ Henüz eşleştirilmemiş HBCV kodları (son 90 gün):
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <tr style="background:#fffbeb;"><th style="padding:5px 8px;text-align:left;border-bottom:1px solid #fde68a;">HBCV Kodu</th>
-        <th style="padding:5px 8px;text-align:left;border-bottom:1px solid #fde68a;">Ürün Adı (HB)</th>
-        <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #fde68a;">Sipariş</th>
-        <th style="padding:5px 8px;border-bottom:1px solid #fde68a;"></th></tr>`;
-      for (const u of unknown) {
-        html += `<tr>
-          <td style="padding:5px 8px;font-family:monospace;color:#4338ca;">${escHtml(u.sku)}</td>
-          <td style="padding:5px 8px;color:#374151;">${escHtml((u.product_name||'').substring(0,50))}</td>
-          <td style="padding:5px 8px;text-align:right;color:#6b7280;">${u.order_count}</td>
-          <td style="padding:5px 8px;">
-            <button onclick="document.getElementById('hbOverrideHBCV').value='${escHtml(u.sku)}';document.getElementById('hbOverrideBarcode').focus();"
-              style="font-size:11px;color:#4f46e5;border:1px solid #c7d2fe;background:#eef2ff;border-radius:4px;padding:2px 8px;cursor:pointer;">Eşleştir</button>
-          </td>
-        </tr>`;
-      }
-      html += `</table>`;
-    }
-
-    el.innerHTML = html;
-  } catch (err) {
-    console.error('HB SKU override yükleme hatası:', err);
-  }
-}
-
-async function addHBSkuOverride() {
-  const hbcv    = document.getElementById('hbOverrideHBCV')?.value.trim();
-  const barcode = document.getElementById('hbOverrideBarcode')?.value.trim();
-  const msgEl   = document.getElementById('hbOverrideMsg');
-  if (!hbcv || !barcode) { if (msgEl) msgEl.innerHTML = '<span style="color:#dc2626;">HBCV kodu ve barkod zorunlu</span>'; return; }
-  try {
-    const res = await apiFetch('/api/marketplace/hb-sku-overrides', { method: 'POST', body: { hbcv, barcode } });
-    if (res?.ok) {
-      if (msgEl) msgEl.innerHTML = `<span style="color:#16a34a;">✓ ${hbcv} → ${barcode} eklendi</span>`;
-      document.getElementById('hbOverrideHBCV').value = '';
-      document.getElementById('hbOverrideBarcode').value = '';
-      loadHBSkuOverrides();
-    }
-  } catch (err) { if (msgEl) msgEl.innerHTML = `<span style="color:#dc2626;">${err.message}</span>`; }
-}
-
-async function deleteHBSkuOverride(hbcv) {
-  if (!confirm(`"${hbcv}" eşleştirmesini silmek istiyor musunuz?`)) return;
-  await apiFetch('/api/marketplace/hb-sku-overrides', { method: 'POST', body: { hbcv, barcode: '' } });
-  loadHBSkuOverrides();
-}
 
 async function saveTYCredentials() {
   const supplierId = document.getElementById('tySupplierId').value.trim();
@@ -3442,3 +3345,4 @@ function renderPlatformLegend(tableId, qtyData, totalCount, totalRevenue, revDat
     </tfoot>
   `;
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
