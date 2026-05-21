@@ -522,36 +522,32 @@ app.get('/api/tani', async (req, res) => {
   try {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
-    const baslangic = req.query.baslangic || '2026-05-20';
-    // 1. Verilen tarihten itibaren tüm satışlar
-    const satislar = await pool.query(
-      'SELECT s.id, s.sale_date, s.quantity_change, s.note, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date >= $1 ORDER BY s.sale_date, s.created_at',
-      [baslangic]
-    );
-    // 2. Anlık stok değeri
+    // 1. Anlık stok değeri
     const stokDeger = await pool.query('SELECT COALESCE(SUM(cost_price * stock_quantity), 0) AS toplam FROM products WHERE is_active = TRUE');
-    // 3. Verilen tarihten itibaren stok düşülen tüm marketplace siparişleri
-    const kargoSiparisleri = await pool.query(
-      "SELECT mo.order_number, mo.platform, mo.status, mo.kargoda_at, moi.sku, moi.barcode, moi.quantity, moi.stock_deducted, moi.product_id, p.name AS urun_adi, p.cost_price FROM marketplace_orders mo JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id LEFT JOIN products p ON p.id = moi.product_id WHERE mo.kargoda_at >= $1 AND moi.stock_deducted = TRUE ORDER BY mo.kargoda_at",
-      [baslangic]
+    // 2. Tüm satış kayıtları (son 30 gün) - ürün bazında gruplama ile
+    const satislar = await pool.query(
+      'SELECT s.id, s.sale_date, s.quantity_change, s.note, p.name, p.barcode, p.cost_price, (s.quantity_change * p.cost_price) AS maliyet_etkisi, s.created_at FROM sales s JOIN products p ON s.product_id = p.id WHERE s.sale_date >= NOW() - INTERVAL \'30 days\' ORDER BY s.sale_date, s.created_at'
     );
-    // 4. Stok hareketi toplamı (sales tablosundan)
+    // 3. Son 30 gündeki TÜM marketplace sipariş kalemleri (stok_deducted TRUE veya FALSE), kargoda_at ile
+    const tumSiparisler = await pool.query(
+      "SELECT mo.order_number, mo.platform, mo.status, mo.stock_deducted AS order_stok_dusuldu, mo.kargoda_at, moi.id AS item_id, moi.sku, moi.barcode, moi.quantity, moi.stock_deducted AS item_stok_dusuldu, moi.product_id, p.name AS urun_adi, p.cost_price FROM marketplace_orders mo JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id LEFT JOIN products p ON p.id = moi.product_id WHERE mo.kargoda_at >= NOW() - INTERVAL '30 days' ORDER BY mo.kargoda_at DESC"
+    );
+    // 4. Şüpheli siparişleri kontrol et (sales notunda geçen sipariş numaraları marketplace tablosunda var mı)
+    const supheliSiparisler = await pool.query(
+      "SELECT mo.order_number, mo.platform, mo.status, mo.stock_deducted AS order_stok_dusuldu, mo.kargoda_at, moi.barcode, moi.quantity, moi.stock_deducted AS item_stok_dusuldu, p.name AS urun_adi, p.cost_price FROM marketplace_orders mo JOIN marketplace_order_items moi ON moi.marketplace_order_id = mo.id LEFT JOIN products p ON p.id = moi.product_id WHERE mo.order_number IN ('4137334748','4725401835','11248600519','5477849548','5477843522') ORDER BY mo.kargoda_at"
+    );
+    // 5. Ürün bazında sales kayıt sayısı (duplikat kontrolü)
+    const urunBazindaSatis = await pool.query(
+      "SELECT p.name, p.barcode, p.cost_price, p.stock_quantity, COUNT(s.id) AS satis_kayit_sayisi, SUM(s.quantity_change) AS toplam_adet_degisim FROM products p LEFT JOIN sales s ON s.product_id = p.id AND s.sale_date >= NOW() - INTERVAL '30 days' WHERE p.is_active = TRUE GROUP BY p.id, p.name, p.barcode, p.cost_price, p.stock_quantity HAVING COUNT(s.id) > 0 ORDER BY COUNT(s.id) DESC"
+    );
     const toplamSatisMaliyet = satislar.rows.reduce((acc, r) => acc + (parseFloat(r.maliyet_etkisi) || 0), 0);
-    // 5. Marketplace stok düşüm toplamı
-    const toplamKargoMaliyet = kargoSiparisleri.rows.reduce((acc, r) => acc + (parseFloat(r.cost_price) || 0) * (parseInt(r.quantity) || 0), 0);
     res.json({
-      baslangic_tarihi: baslangic,
       anlik_stok_degeri_tl: parseFloat(stokDeger.rows[0].toplam).toFixed(2),
-      satis_kayitlari: {
-        toplam_adet: satislar.rows.length,
-        toplam_maliyet_etkisi_tl: toplamSatisMaliyet.toFixed(2),
-        satirlar: satislar.rows.map(function(r) { return { tarih: r.sale_date, urun: r.name, barkod: r.barcode, alis_fiyati: parseFloat(r.cost_price).toFixed(2), adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), not: r.note }; })
-      },
-      marketplace_stok_dusumler: {
-        toplam_kalem: kargoSiparisleri.rows.length,
-        toplam_maliyet_tl: toplamKargoMaliyet.toFixed(2),
-        satirlar: kargoSiparisleri.rows.map(function(r) { return { siparis_no: r.order_number, platform: r.platform, barkod: r.barcode, urun_adi: r.urun_adi, alis_fiyati: parseFloat(r.cost_price || 0).toFixed(2), adet: r.quantity, kargoda_at: r.kargoda_at }; })
-      }
+      son_30_gun_satis_toplam_tl: toplamSatisMaliyet.toFixed(2),
+      satis_kayitlari: satislar.rows.map(function(r) { return { id: r.id, tarih: r.sale_date, urun: r.name, barkod: r.barcode, alis_fiyati: parseFloat(r.cost_price).toFixed(2), adet: r.quantity_change, maliyet_etkisi: parseFloat(r.maliyet_etkisi || 0).toFixed(2), not: r.note, created_at: r.created_at }; }),
+      son_30_gun_marketplace_siparisleri: tumSiparisler.rows.map(function(r) { return { siparis_no: r.order_number, platform: r.platform, durum: r.status, order_stok_dusuldu: r.order_stok_dusuldu, item_stok_dusuldu: r.item_stok_dusuldu, barkod: r.barcode, urun_adi: r.urun_adi, alis_fiyati: parseFloat(r.cost_price || 0).toFixed(2), adet: r.quantity, kargoda_at: r.kargoda_at }; }),
+      supheliSiparis_detay: supheliSiparisler.rows.map(function(r) { return { siparis_no: r.order_number, platform: r.platform, durum: r.status, order_stok_dusuldu: r.order_stok_dusuldu, item_stok_dusuldu: r.item_stok_dusuldu, barkod: r.barcode, urun_adi: r.urun_adi, alis_fiyati: parseFloat(r.cost_price || 0).toFixed(2), adet: r.quantity, kargoda_at: r.kargoda_at }; }),
+      urun_bazinda_satis_sayisi: urunBazindaSatis.rows.map(function(r) { return { urun: r.name, barkod: r.barcode, alis_fiyati: parseFloat(r.cost_price).toFixed(2), mevcut_stok: r.stock_quantity, satis_kayit_sayisi: parseInt(r.satis_kayit_sayisi), toplam_adet_degisim: parseInt(r.toplam_adet_degisim) }; })
     });
     await pool.end();
   } catch (err) { res.status(500).json({ error: err.message }); }
