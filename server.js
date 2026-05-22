@@ -553,6 +553,30 @@ app.get('/api/tani', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/tani-fix', async (req, res) => {
+  if (req.query.onayla !== 'evet') {
+    return res.json({ mesaj: '?onayla=evet ekle', yapilacaklar: ['sales 539,540,541 silinecek', 'Kelebek-Siyah +3 stok', 'Beklenen sonuc: 61316 TL'] });
+  }
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    const kontrol = await pool.query('SELECT COUNT(*) as cnt FROM sales WHERE id IN (539,540,541)');
+    if (parseInt(kontrol.rows[0].cnt) === 0) {
+      const stok = await pool.query('SELECT COALESCE(SUM(cost_price * stock_quantity),0) AS toplam FROM products WHERE is_active=TRUE');
+      await pool.end();
+      return res.json({ mesaj: 'Duzeltme zaten yapilmis', stok_tl: parseFloat(stok.rows[0].toplam).toFixed(2) });
+    }
+    await pool.query('BEGIN');
+    const sil = await pool.query('DELETE FROM sales WHERE id IN (539,540,541) RETURNING id, note');
+    const guncelle = await pool.query("UPDATE products SET stock_quantity = stock_quantity + 3 WHERE barcode = 'HF00109SYH' RETURNING name, stock_quantity, cost_price");
+    const yeniStok = await pool.query('SELECT COALESCE(SUM(cost_price * stock_quantity),0) AS toplam FROM products WHERE is_active=TRUE');
+    await pool.query('COMMIT');
+    await pool.end();
+    const yeniDeger = parseFloat(yeniStok.rows[0].toplam).toFixed(2);
+    res.json({ basarili: true, silinen: sil.rows, kelebek_siyah: guncelle.rows[0], yeni_stok_tl: yeniDeger, hedef: '61316.00', dogru_mu: Math.abs(parseFloat(yeniDeger) - 61316) < 1 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 
 // Hata yakalama
 app.use((err, req, res, next) => {
