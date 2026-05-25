@@ -2557,6 +2557,25 @@ async function upsertOrder(db, order) {
       );
     }
 
+    // ── HB Çapraz-Güncelleme: PackageNumber → OrderNumber köprüsü (iptal) ──────
+    // /packages/cancelled paket numarasıyla (PackageNumber) gelir; ancak DB'deki
+    // orijinal kayıt sipariş numarasıyla (OrderNumber) saklanmış olabilir.
+    // kargoda/teslim_edildi/iade_onaylandi koruması: bu statüler iptal'e düşmez.
+    if (order.platform === 'hepsiburada' && order.status === 'iptal' &&
+        order.order_number && order.order_number !== order.order_id) {
+      await client.query(
+        `UPDATE marketplace_orders
+         SET status    = 'iptal',
+             status_tr = 'İptal Edildi',
+             raw_status = $1,
+             updated_at = NOW()
+         WHERE platform  = 'hepsiburada'
+           AND order_id  = $2
+           AND status NOT IN ('kargoda','teslim_edildi','iade_onaylandi')`,
+        [order.raw_status, order.order_number]
+      );
+    }
+
     // ── Order-level guard ─────────────────────────────────────────────────────
     // Sipariş daha önce kısmen işlendiyse (bazı ürünler düşüldü, bazıları düşülmedi):
     // Kaçırılan ürünleri de düşmeye çalış (barkod o anda eşleşmemişse sonraki sync'te tekrar dene).

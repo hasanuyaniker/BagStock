@@ -189,6 +189,24 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     console.warn('[HepsiB] /orders/ tüm stratejiler başarısız — açık siparişler atlandı');
   }
 
+  // ── 1b. Takviye tarih aralığı sorgusu — iptal/kapalı siparişleri yakala ────────
+  // Tarihsiz /orders endpoint'i yalnızca aktif siparişleri döndürür; iptal olan
+  // siparişler bu listeden düşer. Tarihli sorgu tüm durumlardaki siparişleri
+  // döndürdüğünden son 30 günlük iptaller de yakalanır.
+  // seenIds kontrolü: aktif siparişler zaten eklenmiş → duplicate oluşmaz.
+  try {
+    console.log('[HepsiB] /orders/ takviye tarih aralığı sorgusu (iptal/kapalı siparişler için)');
+    await fetchPaginated(
+      `${base}/orders/merchantid/${merchantId}`,
+      { begindate, enddate },
+      headers,
+      ordersCallback
+    );
+    console.log('[HepsiB] /orders/ takviye sorgu tamamlandı');
+  } catch (e) {
+    console.warn(`[HepsiB] /orders/ takviye sorgu başarısız (kritik değil): ${e.message.substring(0, 120)}`);
+  }
+
   // ── 2. Paketler — HB'nin status bazlı AYRI endpoint'leri var ─────────────────
   // Dok: /packages/merchantid/{id}           → Open/Packed (aksiyon bekleyenler)
   //      /packages/merchantid/{id}/shipped   → Kargoya Verilen
@@ -212,6 +230,9 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
     { url: `${pkgBase}/shipped`,     params: {},               label: 'shipped-tarihsiz',     rawStatus: 'Shipped'     },
     // Teslim edilen
     { url: `${pkgBase}/delivered`,   params: {},               label: 'delivered-tarihsiz',   rawStatus: 'Delivered'   },
+    // İptal edilen paketler — paket oluşturulduktan sonra iptal olan durumlarda buraya düşer.
+    // upsertOrder'daki durum öncelik kuralları kargoda/teslim_edildi'yi iptal'e düşmekten korur.
+    { url: `${pkgBase}/cancelled`,   params: {},               label: 'cancelled-tarihsiz',   rawStatus: 'Cancelled'   },
     // NOT: /undelivered endpoint'i kaldırıldı — kargoda durumundaki siparişleri
     // yanlışlıkla 'iptal' olarak işaretliyordu. UnDelivered paketler upsertOrder'daki
     // durum öncelik kuralları ile korunuyor.
