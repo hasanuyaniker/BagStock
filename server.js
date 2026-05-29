@@ -578,6 +578,27 @@ app.get('/api/tani-fix', async (req, res) => {
 });
 
 
+// ── /api/iptal-fix — HB iptal siparişini anında düzelt (geçici, deploy sonrası sil) ─
+app.get('/api/iptal-fix', async (req, res) => {
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    // Mevcut durumu kontrol et
+    const mevcut = await pool.query(
+      "SELECT id, order_id, order_number, status, raw_status, updated_at FROM marketplace_orders WHERE platform='hepsiburada' AND (order_id='5478247276' OR order_number='5478247276') ORDER BY id"
+    );
+    if (req.query.onayla !== 'evet') {
+      await pool.end();
+      return res.json({ mesaj: '?onayla=evet ekle', mevcut_kayitlar: mevcut.rows });
+    }
+    const guncelle = await pool.query(
+      "UPDATE marketplace_orders SET status='iptal', status_tr='İptal Edildi', raw_status='Cancelled', updated_at=NOW() WHERE platform='hepsiburada' AND (order_id='5478247276' OR order_number='5478247276') AND status NOT IN ('kargoda','teslim_edildi','iade_onaylandi') RETURNING id, order_id, order_number, status"
+    );
+    await pool.end();
+    res.json({ basarili: true, guncellenen: guncelle.rows, not: 'Yeni upsertOrder kurali iptal->bekliyor regresyonunu onler' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Hata yakalama
 app.use((err, req, res, next) => {
   console.error('Sunucu hatası:', err);

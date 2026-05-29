@@ -2470,12 +2470,16 @@ async function upsertOrder(db, order) {
          -- Durum öncelik kuralları (geri düşme engeli):
          --   teslim_edildi / iade_onaylandi → bekliyor/kargoda/iptal'a düşürülemez
          --   kargoda → bekliyor veya iptal'a düşürülemez
+         --   iptal / iade_bekliyor → bekliyor'a geri düşürülemez (HB API gecikme koruması)
          status = CASE
            WHEN marketplace_orders.status IN ('teslim_edildi','iade_onaylandi')
                 AND EXCLUDED.status IN ('bekliyor','kargoda','iptal')
            THEN marketplace_orders.status
            WHEN marketplace_orders.status = 'kargoda'
                 AND EXCLUDED.status IN ('bekliyor','iptal')
+           THEN marketplace_orders.status
+           WHEN marketplace_orders.status IN ('iptal','iade_bekliyor')
+                AND EXCLUDED.status = 'bekliyor'
            THEN marketplace_orders.status
            ELSE EXCLUDED.status
          END,
@@ -2485,6 +2489,9 @@ async function upsertOrder(db, order) {
            THEN marketplace_orders.status_tr
            WHEN marketplace_orders.status = 'kargoda'
                 AND EXCLUDED.status IN ('bekliyor','iptal')
+           THEN marketplace_orders.status_tr
+           WHEN marketplace_orders.status IN ('iptal','iade_bekliyor')
+                AND EXCLUDED.status = 'bekliyor'
            THEN marketplace_orders.status_tr
            ELSE EXCLUDED.status_tr
          END,
