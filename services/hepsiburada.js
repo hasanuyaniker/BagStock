@@ -163,10 +163,20 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
 
   const ordersCallback = (item) => {
     const norm = normalizeHBOpenOrder(item);
-    if (norm.order_id && !seenIds.has(norm.order_id)) {
-      seenIds.add(norm.order_id);
-      allOrders.push(norm);
+    if (!norm.order_id) return;
+    if (seenIds.has(norm.order_id)) {
+      // İptal durumu: zaten görülen siparişi bekliyor'dan iptal'e güncelle
+      if (norm.status === 'iptal') {
+        const idx = allOrders.findIndex(o => o.order_id === norm.order_id);
+        if (idx !== -1 && allOrders[idx].status === 'bekliyor') {
+          allOrders[idx] = Object.assign({}, allOrders[idx], norm);
+          console.log(`[HepsiB] Sipariş ${norm.order_id} bekliyor→iptal güncellendi (orders)`);
+        }
+      }
+      return;
     }
+    seenIds.add(norm.order_id);
+    allOrders.push(norm);
   };
 
   let ordersFetched = false;
@@ -240,10 +250,20 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
 
   const pkgCallback = (pkg, forcedRawStatus) => {
     const norm = normalizeHBPackage(pkg, forcedRawStatus);
-    if (norm.order_id && !seenIds.has(norm.order_id)) {
-      seenIds.add(norm.order_id);
-      allOrders.push(norm);
+    if (!norm.order_id) return;
+    if (seenIds.has(norm.order_id)) {
+      // İptal durumu: zaten görülen siparişi bekliyor'dan iptal'e güncelle
+      if (norm.status === 'iptal') {
+        const idx = allOrders.findIndex(o => o.order_id === norm.order_id);
+        if (idx !== -1 && allOrders[idx].status === 'bekliyor') {
+          allOrders[idx] = Object.assign({}, allOrders[idx], norm);
+          console.log(`[HepsiB] Sipariş ${norm.order_id} bekliyor→iptal güncellendi (packages)`);
+        }
+      }
+      return;
     }
+    seenIds.add(norm.order_id);
+    allOrders.push(norm);
   };
 
   let pkgFetched = false;
