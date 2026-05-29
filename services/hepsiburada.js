@@ -203,18 +203,63 @@ async function fetchHepsiburadaOrders(creds, days = 30) {
   // Tarihsiz /orders endpoint'i yalnızca aktif siparişleri döndürür; iptal olan
   // siparişler bu listeden düşer. Tarihli sorgu tüm durumlardaki siparişleri
   // döndürdüğünden son 30 günlük iptaller de yakalanır.
-  // seenIds kontrolü: aktif siparişler zaten eklenmiş → duplicate oluşmaz.
-  try {
-    console.log('[HepsiB] /orders/ takviye tarih aralığı sorgusu (iptal/kapalı siparişler için)');
-    await fetchPaginated(
-      `${base}/orders/merchantid/${merchantId}`,
-      { begindate, enddate },
-      headers,
-      ordersCallback
-    );
-    console.log('[HepsiB] /orders/ takviye sorgu tamamlandı');
-  } catch (e) {
-    console.warn(`[HepsiB] /orders/ takviye sorgu başarısız (kritik değil): ${e.message.substring(0, 120)}`);
+  //
+  // Takviye callback'i ordersCallback'ten farklıdır:
+  //   - seenIds ile kısıtlanmaz; mevcut girdileri de günceller
+  //   - order_id VEYA order_number üzerinden eşleştirir (HB endpoint'leri farklı anahtar kullanır)
+  //   - Yalnızca daha kesin durumlara (iptal, kargoda, teslim) günceller; bekliyor'a geri düşürmez
+  const STATUS_RANK = { bekliyor: 0, kargoda: 1, iptal: 2, iade_bekliyor: 2, iade_onaylandi: 3, teslim_edildi: 3 };
+
+  const supplementaryCallback = (item) => {
+    const norm = normalizeHBOpenOrder(item);
+    if (!norm.order_id) return;
+
+    // Önce order_id ile eşleştir, sonra order_number ile
+    let existingIdx = allOrders.findIndex(o => o.order_id === norm.order_id);
+    if (existingIdx === -1 && norm.order_number) {
+      existingIdx = allOrders.findIndex(o =>
+        o.order_number && o.order_number === norm.order_number
+      );
+    }
+
+    if (existingIdx !== -1) {
+      const existing = allOrders[existingIdx];
+      const existingRank = STATUS_RANK[existing.status] ?? -1;
+      const newRank      = STATUS_RANK[norm.status]    ?? -1;
+      if (newRank > existingRank) {
+        allOrders[existingIdx] = Object.assign({}, existing, norm);
+        console.log(`[HepsiB][SUPP] Sipariş ${norm.order_number || norm.order_id}: ${existing.status} → ${norm.status}`);
+      }
+    } else if (!seenIds.has(norm.order_id)) {
+      // Tarihsiz sorguda görünmeyen yeni kayıt (iptal edilmiş olabilir)
+      seenIds.add(norm.order_id);
+      allOrders.push(norm);
+      if (norm.status !== 'bekliyor') {
+        console.log(`[HepsiB][SUPP] Yeni kayıt eklendi: ${norm.order_number || norm.order_id} durum=${norm.status}`);
+      }
+    }
+  };
+
+  // Takviye sorguyu birden fazla stratejiyle dene (production bazı tarih aralıklarını reddeder)
+  const suppStrategies = [
+    { label: 'son 30 gün', params: { begindate, enddate } },
+    { label: 'son 7 gün',  params: { begindate: week7ago, enddate } },
+    { label: 'dün+bugün',  params: { begindate: yesterday, enddate } },
+  ];
+  for (const supp of suppStrategies) {
+    try {
+      console.log(`[HepsiB] /orders/ takviye sorgu: ${supp.label}`);
+      await fetchPaginated(
+        `${base}/orders/merchantid/${merchantId}`,
+        supp.params,
+        headers,
+        supplementaryCallback
+      );
+      console.log(`[HepsiB] /orders/ takviye sorgu tamamlandı (${supp.label})`);
+      break; // İlk başarılı strateji yeterli
+    } catch (e) {
+      console.warn(`[HepsiB] /orders/ takviye sorgu başarısız (${supp.label}): ${e.message.substring(0, 120)}`);
+    }
   }
 
   // ── 2. Paketler — HB'nin status bazlı AYRI endpoint'leri var ─────────────────

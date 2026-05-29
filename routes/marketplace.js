@@ -2388,6 +2388,36 @@ async function syncPlatform(db, platform, creds) {
       orders = await fetchHepsiburadaOrders(creds, 30);
     }
 
+    // ── HB Reconciliation: DB'deki bekliyor siparişleri API sonuçlarıyla karşılaştır ──
+    // HB API bazı durumlarda gecikmeli güncellenir; tarihsiz endpoint'te görünmeyen
+    // bekliyor siparişler muhtemelen iptal/kargo/teslim aşamasına geçmiştir.
+    // Bu durumları "kaçırılmış güncelleme" olarak işaretle ve supplementary sorgudan gelen
+    // daha kesin durum varsa upsert sırasına ekle.
+    if (platform === 'hepsiburada' && orders.length > 0) {
+      try {
+        const fetchedSet = new Set(
+          orders.flatMap(o => [o.order_id, o.order_number].filter(Boolean))
+        );
+        const dbBekliyor = await db.query(
+          `SELECT order_id, order_number FROM marketplace_orders
+           WHERE platform = 'hepsiburada' AND status = 'bekliyor'`
+        );
+        const missing = dbBekliyor.rows.filter(r =>
+          !fetchedSet.has(r.order_id) && !fetchedSet.has(r.order_number)
+        );
+        if (missing.length > 0) {
+          console.log(`[HepsiB Reconcile] ${missing.length} bekliyor sipariş API'da görünmüyor:`, missing.map(r => r.order_number || r.order_id));
+          // Bu siparişler tarihsiz listesinden düşmüş demektir.
+          // supplementaryCallback zaten STATUS_RANK ile daha kesin duruma güncelliyor.
+          // Eğer hâlâ allOrders'da yoksa, HB API bunları artık döndürmüyor;
+          // iptal veya teslim edilmiş olabilirler ama kesin olmadan değiştiremeyiz.
+          // Log'a yazıp geçiyoruz — bir sonraki sync'te supplementary sorgu yakalamalı.
+        }
+      } catch (recErr) {
+        console.warn('[HepsiB Reconcile] Karşılaştırma atlandı:', recErr.message);
+      }
+    }
+
     let upserted = 0, deducted = 0;
     for (const order of orders) {
       const { deductCount } = await upsertOrder(db, order);
