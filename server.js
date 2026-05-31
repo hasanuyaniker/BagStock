@@ -599,21 +599,51 @@ app.get('/api/iptal-fix', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── /api/ty-tani — TY bekliyor siparis tanisi (gecici) ──────────────────────────
+// ── /api/ty-tani — TY bekliyor tanisi + canli API kontrolu (gecici) ─────────────
 app.get('/api/ty-tani', async (req, res) => {
   try {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-    const r = await pool.query(`
+
+    // DB'deki TY bekliyor siparisler
+    const dbR = await pool.query(`
       SELECT id, order_id, order_number, status, raw_status,
-             order_date::text, kargoda_at::text, updated_at::text,
-             COALESCE(kargoda_at, order_date) as filtre_tarihi
+             order_date::text, kargoda_at::text, updated_at::text
       FROM marketplace_orders
       WHERE platform='trendyol' AND status='bekliyor'
       ORDER BY order_date DESC
     `);
+
+    // TY API'den canli cek (son 30 gun, ilk sayfa)
+    const credRow = await pool.query("SELECT value FROM app_settings WHERE key='marketplace_credentials'");
     await pool.end();
-    res.json({ bekliyor_toplam: r.rows.length, siparisler: r.rows });
+    let apiSonuc = null;
+    if (credRow.rows[0]) {
+      try {
+        const creds = JSON.parse(credRow.rows[0].value).trendyol;
+        if (creds?.supplierId && creds?.apiKey) {
+          const { fetchTrendyolOrders } = require('./services/trendyol');
+          const orders = await fetchTrendyolOrders(creds, 30);
+          const bekliyor = orders.filter(o => o.status === 'bekliyor');
+          apiSonuc = {
+            toplam_cekilen: orders.length,
+            bekliyor_sayisi: bekliyor.length,
+            bekliyor_siparisler: bekliyor.map(o => ({
+              order_id: o.order_id,
+              order_number: o.order_number,
+              order_date: o.order_date,
+              raw_status: o.raw_status
+            }))
+          };
+        }
+      } catch(e) { apiSonuc = { hata: e.message }; }
+    }
+
+    res.json({
+      db_bekliyor: dbR.rows.length,
+      db_siparisler: dbR.rows,
+      api_canli: apiSonuc
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
