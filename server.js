@@ -599,6 +599,24 @@ app.get('/api/iptal-fix', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── /api/ty-tani — TY bekliyor siparis tanisi (gecici) ──────────────────────────
+app.get('/api/ty-tani', async (req, res) => {
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    const r = await pool.query(`
+      SELECT id, order_id, order_number, status, raw_status,
+             order_date::text, kargoda_at::text, updated_at::text,
+             COALESCE(kargoda_at, order_date) as filtre_tarihi
+      FROM marketplace_orders
+      WHERE platform='trendyol' AND status='bekliyor'
+      ORDER BY order_date DESC
+    `);
+    await pool.end();
+    res.json({ bekliyor_toplam: r.rows.length, siparisler: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── /api/bekliyor-fix — Yanlış iptal edilen siparişi bekliyor'a geri al (geçici) ──
 app.get('/api/bekliyor-fix', async (req, res) => {
   const orderNum = req.query.siparis || '5480230109';

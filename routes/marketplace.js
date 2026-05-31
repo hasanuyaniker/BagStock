@@ -341,8 +341,9 @@ router.get('/status-counts', async (req, res) => {
     const params = [];
     const conditions = [];
     if (platform) conditions.push(`platform = $${params.push(platform)}`);
-    if (from)     conditions.push(`DATE(order_date) >= $${params.push(from)}`);
-    if (to)       conditions.push(`DATE(order_date) <= $${params.push(to)}`);
+    // Tablo ile aynı tarih filtresi: kargoya verilme tarihi öncelikli (kargoda_at), yoksa sipariş tarihi
+    if (from)     conditions.push(`DATE(COALESCE(kargoda_at, order_date) AT TIME ZONE 'Europe/Istanbul') >= $${params.push(from)}`);
+    if (to)       conditions.push(`DATE(COALESCE(kargoda_at, order_date) AT TIME ZONE 'Europe/Istanbul') <= $${params.push(to)}`);
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const result = await pool.query(
@@ -2497,9 +2498,12 @@ async function upsertOrder(db, order) {
            ELSE EXCLUDED.status_tr
          END,
          -- kargoda_at: yalnızca bekliyor→kargoda geçişinde set et, sonradan değiştirme
+         -- bekliyor statüsüne düşerse sıfırla (yanlış set edilmiş kargoda_at'ı temizle)
          kargoda_at = CASE
            WHEN EXCLUDED.status = 'kargoda' AND marketplace_orders.status <> 'kargoda'
            THEN NOW()
+           WHEN EXCLUDED.status = 'bekliyor'
+           THEN NULL
            ELSE marketplace_orders.kargoda_at
          END,
          raw_status           = EXCLUDED.raw_status,
