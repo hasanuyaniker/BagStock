@@ -599,6 +599,29 @@ app.get('/api/iptal-fix', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── /api/bekliyor-fix — Yanlış iptal edilen siparişi bekliyor'a geri al (geçici) ──
+app.get('/api/bekliyor-fix', async (req, res) => {
+  const orderNum = req.query.siparis || '5480230109';
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    const mevcut = await pool.query(
+      "SELECT id, order_id, order_number, status FROM marketplace_orders WHERE platform='hepsiburada' AND (order_id=$1 OR order_number=$1)",
+      [orderNum]
+    );
+    if (req.query.onayla !== 'evet') {
+      await pool.end();
+      return res.json({ mesaj: '?onayla=evet ekle', mevcut: mevcut.rows });
+    }
+    const guncelle = await pool.query(
+      "UPDATE marketplace_orders SET status='bekliyor', status_tr='Satıcıda Bekliyor', raw_status='WAITING_IN_MERCHANT', updated_at=NOW() WHERE platform='hepsiburada' AND (order_id=$1 OR order_number=$1) AND status='iptal' RETURNING id, order_number, status",
+      [orderNum]
+    );
+    await pool.end();
+    res.json({ basarili: true, guncellenen: guncelle.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Hata yakalama
 app.use((err, req, res, next) => {
   console.error('Sunucu hatası:', err);

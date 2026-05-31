@@ -2388,46 +2388,6 @@ async function syncPlatform(db, platform, creds) {
       orders = await fetchHepsiburadaOrders(creds, 30);
     }
 
-    // ── HB Reconciliation: sync'te görünmeyen bekliyor siparişleri iptal et ──────
-    // HB /orders/ endpoint'i (tarihsiz + tarihli) yalnızca aktif siparişleri döndürür.
-    // İptal olan bir sipariş bu listeden tamamen düşer ve hiçbir endpoint'te görünmez
-    // (paket oluşturulmadan önce iptal edilmişse /packages/cancelled'da da yok).
-    //
-    // Mekanizma: upsertOrder her işlemde updated_at=NOW() yazar. Eğer bir bekliyor
-    // sipariş bu sync'te görünmediyse updated_at güncellenmez → "stale" kalır.
-    // Birden fazla sync döngüsü boyunca stale kalan bekliyor = iptal sinyali.
-    //
-    // Güvenlik: yalnızca orders.length>0 ise çalışır (HB API boş döndürdüyse çalışmaz).
-    if (platform === 'hepsiburada' && orders.length > 0) {
-      try {
-        // 45 dakika = 3 sync döngüsü — geçici HB API gecikmelerine tolerans
-        const staleThreshold = new Date(Date.now() - 45 * 60 * 1000);
-        const staleOrders = await db.query(
-          `SELECT id, order_id, order_number
-           FROM marketplace_orders
-           WHERE platform = 'hepsiburada'
-             AND status = 'bekliyor'
-             AND updated_at < $1
-             AND created_at  < $1`,
-          [staleThreshold]
-        );
-        if (staleOrders.rows.length > 0) {
-          console.log(`[HepsiB Reconcile] ${staleOrders.rows.length} stale bekliyor sipariş tespit edildi → iptal`);
-          for (const row of staleOrders.rows) {
-            await db.query(
-              `UPDATE marketplace_orders
-               SET status = 'iptal', status_tr = 'İptal Edildi',
-                   raw_status = 'CancelledByReconcile', updated_at = NOW()
-               WHERE id = $1 AND status = 'bekliyor'`,
-              [row.id]
-            );
-            console.log(`[HepsiB Reconcile] Sipariş ${row.order_number || row.order_id} → iptal (stale)`);
-          }
-        }
-      } catch (recErr) {
-        console.warn('[HepsiB Reconcile] Reconciliation atlandı:', recErr.message);
-      }
-    }
 
     let upserted = 0, deducted = 0;
     for (const order of orders) {
