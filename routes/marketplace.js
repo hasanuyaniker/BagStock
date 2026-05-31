@@ -2388,33 +2388,44 @@ async function syncPlatform(db, platform, creds) {
       orders = await fetchHepsiburadaOrders(creds, 30);
     }
 
-    // ── HB Reconciliation: DB'deki bekliyor siparişleri API sonuçlarıyla karşılaştır ──
-    // HB API bazı durumlarda gecikmeli güncellenir; tarihsiz endpoint'te görünmeyen
-    // bekliyor siparişler muhtemelen iptal/kargo/teslim aşamasına geçmiştir.
-    // Bu durumları "kaçırılmış güncelleme" olarak işaretle ve supplementary sorgudan gelen
-    // daha kesin durum varsa upsert sırasına ekle.
+    // ── HB Reconciliation: sync'te görünmeyen bekliyor siparişleri iptal et ──────
+    // HB /orders/ endpoint'i (tarihsiz + tarihli) yalnızca aktif siparişleri döndürür.
+    // İptal olan bir sipariş bu listeden tamamen düşer ve hiçbir endpoint'te görünmez
+    // (paket oluşturulmadan önce iptal edilmişse /packages/cancelled'da da yok).
+    //
+    // Mekanizma: upsertOrder her işlemde updated_at=NOW() yazar. Eğer bir bekliyor
+    // sipariş bu sync'te görünmediyse updated_at güncellenmez → "stale" kalır.
+    // Birden fazla sync döngüsü boyunca stale kalan bekliyor = iptal sinyali.
+    //
+    // Güvenlik: yalnızca orders.length>0 ise çalışır (HB API boş döndürdüyse çalışmaz).
     if (platform === 'hepsiburada' && orders.length > 0) {
       try {
-        const fetchedSet = new Set(
-          orders.flatMap(o => [o.order_id, o.order_number].filter(Boolean))
+        // 45 dakika = 3 sync döngüsü — geçici HB API gecikmelerine tolerans
+        const staleThreshold = new Date(Date.now() - 45 * 60 * 1000);
+        const staleOrders = await db.query(
+          `SELECT id, order_id, order_number
+           FROM marketplace_orders
+           WHERE platform = 'hepsiburada'
+             AND status = 'bekliyor'
+             AND updated_at < $1
+             AND created_at  < $1`,
+          [staleThreshold]
         );
-        const dbBekliyor = await db.query(
-          `SELECT order_id, order_number FROM marketplace_orders
-           WHERE platform = 'hepsiburada' AND status = 'bekliyor'`
-        );
-        const missing = dbBekliyor.rows.filter(r =>
-          !fetchedSet.has(r.order_id) && !fetchedSet.has(r.order_number)
-        );
-        if (missing.length > 0) {
-          console.log(`[HepsiB Reconcile] ${missing.length} bekliyor sipariş API'da görünmüyor:`, missing.map(r => r.order_number || r.order_id));
-          // Bu siparişler tarihsiz listesinden düşmüş demektir.
-          // supplementaryCallback zaten STATUS_RANK ile daha kesin duruma güncelliyor.
-          // Eğer hâlâ allOrders'da yoksa, HB API bunları artık döndürmüyor;
-          // iptal veya teslim edilmiş olabilirler ama kesin olmadan değiştiremeyiz.
-          // Log'a yazıp geçiyoruz — bir sonraki sync'te supplementary sorgu yakalamalı.
+        if (staleOrders.rows.length > 0) {
+          console.log(`[HepsiB Reconcile] ${staleOrders.rows.length} stale bekliyor sipariş tespit edildi → iptal`);
+          for (const row of staleOrders.rows) {
+            await db.query(
+              `UPDATE marketplace_orders
+               SET status = 'iptal', status_tr = 'İptal Edildi',
+                   raw_status = 'CancelledByReconcile', updated_at = NOW()
+               WHERE id = $1 AND status = 'bekliyor'`,
+              [row.id]
+            );
+            console.log(`[HepsiB Reconcile] Sipariş ${row.order_number || row.order_id} → iptal (stale)`);
+          }
         }
       } catch (recErr) {
-        console.warn('[HepsiB Reconcile] Karşılaştırma atlandı:', recErr.message);
+        console.warn('[HepsiB Reconcile] Reconciliation atlandı:', recErr.message);
       }
     }
 
