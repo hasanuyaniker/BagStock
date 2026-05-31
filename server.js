@@ -599,6 +599,36 @@ app.get('/api/iptal-fix', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── /api/ty-tarih-fix — Gelecek tarihli TY siparislerini duzelt (tek seferlik) ───
+app.get('/api/ty-tarih-fix', async (req, res) => {
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    // Simdiden 30+ dk ileride tarihli TY siparisleri bul (TY API timezone hatasi)
+    const bul = await pool.query(`
+      SELECT id, order_id, order_number, order_date::text,
+             (order_date - interval '3 hours')::text as duzeltilmis_tarih
+      FROM marketplace_orders
+      WHERE platform = 'trendyol'
+        AND order_date > NOW() + interval '30 minutes'
+    `);
+    if (req.query.onayla !== 'evet') {
+      await pool.end();
+      return res.json({ mesaj: '?onayla=evet ekle', yanlis_tarihli: bul.rows });
+    }
+    let duzeltilen = 0;
+    for (const r of bul.rows) {
+      await pool.query(
+        `UPDATE marketplace_orders SET order_date = order_date - interval '3 hours', updated_at = NOW() WHERE id = $1`,
+        [r.id]
+      );
+      duzeltilen++;
+    }
+    await pool.end();
+    res.json({ basarili: true, duzeltilen_adet: duzeltilen, duzeltilen_siparisler: bul.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── /api/ty-tani — TY bekliyor tanisi + canli API kontrolu (gecici) ─────────────
 app.get('/api/ty-tani', async (req, res) => {
   try {

@@ -242,7 +242,18 @@ function mapOrder(order) {
     status_tr:             statusInfo.tr,
     raw_status:            effectiveRaw,   // debug için gerçek kullanılan raw değer
     customer_name:         order.customerName || order.shipmentAddress?.fullName || order.buyerName || '',
-    order_date:            order.orderDate ? new Date(order.orderDate) : new Date(),
+    order_date:            (() => {
+      // TY API bazen orderDate'i UTC yerine İstanbul yerel saati olarak döndürür.
+      // Belirti: timestamp sync anından 30+ dk ileride → imkânsız → İstanbul offset uygula.
+      const ms = order.orderDate;
+      if (!ms) return new Date();
+      if (ms > Date.now() + 30 * 60 * 1000) {
+        const corrected = new Date(ms - 3 * 60 * 60 * 1000);
+        console.warn(`[TY#${order.orderNumber || order.id}] orderDate gelecekte (${new Date(ms).toISOString()}) → İstanbul düzeltmesi: ${corrected.toISOString()}`);
+        return corrected;
+      }
+      return new Date(ms);
+    })(),
     total_price:           parseFloat(order.grossAmount || order.totalPrice || order.amount || 0),
     currency:              'TRY',
     cargo_company:         cargoCompany,
